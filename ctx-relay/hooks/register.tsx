@@ -1,12 +1,13 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register, Timer, TurnCompleteInput } from 'claude-code'
+import type { EngineInterface, Register, SessionContextUsage, Timer, TurnCompleteInput } from 'claude-code'
 
 import type { Auto, Limits, Reading, Receipt } from '../types'
 
-// ctx-relay：提示框上方一行，顯示每輪花費與距壓縮點的剩餘空間；
+// ctx-relay：提示框上方一行，顯示每輪花費與距交接線的剩餘空間；
 // 主線回合結束時 context 越過自動交接線 → 沒有背景工作就倒數 60 秒 →
 // mod 自己收集 git／INDEX、用 $.model.fork 產生交接檔、機器檢查後寫檔 → /clear → 在新對話送出交接檔路徑。
-// 門檻一律由 ~/.claude/hooks/_lib/ctx-thresholds.sh 派生，本檔不寫窗口數字。
+// 壓縮點取自 Claude Code 自己回報的 autoCompactThreshold，本檔不寫窗口數字；
+// 交接線＝userConfig handoffTokens，沒設或超過壓縮點的 HANDOFF_PCT 時用後者。
 //
 // /clear 之後（P1 probe 實測）：$.state 歸零、模組變數與 $.clock 計時器保留、session.start 不重跑。
 // 所以要撐過 clear 的東西放模組變數，clear 前先取消計時器。
@@ -27,22 +28,34 @@ const SKY = '#56B4E9'
 const ORANGE = '#E69F00'
 const VERMILION = '#D55E00'
 
-// 照 ctx-band-nudge.sh 的派生方式取 lib 值；raw WINDOW 要在 source 前記下（lib 會補預設）
-const LIB_SH = [
-  'RAW_WINDOW="${CLAUDE_CODE_AUTO_COMPACT_WINDOW:-}"',
-  'source "$HOME/.claude/hooks/_lib/ctx-thresholds.sh" || exit 3',
-  '[[ "$RAW_WINDOW" =~ ^[0-9]+$ ]] || RAW_WINDOW=0',
-  'printf \'{"rawWindow":%s,"reserve":%s,"pct":%s,"nudgePct":%s,"nudgeOverride":%s,"handoffPct":%s,"handoffOverride":%s}\' "$RAW_WINDOW" "$CTX_OUTPUT_RESERVE" "$CLAUDE_AUTOCOMPACT_PCT_OVERRIDE" "$CTX_NUDGE_PCT" "${CTX_NUDGE_THRESHOLD:-0}" "$CTX_AUTOHANDOFF_PCT" "${CTX_AUTOHANDOFF_THRESHOLD:-0}"',
-].join('\n')
-// harness root 的演算法單一真相在 lib（與 handoff skill 步驟 1 同一行）
-const ROOT_SH = 'source "$HOME/.claude/hooks/_lib/harness-paths.sh" && harness_state_root "$1"'
+// 自動交接線＝壓縮點的 85%（大輪 +45K＋交接輪 +19K 仍在壓縮點前）；橘色提醒線＝交接線的 88%
+const HANDOFF_PCT = 85
+const NUDGE_PCT = 88
 
-type Lib = { rawWindow: number; reserve: number; pct: number; nudgePct: number; nudgeOverride: number; handoffPct: number; handoffOverride: number }
+// harness 狀態根目錄：git repo → <git-common-dir>/harness；非 git → ~/.claude/harness/<目錄名>-<sha256 前 8 碼>；
+// 任何一步失敗印空字串。照抄 mango 的 dotfiles hooks/_lib/harness-paths.sh（契約：vault Harness-State-Layer-Contract.md），
+// 刻意偏離該檔「hash 演算法只存一份」：plugin 要能在沒有那份 dotfiles 的環境獨立運作。改演算法時兩邊一起改。
+const ROOT_SH = [
+  'real=$(realpath -m "$1" 2>/dev/null) || true',
+  '[ -n "$real" ] || exit 0',
+  'common=$(git -C "$real" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || true',
+  'if [ -n "$common" ]; then',
+  '  common=$(realpath -m "$common" 2>/dev/null) || true',
+  '  [ -n "$common" ] && printf "%s/harness\\n" "$common"',
+  '  exit 0',
+  'fi',
+  '[ -n "${HOME:-}" ] || exit 0',
+  'hash=""',
+  'if command -v sha256sum >/dev/null 2>&1; then hash=$(printf "%s" "$real" | sha256sum 2>/dev/null) || true',
+  'elif command -v shasum >/dev/null 2>&1; then hash=$(printf "%s" "$real" | shasum -a 256 2>/dev/null) || true; fi',
+  'hash=${hash%% *}; hash=${hash:0:8}',
+  '[ -n "$hash" ] || exit 0',
+  'printf "%s/.claude/harness/%s-%s\\n" "$HOME" "${real##*/}" "$hash"',
+].join('\n')
 
 const readingsAtom = atom({ plugin: 'ctx-relay', key: 'readings' } as const, [] as Reading[])
 const receiptAtom = atom({ plugin: 'ctx-relay', key: 'receipt' } as const, null as Receipt | null)
 const limitsAtom = atom({ plugin: 'ctx-relay', key: 'limits' } as const, null as Limits | null)
-const limitsErrorAtom = atom({ plugin: 'ctx-relay', key: 'limitsError' } as const, null as string | null)
 const startedAtAtom = atom({ plugin: 'ctx-relay', key: 'startedAt' } as const, 0)
 const autoAtom = atom({ plugin: 'ctx-relay', key: 'auto' } as const, { phase: 'idle' } as Auto)
 
@@ -57,8 +70,12 @@ let lastHandoff: { path: string; error?: string } | null = null
 // 準備批次編號：每次開始準備或取消都 +1；準備流程每個檢查點都要求編號沒變，
 // 避免「取消 A → /ctx-relay-now 開 B → A 的 fork 回來」時 A 誤用 B 的 preparing 狀態
 let prepGen = 0
+// userConfig handoffTokens（0＝自動）；改設定會重新載入模組，所以每次 register 讀一次就好
+let handoffTokens = 0
 
-export const register: Register = on => {
+export const register: Register = (on, options) => {
+  handoffTokens = typeof options.handoffTokens === 'number' ? options.handoffTokens : 0
+
   // 你手動 /clear 或 session 結束：停掉倒數與進行中的準備（計時器會撐過 clear）
   on('session.end', async ($, e, next) => {
     disarm()
@@ -68,13 +85,13 @@ export const register: Register = on => {
 
   on('session.start', async ($, e, next) => {
     const result = await next(e)
-    const usage = await $.session.usage()
+    const usage = await $.session.usage({ breakdown: 'summary' })
     await update($, startedAtAtom, () => usage.startedAt)
     // 第一輪也要有收據：沒有歷史時記一筆起點基準（reload 時歷史還在，不覆蓋）
     const tokens = usage.context.tokens ?? 0
     const percent = Math.round(usage.context.percent ?? (tokens * 100) / usage.context.window)
     await update($, readingsAtom, list => (list.length > 0 ? list : [{ tokens, percent, costUsd: usage.cost?.usd ?? 0 }]))
-    await refreshLimits($, usage.context.window)
+    await update($, limitsAtom, () => deriveLimits(usage.context))
     await rearm($)
     $.ui.invalidate('ui.render')
     // 名稱衝突會丟例外並中斷本 hook，所以放最後並各自包住
@@ -151,11 +168,10 @@ export const register: Register = on => {
     const work = await runningWork($)
     return {
       text: [
-        `${TAG} context ${readings.at(-1)?.tokens ?? '?'}；交接線 ${limits?.handoff ?? '?'}；壓縮點 ${limits?.fuse ?? '?'}；提醒線 ${limits?.nudge ?? '?'}${limits?.isOverride ? '（THRESHOLD 覆寫）' : ''}`,
+        `${TAG} context ${readings.at(-1)?.tokens ?? '?'}；交接線 ${limits?.handoff ?? '?'}${limits ? `（${sourceLabel(limits.source)}）` : ''}；壓縮點 ${limits?.fuse ?? '?'}；提醒線 ${limits?.nudge ?? '?'}`,
         `自動交接：${auto.phase}${auto.detail ? `（${auto.detail}）` : ''}`,
         `背景工作：${work.length === 0 ? '無' : work.join('、')}`,
         `上一次交接檔：${lastHandoff ? lastHandoff.path + (lastHandoff.error ? `（${lastHandoff.error}）` : '') : '無'}`,
-        ...(await read($, limitsErrorAtom) ? [`門檻讀取錯誤：${await read($, limitsErrorAtom)}`] : []),
       ].join('\n'),
     }
   })
@@ -212,14 +228,13 @@ export const register: Register = on => {
         ? { icon: '▲', color: ORANGE }
         : { icon: '◆', color: SKY }
     const ctx = `${level.icon} ctx ${pct}%`
-    const handoffPct = Math.round((limits.handoff * 100) / limits.window)
 
     if (auto.phase === 'countdown') {
       const left = Math.max(0, Math.ceil(((auto.deadline ?? now) - now) / 1000))
       return (
         <Box flexDirection="row">
           <Text color={level.color} bold wrap="truncate-end">
-            {ctx} · 越過自動交接線 {handoffPct}%，{left} 秒後產生交接檔並 /clear 接續（送出任何訊息也會取消）{' '}
+            {ctx} · 越過自動交接線 {k(limits.handoff)}，{left} 秒後產生交接檔並 /clear 接續（送出任何訊息也會取消）{' '}
           </Text>
           <Button key="cancel" label="取消自動交接" hotkey="1" onPress={() => cancel($, '你按了取消')} />
         </Box>
@@ -238,53 +253,49 @@ export const register: Register = on => {
         : ` · 接續自 ${basename(lastHandoff.path)}`
     }
 
-    const parts = [ctx]
+    // 層次照 token-weather：狀態粗體、數值一般、次要資訊 dim；整條用同一個狀態色
+    const segments = [
+      <Text bold>{ctx}</Text>,
+      <Text dimColor>{` ${k(tokens)}/${k(limits.handoff)}`}</Text>,
+    ]
     if (receipt) {
-      const cache = receipt.cachePct === null ? '' : ` cache ${receipt.cachePct}%`
-      parts.push(`本輪 ${signed(receipt.deltaTokens)} $${receipt.deltaCost.toFixed(2)} ${duration(receipt.durationMs)}${cache}`)
+      segments.push(<Text>{` · 本輪 ${signed(receipt.deltaTokens)} $${receipt.deltaCost.toFixed(2)} ${duration(receipt.durationMs)}`}</Text>)
+      if (receipt.cachePct !== null) segments.push(<Text dimColor>{` cache ${receipt.cachePct}%`}</Text>)
     }
     const turnsLeft = headroomTurns(readings, limits.handoff)
-    if (turnsLeft !== null) parts.push(`剩約 ${turnsLeft} 輪到交接線`)
-    if (isWide && startedAt > 0) parts.push(duration(now - startedAt))
-    if (isWide && readings.length >= 2) parts.push(spark(readings))
+    if (turnsLeft !== null) segments.push(<Text>{` · 剩約 ${turnsLeft} 輪到交接線`}</Text>)
+    if (isWide && startedAt > 0) segments.push(<Text dimColor>{` · ${duration(now - startedAt)}`}</Text>)
+    if (isWide && readings.length >= 2) segments.push(<Text>{` ${spark(readings, limits.handoff)}`}</Text>)
+    if (status !== '') segments.push(<Text>{status}</Text>)
 
     return (
       <Box flexDirection="row">
         <Text color={level.color} wrap="truncate-end">
-          {parts.join(' · ')}
-          {status}
+          {segments}
         </Text>
       </Box>
     )
   })
 }
 
-async function refreshLimits($: EngineInterface, modelWindow: number) {
-  try {
-    const r = await $.process.run(['bash', '-c', LIB_SH])
-    if (r.exitCode !== 0) {
-      await update($, limitsErrorAtom, () => `lib exit ${r.exitCode}: ${r.stderr.slice(0, 200)}`)
-      return
-    }
-    const lib = JSON.parse(r.stdout) as Lib
-    await update($, limitsAtom, () => deriveLimits(lib, modelWindow))
-    await update($, limitsErrorAtom, () => null)
-  } catch (err) {
-    await update($, limitsErrorAtom, () => String(err))
-  }
+// 壓縮點取引擎回報值；auto-compact 關掉時沒有壓縮點，改以模型窗為基準
+function deriveLimits(context: SessionContextUsage): Limits {
+  const fuse = context.breakdown?.autoCompactThreshold ?? context.window
+  const auto = Math.floor((fuse * HANDOFF_PCT) / 100)
+  // 設定值超過自動上限（例：400K 設定換到 200K 模型）會在交接前先被壓縮，改用自動值
+  const handoff = handoffTokens > 0 ? Math.min(handoffTokens, auto) : auto
+  const source = handoffTokens <= 0 ? 'auto' : handoffTokens <= auto ? 'config' : 'capped'
+  return { window: context.window, fuse, nudge: Math.floor((handoff * NUDGE_PCT) / 100), handoff, source }
 }
 
-// 有效窗＝env 覆寫窗與模型真窗取小（CC 會把覆寫窗夾在模型窗內），扣掉輸出保留再乘觸發百分比
-function deriveLimits(lib: Lib, modelWindow: number): Limits {
-  const eff = lib.rawWindow > 0 ? Math.min(lib.rawWindow, modelWindow) : modelWindow
-  const fuse = Math.floor(((eff - lib.reserve) * lib.pct) / 100)
-  const nudge = lib.nudgeOverride > 0 ? lib.nudgeOverride : Math.floor((fuse * lib.nudgePct) / 100)
-  const handoff = lib.handoffOverride > 0 ? lib.handoffOverride : Math.floor((fuse * lib.handoffPct) / 100)
-  return { window: modelWindow, fuse, nudge, handoff, isOverride: lib.handoffOverride > 0 }
+function sourceLabel(source: Limits['source']): string {
+  if (source === 'config') return '設定值 handoffTokens'
+  if (source === 'capped') return `設定值 ${handoffTokens} 超過壓縮點的 ${HANDOFF_PCT}%，改用後者`
+  return `壓縮點的 ${HANDOFF_PCT}%`
 }
 
 async function takeReading($: EngineInterface, e: TurnCompleteInput): Promise<number> {
-  const usage = await $.session.usage()
+  const usage = await $.session.usage({ breakdown: 'summary' })
   const tokens = usage.context.tokens ?? 0
   const costUsd = usage.cost?.usd ?? 0
   const readings = await read($, readingsAtom)
@@ -301,7 +312,7 @@ async function takeReading($: EngineInterface, e: TurnCompleteInput): Promise<nu
   }
   const percent = Math.round(usage.context.percent ?? (tokens * 100) / usage.context.window)
   await update($, readingsAtom, list => [...list, { tokens, percent, costUsd }].slice(-HISTORY))
-  await refreshLimits($, usage.context.window)
+  await update($, limitsAtom, () => deriveLimits(usage.context))
   return tokens
 }
 
@@ -618,9 +629,9 @@ function headroomTurns(readings: readonly Reading[], handoff: number): number | 
   return left <= 0 ? 0 : Math.floor(left / median)
 }
 
-function spark(readings: readonly Reading[]): string {
-  const top = Math.max(...readings.map(r => r.tokens), 1)
-  return readings.map(r => BARS[Math.min(BARS.length - 1, Math.floor((r.tokens / top) * (BARS.length - 1)))]).join('')
+// 長條高度對交接線：滿格＝到交接線
+function spark(readings: readonly Reading[], handoff: number): string {
+  return readings.map(r => BARS[Math.min(BARS.length - 1, Math.floor((r.tokens / Math.max(handoff, 1)) * (BARS.length - 1)))]).join('')
 }
 
 function formatStamp(ms: number): string {

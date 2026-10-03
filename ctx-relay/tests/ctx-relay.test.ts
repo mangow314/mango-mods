@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
-import type { On } from 'claude-code'
+import type { On, SessionContextBreakdown } from 'claude-code'
 
 const ROOT = '/repo/.git/harness'
 
@@ -17,12 +17,13 @@ const GOOD = [
   '## 指標', '~/.claude/plans/x.md',
 ].join('\n')
 
-// 測試裡的「引擎」：usage、lib、git、檔案、fork、clear 都由這裡回答
+// 測試裡的「引擎」：usage、git、檔案、fork、clear 都由這裡回答
 type World = {
   tokens: number
   window: number
+  // 引擎回報的壓縮點（breakdown.autoCompactThreshold）
+  fuse: number
   cost: number
-  lib: { rawWindow: number; reserve: number; pct: number; nudgePct: number; nudgeOverride: number; handoffPct: number; handoffOverride: number }
   sessionId: string
   files: Map<string, string>
   forkText: string | null
@@ -44,8 +45,9 @@ function world(on: On, patch: Partial<World> = {}): World {
   const w: World = {
     tokens: 0,
     window: 1_000_000,
+    // ×85%＝433840，沿用舊版 lib 推算的交接線，下面的數字都以它為準
+    fuse: 510_400,
     cost: 0,
-    lib: { rawWindow: 600_000, reserve: 20_000, pct: 88, nudgePct: 75, nudgeOverride: 0, handoffPct: 85, handoffOverride: 0 },
     sessionId: 'sid-1',
     files: new Map(),
     forkText: GOOD,
@@ -64,7 +66,11 @@ function world(on: On, patch: Partial<World> = {}): World {
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('session.end', (_$, e) => ({ sessionId: e.sessionId }))
   on('turn.complete', (_$, e) => ({ text: e.answer }))
-  on('session.usage', () => ({ value: { startedAt: 0, context: { tokens: w.tokens, window: w.window }, rateLimits: [], cost: { usd: w.cost } } }))
+  on('session.usage', (_$, e) => {
+    // 只填 mod 會讀的欄位
+    const breakdown = e.breakdown ? { breakdown: { autoCompactThreshold: w.fuse } as SessionContextBreakdown } : {}
+    return { value: { startedAt: 0, context: { tokens: w.tokens, window: w.window, ...breakdown }, rateLimits: [], cost: { usd: w.cost } } }
+  })
   on('session.id', () => ({ value: w.sessionId }))
   on('session.cwd', () => ({ value: '/repo' }))
   on('session.messages', () => ({ value: w.messages.map(m => ({ ...m, toolUses: [] })) }))
@@ -101,8 +107,7 @@ function world(on: On, patch: Partial<World> = {}): World {
   on('process.run', async (_$, e) => {
     const ok = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
     const [cmd, , script = ''] = e.argv
-    if (cmd === 'bash' && script.includes('ctx-thresholds.sh')) return ok(JSON.stringify(w.lib))
-    if (cmd === 'bash' && script.includes('harness-paths.sh')) return ok(`${ROOT}\n`)
+    if (cmd === 'bash' && script.includes('--git-common-dir')) return ok(`${ROOT}\n`)
     if (cmd === 'mkdir') return ok('')
     if (cmd === 'git') {
       const sub = e.argv[3]
@@ -156,22 +161,48 @@ test('1M：ctx 顯示佔模型窗百分比，收據與剩餘輪數', async ($, o
   await turn($, w, 200_000)
   await turn($, w, 220_000)
   const { text } = await band($)
-  // 壓縮點 (600000−20000)×88%＝510400；交接線 ×85%＝433840 → (433840−220000)/20000＝10.7
+  // 引擎壓縮點 510400；交接線 ×85%＝433840 → (433840−220000)/20000＝10.7
   expect(text).toContain('ctx 22%')
+  expect(text).toContain('220K/434K')
   expect(text).toContain('本輪 +20K $0.50')
   expect(text).toContain('cache 90%')
   expect(text).toContain('剩約 10 輪到交接線')
 })
 
-test('非 1M：有效窗夾在模型窗內，交接線跟著變低', async ($, on) => {
+test('非 1M：引擎回報的壓縮點低，交接線跟著變低', async ($, on) => {
   mock.clock(on)
-  const w = world(on, { window: 200_000 })
+  const w = world(on, { window: 200_000, fuse: 158_400 })
   await start($)
   await turn($, w, 100_000)
   expect((await band($)).text).toContain('ctx 50%')
-  // (200000−20000)×88%×85%＝134640 → 140000 已越線；134640/200000＝67%
+  // 158400×85%＝134640 → 140000 已越線
   await turn($, w, 140_000)
-  expect((await band($)).text).toContain('越過自動交接線 67%')
+  expect((await band($)).text).toContain('越過自動交接線 135K')
+})
+
+test('handoffTokens：固定交接線，越過就自動交接', { options: { handoffTokens: 400_000 } }, async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+  await start($)
+  await turn($, w, 390_000)
+  const before = (await band($)).text
+  expect(before).toContain('390K/400K')
+  expect(before).not.toContain('秒後產生交接檔')
+  await turn($, w, 410_000)
+  expect((await band($)).text).toContain('越過自動交接線 400K')
+  await clock.advance(60_000)
+  await clock.settle()
+  expect(w.cleared).toBe(1)
+})
+
+test('handoffTokens 超過壓縮點的 85%：改用 85%，狀態說明原因', { options: { handoffTokens: 900_000 } }, async ($, on) => {
+  mock.clock(on)
+  const w = world(on)
+  await start($)
+  await turn($, w, 450_000)
+  expect((await band($)).text).toContain('越過自動交接線 434K')
+  const status = await $.command.run({ command: 'ctx-relay-status', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 160 } })
+  expect(status.text).toContain('交接線 433840（設定值 900000 超過壓縮點的 85%，改用後者）')
 })
 
 test('越過交接線：倒數 60 秒後 fork 一次、寫交接檔、clear 一次、在新對話送出路徑', async ($, on) => {
@@ -436,17 +467,6 @@ test('協調契約被改寫：標「未原樣續傳」', async ($, on) => {
   await clock.settle()
   const files = handoffFiles(w).filter(([p]) => p !== source)
   expect(files[0]?.[1]).toContain('協調契約（未原樣續傳）')
-})
-
-test('THRESHOLD 覆寫：低門檻即可觸發（端到端測試用）', async ($, on) => {
-  const clock = mock.clock(on)
-  const w = world(on)
-  w.lib.handoffOverride = 30_000
-  await start($)
-  await turn($, w, 31_000)
-  await clock.advance(60_000)
-  await clock.settle()
-  expect(w.cleared).toBe(1)
 })
 
 test('剩幾輪：偶數筆增量取中間兩值平均；第一輪也有收據', async ($, on) => {

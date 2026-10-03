@@ -1,7 +1,16 @@
 {
   "name": "ctx-relay",
-  "version": "0.2.0",
-  "description": "提示框上方顯示每輪花費與距壓縮點的剩餘空間；越過自動交接線時倒數 60 秒，用 fork 產生交接檔後 /clear 並在新對話接續",
+  "version": "0.3.0",
+  "description": "提示框上方顯示每輪花費與距交接線的剩餘空間；越過自動交接線時倒數 60 秒，用 fork 產生交接檔後 /clear 並在新對話接續",
   "author": { "name": "Mango" },
-  "types": "./types/index.d.ts"
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "handoffTokens": {
+      "type": "number",
+      "title": "自動交接線（tokens）",
+      "description": "context 到這個 token 數就自動交接。0＝自動：Claude Code 壓縮點的 85%。設定值超過自動值時用自動值。",
+      "default": 0,
+      "min": 0
+    }
+  }
 }
