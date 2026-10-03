@@ -1,0 +1,14 @@
+{
+  "name": "mango-mods",
+  "owner": { "name": "Mango" },
+  "metadata": {
+    "description": "個人用 Claude Code mods（function hooks plugin）。"
+  },
+  "plugins": [
+    {
+      "name": "ctx-relay",
+      "source": "./ctx-relay",
+      "description": "每輪花費與剩餘空間；越過自動交接線時自動產生交接檔並 /clear 接續。"
+    }
+  ]
+}
