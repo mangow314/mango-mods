@@ -24,7 +24,7 @@
 echo '{"handoffTokens": "400000"}' | claude plugin configure ctx-relay@mango-mods --values-stdin
 ```
 
-改設定會重新載入 mod。端到端測試可以把它設得很低（例如 1）。
+從 shell 改的設定，要重開 Claude Code 或在 session 裡跑 `/reload-plugins` 才生效。端到端測試可以把它設得很低（例如 1）。
 
 注意：設了 `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` 時，Claude Code 回報的壓縮點可能沒有套用這個百分比。2.1.288 實測：`CLAUDE_CODE_AUTO_COMPACT_WINDOW=600000`、`CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=88` 時，回報 567,000（=600,000−33,000）。真正在哪裡壓縮沒有驗證。用了這個環境變數，就請設 `handoffTokens`。
 
