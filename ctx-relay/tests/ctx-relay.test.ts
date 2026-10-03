@@ -162,11 +162,11 @@ test('1M：ctx 顯示佔模型窗百分比，收據與剩餘輪數', async ($, o
   await turn($, w, 220_000)
   const { text } = await band($)
   // 引擎壓縮點 510400；交接線 ×85%＝433840 → (433840−220000)/20000＝10.7
-  expect(text).toContain('ctx 22%')
+  expect(text).toContain('CTX 22%')
   expect(text).toContain('220K/434K')
   expect(text).toContain('本輪 +20K $0.50')
-  expect(text).toContain('cache 90%')
-  expect(text).toContain('剩約 10 輪到交接線')
+  expect(text).toContain('12s 90%')
+  expect(text).toContain('STAGE 10 輪')
 })
 
 test('非 1M：引擎回報的壓縮點低，交接線跟著變低', async ($, on) => {
@@ -174,10 +174,10 @@ test('非 1M：引擎回報的壓縮點低，交接線跟著變低', async ($, o
   const w = world(on, { window: 200_000, fuse: 158_400 })
   await start($)
   await turn($, w, 100_000)
-  expect((await band($)).text).toContain('ctx 50%')
+  expect((await band($)).text).toContain('CTX 50%')
   // 158400×85%＝134640 → 140000 已越線
   await turn($, w, 140_000)
-  expect((await band($)).text).toContain('越過自動交接線 135K')
+  expect((await band($)).text).toContain('135K 存檔交接')
 })
 
 test('handoffTokens：固定交接線，越過就自動交接', { options: { handoffTokens: 400_000 } }, async ($, on) => {
@@ -187,9 +187,9 @@ test('handoffTokens：固定交接線，越過就自動交接', { options: { han
   await turn($, w, 390_000)
   const before = (await band($)).text
   expect(before).toContain('390K/400K')
-  expect(before).not.toContain('秒後產生交接檔')
+  expect(before).not.toContain('CONTINUE?')
   await turn($, w, 410_000)
-  expect((await band($)).text).toContain('越過自動交接線 400K')
+  expect((await band($)).text).toContain('400K 存檔交接')
   await clock.advance(60_000)
   await clock.settle()
   expect(w.cleared).toBe(1)
@@ -200,7 +200,7 @@ test('handoffTokens 超過壓縮點的 85%：改用 85%，狀態說明原因', {
   const w = world(on)
   await start($)
   await turn($, w, 450_000)
-  expect((await band($)).text).toContain('越過自動交接線 434K')
+  expect((await band($)).text).toContain('434K 存檔交接')
   const status = await $.command.run({ command: 'ctx-relay-status', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 160 } })
   expect(status.text).toContain('交接線 433840（設定值 900000 超過壓縮點的 85%，改用後者）')
 })
@@ -210,9 +210,9 @@ test('越過交接線：倒數 60 秒後 fork 一次、寫交接檔、clear 一�
   const w = world(on)
   await start($)
   await turn($, w, 420_000)
-  expect((await band($)).text).not.toContain('秒後產生交接檔')
+  expect((await band($)).text).not.toContain('CONTINUE?')
   await turn($, w, 450_000)
-  expect((await band($)).text).toContain('秒後產生交接檔')
+  expect((await band($)).text).toContain('CONTINUE?')
   await clock.advance(59_000)
   expect(w.forkPrompts).toHaveLength(0)
   await clock.advance(1_000)
@@ -402,7 +402,7 @@ test('有背景 Bash 在跑：延後交接；完成通知後下一輪才倒數',
   expect(w.forkPrompts).toHaveLength(0)
   await $.prompt.submit({ text: 'task bg42 completed', wait: false, origin: { kind: 'task-notification' } })
   await turn($, w, 455_000)
-  expect((await band($)).text).toContain('秒後產生交接檔')
+  expect((await band($)).text).toContain('CONTINUE?')
 })
 
 test('有子代理在跑：延後交接', async ($, on) => {
@@ -478,7 +478,7 @@ test('剩幾輪：偶數筆增量取中間兩值平均；第一輪也有收據',
   await turn($, w, 270_000)
   await turn($, w, 300_000)
   // 增量 10000、30000（起點那段不算）→ 中位數 20000 → (433840−300000)/20000＝6.7
-  expect((await band($)).text).toContain('剩約 6 輪到交接線')
+  expect((await band($)).text).toContain('STAGE 6 輪')
 })
 
 test('三態顏色：正常天藍、過提醒線橘、倒數朱紅', async ($, on) => {
@@ -492,6 +492,22 @@ test('三態顏色：正常天藍、過提醒線橘、倒數朱紅', async ($, o
   expect(await colorOf()).toBe('#E69F00')
   await turn($, w, 450_000)
   expect(await colorOf()).toBe('#D55E00')
+})
+
+test('三隻小怪獸：依 token÷交接線掉命，過提醒線換骷髏', async ($, on) => {
+  mock.clock(on)
+  const w = world(on)
+  await start($)
+  // 交接線 433840、提醒線 381779
+  const lives = async () => (await band($)).text.trim().split('  ')[0]
+  await turn($, w, 100_000)
+  expect(await lives()).toBe('󰯉 󰯉 󰯉')
+  await turn($, w, 250_000)
+  expect(await lives()).toBe('󰯉 󰯉 󰊠')
+  await turn($, w, 330_000)
+  expect(await lives()).toBe('󰯉 󰊠 󰊠')
+  await turn($, w, 400_000)
+  expect(await lives()).toBe('󰯉 󰚌 󰚌')
 })
 
 test('倒數中重新載入（session.start 再跑）：照原截止時間交接一次', async ($, on) => {

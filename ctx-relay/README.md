@@ -29,12 +29,17 @@ echo '{"handoffTokens": "400000"}' | claude plugin configure ctx-relay@mango-mod
 注意：設了 `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` 時，Claude Code 回報的壓縮點可能沒有套用這個百分比。2.1.288 實測：`CLAUDE_CODE_AUTO_COMPACT_WINDOW=600000`、`CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=88` 時，回報 567,000（=600,000−33,000）。真正在哪裡壓縮沒有驗證。用了這個環境變數，就請設 `handoffTokens`。
 
 ## band
-`◆ ctx 22% 220K/400K · 本輪 +20K $0.50 12s cache 90% · 剩約 10 輪到交接線 · 1h20m ▁▂▃▅`
+`󰯉 󰯉 󰊠  CTX 22% 220K/400K · 本輪 +20K $0.50 12s 90% · STAGE 10 輪 · 1h20m ▁▂▃▅`
 
-- 顏色：天藍＝正常、橘＝過提醒線、朱紅＝過交接線／倒數／失敗。狀態粗體，次要資訊 dim。
-- `220K/400K`：目前 context／交接線。
-- 「剩約 N 輪」從第 2 輪結束起出現（第一筆增量含系統提示，不算）。
+8-Bit 街機計分板樣式。倒數時整行換成 `󰯉 CONTINUE? 42s（400K 存檔交接／任發訊息取消）`，旁邊是取消按鈕（按 1）。
+
+- 三隻小怪獸是離交接線的 HP（token ÷ 交接線）：<40% 三隻；<70% 一隻變鬼魂；到提醒線前剩一隻＋兩隻鬼魂；過提醒線換骷髏；越過交接線全是骷髏。
+- 顏色：天藍＝正常、橘＝過提醒線、朱紅＝過交接線／倒數／失敗。底色跟著三態變深藍／暗橘／暗紅。
+- `CTX 22%`：佔模型窗的百分比。`220K/400K`：目前 context／交接線。`90%`：本輪 cache 命中率。
+- 「STAGE N 輪」＝剩約 N 輪到交接線，從第 2 輪結束起出現（第一筆增量含系統提示，不算）。
 - 經過時間和長條只在終端機寬度 ≥110 欄時顯示；長條高度對交接線，滿格＝到交接線。
+- 圖示要 Nerd Font（例如 Symbols Nerd Font 補字），沒有的話三隻小怪獸會變成方框。
+- 在 tmux 裡，Claude Code 預設只用 256 色，暗色底會變成 #00005f 這類亮很多的顏色。tmux 有開 RGB 的話，設 `CLAUDE_CODE_TMUX_TRUECOLOR=1` 才會照原色畫。
 
 ## 交接檔放哪裡
 git repo：`<git-common-dir>/harness/handoff/`；非 git：`~/.claude/harness/<目錄名>-<sha256 前 8 碼>/handoff/`。

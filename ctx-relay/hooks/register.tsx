@@ -28,6 +28,18 @@ const SKY = '#56B4E9'
 const ORANGE = '#E69F00'
 const VERMILION = '#D55E00'
 
+// band 樣式：8-Bit 街機計分板。底色跟著三態，三隻小怪獸是離交接線的 HP
+const BG = { [SKY]: '#161922', [ORANGE]: '#241c12', [VERMILION]: '#321210' } as Record<string, string>
+const LABEL = '#7d8794'
+const VALUE = '#f5f7fa'
+const DOT = '#464e5a'
+const INVADER = '󰯉' // Nerd Font md-space_invaders U+F0BC9
+const GHOST = '󰊠' // md-ghost U+F02A0
+const SKULL = '󰚌' // md-skull U+F068C
+// HP 分段取自設計稿（token ÷ 交接線），不是引擎數字：<40% 三隻、<70% 一隻變鬼、提醒線前剩一隻
+const HP_FULL = 0.4
+const HP_HALF = 0.7
+
 // 自動交接線＝壓縮點的 85%（大輪 +45K＋交接輪 +19K 仍在壓縮點前）；橘色提醒線＝交接線的 88%
 const HANDOFF_PCT = 85
 const NUDGE_PCT = 88
@@ -204,9 +216,9 @@ export const register: Register = (on, options) => {
       // /clear 後還沒有讀數：送出失敗時新對話不會自己跑回合，這裡仍要畫出手動接續的指示
       if (lastHandoff?.error) {
         return (
-          <Box flexDirection="row">
+          <Box flexDirection="row" backgroundColor={BG[VERMILION]}>
             <Text color={VERMILION} bold wrap="truncate-end">
-              {`■ ${TAG} 已 /clear 但${lastHandoff.error}：請手動輸入「讀 ${lastHandoff.path} 並依其接續」`}
+              {` ${SKULL} ${TAG} 已 /clear 但${lastHandoff.error}：請手動輸入「讀 ${lastHandoff.path} 並依其接續」 `}
             </Text>
           </Box>
         )
@@ -222,55 +234,65 @@ export const register: Register = (on, options) => {
     const pct = readings.at(-1)?.percent ?? 0
     const isWide = e.props.bodyColumns >= 110
 
-    const level = auto.phase === 'countdown' || auto.phase === 'preparing' || auto.phase === 'failed' || tokens >= limits.handoff
-      ? { icon: '■', color: VERMILION }
-      : tokens >= limits.nudge
-        ? { icon: '▲', color: ORANGE }
-        : { icon: '◆', color: SKY }
-    const ctx = `${level.icon} ctx ${pct}%`
+    const color = auto.phase === 'countdown' || auto.phase === 'preparing' || auto.phase === 'failed' || tokens >= limits.handoff
+      ? VERMILION
+      : tokens >= limits.nudge ? ORANGE : SKY
 
     if (auto.phase === 'countdown') {
       const left = Math.max(0, Math.ceil(((auto.deadline ?? now) - now) / 1000))
       return (
         <Box flexDirection="row">
-          <Text color={level.color} bold wrap="truncate-end">
-            {ctx} · 越過自動交接線 {k(limits.handoff)}，{left} 秒後產生交接檔並 /clear 接續（送出任何訊息也會取消）{' '}
-          </Text>
-          <Button key="cancel" label="取消自動交接" hotkey="1" onPress={() => cancel($, '你按了取消')} />
+          <Box flexDirection="row" backgroundColor={BG[color]}>
+            <Text color={color} bold wrap="truncate-end">
+              {` ${INVADER} CONTINUE? `}
+              <Text color={VALUE}>{`${left}s`}</Text>
+              <Text color={LABEL}>{`（${k(limits.handoff)} 存檔交接／任發訊息取消） `}</Text>
+            </Text>
+          </Box>
+          <Text> </Text>
+          <Button key="cancel" label="PUSH 1 TO CANCEL" hotkey="1" onPress={() => cancel($, '你按了取消')} />
         </Box>
       )
     }
 
     let status = ''
-    if (auto.phase === 'deferred') status = ` · 交接延後：${auto.detail ?? ''}`
-    if (auto.phase === 'preparing') status = ' · 正在產生交接檔…'
-    if (auto.phase === 'done') status = ` · ${auto.detail ?? ''}`
-    if (auto.phase === 'failed') status = ` · 自動交接失敗：${auto.detail ?? ''}，請手動出場`
-    if (auto.phase === 'cancelled') status = ` · 自動交接已取消（${auto.detail ?? ''}；本對話只提醒）`
+    if (auto.phase === 'deferred') status = `交接延後：${auto.detail ?? ''}`
+    if (auto.phase === 'preparing') status = '正在產生交接檔…'
+    if (auto.phase === 'done') status = auto.detail ?? ''
+    if (auto.phase === 'failed') status = `自動交接失敗：${auto.detail ?? ''}，請手動出場`
+    if (auto.phase === 'cancelled') status = `自動交接已取消（${auto.detail ?? ''}；本對話只提醒）`
     if (auto.phase === 'idle' && lastHandoff) {
       status = lastHandoff.error
-        ? ` · 已 /clear 但${lastHandoff.error}：請手動輸入「讀 ${lastHandoff.path} 並依其接續」`
-        : ` · 接續自 ${basename(lastHandoff.path)}`
+        ? `已 /clear 但${lastHandoff.error}：請手動輸入「讀 ${lastHandoff.path} 並依其接續」`
+        : `接續自 ${basename(lastHandoff.path)}`
     }
 
-    // 層次照 token-weather：狀態粗體、數值一般、次要資訊 dim；整條用同一個狀態色
+    // 標籤灰、數值白粗體、狀態相關的數字用狀態色；外層 Text 的 color 是三態色
+    const sep = () => <Text color={DOT}>{' · '}</Text>
     const segments = [
-      <Text bold>{ctx}</Text>,
-      <Text dimColor>{` ${k(tokens)}/${k(limits.handoff)}`}</Text>,
+      <Text bold>{' '}{hp(tokens, limits).map(([glyph, c], i) => <Text color={c}>{i === 0 ? glyph : ` ${glyph}`}</Text>)}</Text>,
+      <Text color={LABEL}>{'  CTX '}</Text>,
+      <Text color={VALUE} bold>{`${pct}%`}</Text>,
+      <Text bold>{` ${k(tokens)}`}</Text>,
+      <Text color={LABEL}>{`/${k(limits.handoff)}`}</Text>,
     ]
     if (receipt) {
-      segments.push(<Text>{` · 本輪 ${signed(receipt.deltaTokens)} $${receipt.deltaCost.toFixed(2)} ${duration(receipt.durationMs)}`}</Text>)
-      if (receipt.cachePct !== null) segments.push(<Text dimColor>{` cache ${receipt.cachePct}%`}</Text>)
+      segments.push(sep(), <Text color={LABEL}>本輪 </Text>, <Text color={VALUE} bold>{`${signed(receipt.deltaTokens)} $${receipt.deltaCost.toFixed(2)}`}</Text>)
+      segments.push(<Text color={LABEL}>{` ${duration(receipt.durationMs)}`}</Text>)
+      if (receipt.cachePct !== null) segments.push(<Text>{` ${receipt.cachePct}%`}</Text>)
     }
     const turnsLeft = headroomTurns(readings, limits.handoff)
-    if (turnsLeft !== null) segments.push(<Text>{` · 剩約 ${turnsLeft} 輪到交接線`}</Text>)
-    if (isWide && startedAt > 0) segments.push(<Text dimColor>{` · ${duration(now - startedAt)}`}</Text>)
+    if (turnsLeft !== null) {
+      segments.push(sep(), <Text color={LABEL}>STAGE </Text>, <Text color={color === SKY ? VALUE : color} bold>{String(turnsLeft)}</Text>, <Text color={LABEL}> 輪</Text>)
+    }
+    if (isWide && startedAt > 0) segments.push(sep(), <Text color={LABEL}>{duration(now - startedAt)}</Text>)
     if (isWide && readings.length >= 2) segments.push(<Text>{` ${spark(readings, limits.handoff)}`}</Text>)
-    if (status !== '') segments.push(<Text>{status}</Text>)
+    if (status !== '') segments.push(sep(), <Text>{status}</Text>)
+    segments.push(<Text> </Text>)
 
     return (
-      <Box flexDirection="row">
-        <Text color={level.color} wrap="truncate-end">
+      <Box flexDirection="row" backgroundColor={BG[color]}>
+        <Text color={color} wrap="truncate-end">
           {segments}
         </Text>
       </Box>
@@ -612,6 +634,17 @@ async function setAuto($: EngineInterface, auto: Auto) {
 }
 
 // 剩幾輪＝(交接線 − 現在) ÷ 近幾輪正增量的中位數；樣本不足回 null
+// 三隻小怪獸：鬼魂灰色，其餘用狀態色（undefined＝沿用外層）；過提醒線換骷髏，越過交接線全骷髏
+function hp(tokens: number, limits: Limits): [string, string | undefined][] {
+  const ratio = tokens / limits.handoff
+  const lives = tokens >= limits.handoff ? [SKULL, SKULL, SKULL]
+    : tokens >= limits.nudge ? [INVADER, SKULL, SKULL]
+      : ratio >= HP_HALF ? [INVADER, GHOST, GHOST]
+        : ratio >= HP_FULL ? [INVADER, INVADER, GHOST]
+          : [INVADER, INVADER, INVADER]
+  return lives.map(glyph => [glyph, glyph === GHOST ? LABEL : undefined])
+}
+
 function headroomTurns(readings: readonly Reading[], handoff: number): number | null {
   const deltas: number[] = []
   readings.forEach((r, i) => {
