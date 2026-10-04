@@ -1,11 +1,12 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register, SessionContextUsage, Timer, TurnCompleteInput } from 'claude-code'
+import type { EngineInterface, Register, RenderElement, RenderInput, SessionContextUsage, Timer, TurnCompleteInput } from 'claude-code'
 
 import type { Auto, Limits, Reading, Receipt } from '../types'
 
 // ctx-relay：提示框上方一行，顯示每輪花費與距交接線的剩餘空間；
-// 主線回合結束時 context 越過自動交接線 → 沒有背景工作就倒數 60 秒 →
+// 主對話停下（classic.Stop）時 context 越過自動交接線 → 引擎回報沒有背景工作就倒數 60 秒 →
 // mod 自己收集 git／INDEX、用 $.model.fork 產生交接檔、機器檢查後寫檔 → /clear → 在新對話送出交接檔路徑。
+// 倒數或準備中有新回合開始（排程、通知、你送訊息）就作廢這次切換。
 // 壓縮點取自 Claude Code 自己回報的 autoCompactThreshold，本檔不寫窗口數字；
 // 交接線＝userConfig handoffTokens，沒設或超過壓縮點的 HANDOFF_PCT 時用後者。
 //
@@ -15,6 +16,8 @@ import type { Auto, Limits, Reading, Receipt } from '../types'
 const HISTORY = 12
 const HEADROOM_SAMPLE = 5
 const COUNTDOWN_MS = 60_000
+// fork 沒有取消參數：超過這個時間就放棄等待、記失敗，不 clear（回來的結果不再使用）
+const FORK_TIMEOUT_MS = 180_000
 const BARS = '▁▂▃▄▅▆▇█'
 const TAG = '[ctx-relay]'
 
@@ -68,17 +71,18 @@ const ROOT_SH = [
 const readingsAtom = atom({ plugin: 'ctx-relay', key: 'readings' } as const, [] as Reading[])
 const receiptAtom = atom({ plugin: 'ctx-relay', key: 'receipt' } as const, null as Receipt | null)
 const limitsAtom = atom({ plugin: 'ctx-relay', key: 'limits' } as const, null as Limits | null)
-const startedAtAtom = atom({ plugin: 'ctx-relay', key: 'startedAt' } as const, 0)
 const autoAtom = atom({ plugin: 'ctx-relay', key: 'auto' } as const, { phase: 'idle' } as Auto)
 
 // 模組變數：hot reload 會清掉；/clear 不會
 let tick: Timer | null = null
 let fireTimer: Timer | null = null
 let mainTurns = 0
-// 追蹤中的背景 Bash backgroundTaskId（子代理另由 $.agent.list() 查）
-const background = new Set<string>()
-// 上一次切換的結果，撐過 /clear 顯示在新對話的 band
+// 上一次主對話停下（classic.Stop）時引擎回報、會再叫醒這個 session 的工作；給指令用，換 session 就清掉
+let stopWork: string[] = []
+// 上一次切換的結果，撐過 /clear 顯示在新對話的 band；之後你自己 clear 就清掉
 let lastHandoff: { path: string; error?: string } | null = null
+// mod 自己正在執行 /clear（這時的 session.end 不清 lastHandoff）
+let ownClear = false
 // 準備批次編號：每次開始準備或取消都 +1；準備流程每個檢查點都要求編號沒變，
 // 避免「取消 A → /ctx-relay-now 開 B → A 的 fork 回來」時 A 誤用 B 的 preparing 狀態
 let prepGen = 0
@@ -92,17 +96,17 @@ export const register: Register = (on, options) => {
   on('session.end', async ($, e, next) => {
     disarm()
     prepGen += 1
+    stopWork = []
+    if (!ownClear) lastHandoff = null
     return next(e)
   })
 
   on('session.start', async ($, e, next) => {
     const result = await next(e)
     const usage = await $.session.usage({ breakdown: 'summary' })
-    await update($, startedAtAtom, () => usage.startedAt)
     // 第一輪也要有收據：沒有歷史時記一筆起點基準（reload 時歷史還在，不覆蓋）
     const tokens = usage.context.tokens ?? 0
-    const percent = Math.round(usage.context.percent ?? (tokens * 100) / usage.context.window)
-    await update($, readingsAtom, list => (list.length > 0 ? list : [{ tokens, percent, costUsd: usage.cost?.usd ?? 0 }]))
+    await update($, readingsAtom, list => (list.length > 0 ? list : [{ tokens, costUsd: usage.cost?.usd ?? 0 }]))
     await update($, limitsAtom, () => deriveLimits(usage.context))
     await rearm($)
     $.ui.invalidate('ui.render')
@@ -126,17 +130,29 @@ export const register: Register = (on, options) => {
       return result
     }
     mainTurns += 1
-    const tokens = await takeReading($, e)
-    await afterTurn($, e, tokens)
+    await takeReading($, e)
+    $.ui.invalidate('ui.render')
+    return result
+  })
+
+  // 主對話停下：要不要交接在這裡判斷，因為引擎在這裡回報背景工作與排程（shell、子代理、monitor、workflow…）
+  on('classic.Stop', async ($, e, next) => {
+    const result = await next(e)
+    // 別的 Stop hook 擋下＝回合其實沒結束，等真正停下的那次再判斷
+    if (result.block !== undefined) {
+      return result
+    }
+    stopWork = [
+      ...(e.background_tasks ?? []).map(t => `${t.type} ${t.description}`.slice(0, 80)),
+      // 一次性排程會再叫醒這個 session；循環排程每次都會醒，不擋交接
+      ...(e.session_crons ?? []).filter(c => !c.recurring).map(c => `一次性排程 ${c.prompt}`.slice(0, 80)),
+    ]
+    await afterStop($)
     $.ui.invalidate('ui.render')
     return result
   })
 
   on('prompt.submit', async ($, e, next) => {
-    // 背景工作的完成通知：從追蹤清單移除
-    if (e.origin.kind === 'task-notification') {
-      for (const id of background.keys()) if (e.text.includes(id)) background.delete(id)
-    }
     // 你親手送出（或遠端轉來你的訊息）＝人在場 → 取消倒數或進行中的準備
     if (e.origin.kind === 'composer' || e.origin.kind === 'bridge') {
       const auto = await read($, autoAtom)
@@ -147,20 +163,17 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
-  // 只觀察：工具跑完後記下背景 Bash 的 id，不攔、不改呼叫
-  on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
-    const ran = await next(e)
-    const id = ran.deny === undefined && ran.isError !== true ? ran.result?.backgroundTaskId : undefined
-    if (id !== undefined) background.add(id)
-    return ran
-  })
-
-  on('tool.call', { tool: 'TaskStop' }, async ($, e, next) => {
-    const ran = await next(e)
-    const id = (e as { task_id?: unknown }).task_id
-    // 停止被拒或失敗時工作還在跑，不移除
-    if (typeof id === 'string' && ran.deny === undefined && ran.isError !== true) background.delete(id)
-    return ran
+  // 主對話開了新回合（排程、背景通知、別的 session 傳訊；子代理不發 turn.start）：
+  // 這次倒數或準備作廢、回到 idle，回合結束時再重新判斷。你親手送出的訊息在上面已改成 cancelled，這裡不動
+  on('turn.start', async ($, e, next) => {
+    const auto = await read($, autoAtom)
+    if (auto.phase === 'countdown' || auto.phase === 'preparing') {
+      disarm()
+      prepGen += 1
+      await setAuto($, { phase: 'idle' })
+      $.ui.invalidate('ui.render')
+    }
+    return next(e)
   })
 
   // 只觀察：本 session 已載入 handoff skill（你手動交接）→ 之後不再自動交接
@@ -180,7 +193,7 @@ export const register: Register = (on, options) => {
     const work = await runningWork($)
     return {
       text: [
-        `${TAG} context ${readings.at(-1)?.tokens ?? '?'}；交接線 ${limits?.handoff ?? '?'}${limits ? `（${sourceLabel(limits.source)}）` : ''}；壓縮點 ${limits?.fuse ?? '?'}；提醒線 ${limits?.nudge ?? '?'}`,
+        `${TAG} context ${readings.at(-1)?.tokens ?? '?'}；交接線 ${limits?.handoff ?? '?'}${limits ? `（${sourceLabel(limits.source)}）` : ''}；壓縮點 ${limits?.fuse ?? '?'}；提醒線 ${limits?.nudge ?? '?'}；有背景工作時延後上限 ${limits?.cap ?? '?'}`,
         `自動交接：${auto.phase}${auto.detail ? `（${auto.detail}）` : ''}`,
         `背景工作：${work.length === 0 ? '無' : work.join('、')}`,
         `上一次交接檔：${lastHandoff ? lastHandoff.path + (lastHandoff.error ? `（${lastHandoff.error}）` : '') : '無'}`,
@@ -209,95 +222,107 @@ export const register: Register = (on, options) => {
     if (e.props.hasSurvey) {
       return next(e)
     }
-    const readings = await read($, readingsAtom)
-    const limits = await read($, limitsAtom)
-    const { Box, Button, Text } = $.ui.resolve(e)
-    if (readings.length === 0 || limits === null) {
-      // /clear 後還沒有讀數：送出失敗時新對話不會自己跑回合，這裡仍要畫出手動接續的指示
-      if (lastHandoff?.error) {
-        return (
-          <Box flexDirection="row" backgroundColor={BG[VERMILION]}>
-            <Text color={VERMILION} bold wrap="truncate-end">
-              {` ${SKULL} ${TAG} 已 /clear 但${lastHandoff.error}：請手動輸入「讀 ${lastHandoff.path} 並依其接續」 `}
-            </Text>
-          </Box>
-        )
-      }
-      return next(e)
-    }
-    const receipt = await read($, receiptAtom)
-    const auto = await read($, autoAtom)
-    const now = await $.clock.now()
-    const startedAt = await read($, startedAtAtom)
-    const tokens = readings.at(-1)?.tokens ?? 0
-    // 佔模型窗的百分比，與 statusline 的 used_percentage 同一來源
-    const pct = readings.at(-1)?.percent ?? 0
-    const isWide = e.props.bodyColumns >= 110
-
-    const color = auto.phase === 'countdown' || auto.phase === 'preparing' || auto.phase === 'failed' || tokens >= limits.handoff
-      ? VERMILION
-      : tokens >= limits.nudge ? ORANGE : SKY
-
-    if (auto.phase === 'countdown') {
-      const left = Math.max(0, Math.ceil(((auto.deadline ?? now) - now) / 1000))
-      return (
-        <Box flexDirection="row">
-          <Box flexDirection="row" backgroundColor={BG[color]}>
-            <Text color={color} bold wrap="truncate-end">
-              {` ${INVADER} CONTINUE? `}
-              <Text color={VALUE}>{`${left}s`}</Text>
-              <Text color={LABEL}>{`（${k(limits.handoff)} 存檔交接／任發訊息取消） `}</Text>
-            </Text>
-          </Box>
-          <Text> </Text>
-          <Button key="cancel" label="PUSH 1 TO CANCEL" hotkey="1" onPress={() => cancel($, '你按了取消')} />
-        </Box>
-      )
-    }
-
-    let status = ''
-    if (auto.phase === 'deferred') status = `交接延後：${auto.detail ?? ''}`
-    if (auto.phase === 'preparing') status = '正在產生交接檔…'
-    if (auto.phase === 'done') status = auto.detail ?? ''
-    if (auto.phase === 'failed') status = `自動交接失敗：${auto.detail ?? ''}，請手動出場`
-    if (auto.phase === 'cancelled') status = `自動交接已取消（${auto.detail ?? ''}；本對話只提醒）`
-    if (auto.phase === 'idle' && lastHandoff) {
-      status = lastHandoff.error
-        ? `已 /clear 但${lastHandoff.error}：請手動輸入「讀 ${lastHandoff.path} 並依其接續」`
-        : `接續自 ${basename(lastHandoff.path)}`
-    }
-
-    // 標籤灰、數值白粗體、狀態相關的數字用狀態色；外層 Text 的 color 是三態色
-    const sep = () => <Text color={DOT}>{' · '}</Text>
-    const segments = [
-      <Text bold>{' '}{hp(tokens, limits).map(([glyph, c], i) => <Text color={c}>{i === 0 ? glyph : ` ${glyph}`}</Text>)}</Text>,
-      <Text color={LABEL}>{'  CTX '}</Text>,
-      <Text color={VALUE} bold>{`${pct}%`}</Text>,
-      <Text bold>{` ${k(tokens)}`}</Text>,
-      <Text color={LABEL}>{`/${k(limits.handoff)}`}</Text>,
-    ]
-    if (receipt) {
-      segments.push(sep(), <Text color={LABEL}>本輪 </Text>, <Text color={VALUE} bold>{`${signed(receipt.deltaTokens)} $${receipt.deltaCost.toFixed(2)}`}</Text>)
-      segments.push(<Text color={LABEL}>{` ${duration(receipt.durationMs)}`}</Text>)
-      if (receipt.cachePct !== null) segments.push(<Text>{` ${receipt.cachePct}%`}</Text>)
-    }
-    const turnsLeft = headroomTurns(readings, limits.handoff)
-    if (turnsLeft !== null) {
-      segments.push(sep(), <Text color={LABEL}>STAGE </Text>, <Text color={color === SKY ? VALUE : color} bold>{String(turnsLeft)}</Text>, <Text color={LABEL}> 輪</Text>)
-    }
-    if (isWide && startedAt > 0) segments.push(sep(), <Text color={LABEL}>{duration(now - startedAt)}</Text>)
-    if (isWide && readings.length >= 2) segments.push(<Text>{` ${spark(readings, limits.handoff)}`}</Text>)
-    if (status !== '') segments.push(sep(), <Text>{status}</Text>)
-    segments.push(<Text> </Text>)
-
+    // band 只有一個：先讓排在下面的 mod 畫（例如 blast-radius 在窄終端機把 Proceed／Cancel 畫在這裡），
+    // 自己這行疊在它下面；只回自己的 tree 會把它整個蓋掉
+    const below = await next(e)
+    const mine = await drawBand($, e)
+    if (mine === null) return below
+    if (!below) return mine
+    const { Box } = $.ui.resolve(e)
     return (
-      <Box flexDirection="row" backgroundColor={BG[color]}>
-        <Text color={color} wrap="truncate-end">
-          {segments}
-        </Text>
+      <Box flexDirection="column">
+        {below}
+        {mine}
       </Box>
     )
   })
+}
+
+// 沒有東西要畫時回 null
+async function drawBand($: EngineInterface, e: RenderInput<'AbovePrompt'>): Promise<RenderElement | null> {
+  const readings = await read($, readingsAtom)
+  const limits = await read($, limitsAtom)
+  const { Box, Button, Text } = $.ui.resolve(e)
+  if (readings.length === 0 || limits === null) {
+    // /clear 後還沒有讀數：送出失敗時新對話不會自己跑回合，這裡仍要畫出手動接續的指示
+    if (lastHandoff?.error) {
+      return (
+        <Box flexDirection="row" backgroundColor={BG[VERMILION]}>
+          <Text color={VERMILION} bold wrap="truncate-end">
+            {` ${SKULL} ${TAG} 已 /clear 但${lastHandoff.error}：請手動輸入「讀 ${lastHandoff.path} 並依其接續」 `}
+          </Text>
+        </Box>
+      )
+    }
+    return null
+  }
+  const receipt = await read($, receiptAtom)
+  const auto = await read($, autoAtom)
+  const now = await $.clock.now()
+  const tokens = readings.at(-1)?.tokens ?? 0
+  const isWide = e.props.bodyColumns >= 110
+
+  const color = auto.phase === 'countdown' || auto.phase === 'preparing' || auto.phase === 'failed' || tokens >= limits.handoff
+    ? VERMILION
+    : tokens >= limits.nudge ? ORANGE : SKY
+
+  if (auto.phase === 'countdown') {
+    const left = Math.max(0, Math.ceil(((auto.deadline ?? now) - now) / 1000))
+    return (
+      <Box flexDirection="row">
+        <Box flexDirection="row" backgroundColor={BG[color]}>
+          <Text color={color} bold wrap="truncate-end">
+            {` ${INVADER} CONTINUE? `}
+            <Text color={VALUE}>{`${left}s`}</Text>
+            <Text color={LABEL}>{`（${k(limits.handoff)} 存檔交接／任發訊息取消） `}</Text>
+          </Text>
+        </Box>
+        <Text> </Text>
+        <Button key="cancel" label="PUSH 1 TO CANCEL" hotkey="1" onPress={() => cancel($, '你按了取消')} />
+      </Box>
+    )
+  }
+
+  let status = ''
+  if (auto.phase === 'deferred') status = `交接延後：${auto.detail ?? ''}`
+  if (auto.phase === 'preparing') status = '正在產生交接檔…'
+  if (auto.phase === 'done') status = auto.detail ?? ''
+  if (auto.phase === 'failed') status = `自動交接失敗：${auto.detail ?? ''}，請手動出場`
+  if (auto.phase === 'cancelled') status = `自動交接已取消（${auto.detail ?? ''}；本對話只提醒）`
+  if (auto.phase === 'idle' && lastHandoff) {
+    status = lastHandoff.error
+      ? `已 /clear 但${lastHandoff.error}：請手動輸入「讀 ${lastHandoff.path} 並依其接續」`
+      : `接續自 ${basename(lastHandoff.path)}`
+  }
+
+  // 標籤灰、數值白粗體、狀態相關的數字用狀態色；外層 Text 的 color 是三態色
+  const sep = () => <Text color={DOT}>{' · '}</Text>
+  const segments = [
+    <Text bold>{' '}{hp(tokens, limits).map(([glyph, c], i) => <Text color={c}>{i === 0 ? glyph : ` ${glyph}`}</Text>)}</Text>,
+    <Text color={LABEL}>{'  CTX '}</Text>,
+    <Text bold>{k(tokens)}</Text>,
+    <Text color={LABEL}>{`/${k(limits.handoff)}`}</Text>,
+  ]
+  if (receipt) {
+    segments.push(sep(), <Text color={LABEL}>本輪 </Text>, <Text color={VALUE} bold>{`${signed(receipt.deltaTokens)} $${receipt.deltaCost.toFixed(2)}`}</Text>)
+    segments.push(<Text color={LABEL}>{` ${duration(receipt.durationMs)}`}</Text>)
+    if (receipt.cachePct !== null) segments.push(<Text>{` ${receipt.cachePct}%`}</Text>)
+  }
+  const turnsLeft = headroomTurns(readings, limits.handoff)
+  if (turnsLeft !== null) {
+    segments.push(sep(), <Text color={LABEL}>STAGE </Text>, <Text color={color === SKY ? VALUE : color} bold>{String(turnsLeft)}</Text>, <Text color={LABEL}> 輪</Text>)
+  }
+  if (isWide && readings.length >= 2) segments.push(<Text>{` ${spark(readings, limits.handoff)}`}</Text>)
+  if (status !== '') segments.push(sep(), <Text>{status}</Text>)
+  segments.push(<Text> </Text>)
+
+  return (
+    <Box flexDirection="row" backgroundColor={BG[color]}>
+      <Text color={color} wrap="truncate-end">
+        {segments}
+      </Text>
+    </Box>
+  )
 }
 
 // 壓縮點取引擎回報值；auto-compact 關掉時沒有壓縮點，改以模型窗為基準
@@ -307,7 +332,9 @@ function deriveLimits(context: SessionContextUsage): Limits {
   // 設定值超過自動上限（例：400K 設定換到 200K 模型）會在交接前先被壓縮，改用自動值
   const handoff = handoffTokens > 0 ? Math.min(handoffTokens, auto) : auto
   const source = handoffTokens <= 0 ? 'auto' : handoffTokens <= auto ? 'config' : 'capped'
-  return { window: context.window, fuse, nudge: Math.floor((handoff * NUDGE_PCT) / 100), handoff, source }
+  // 背景工作一直不結束時，延後到交接線與壓縮點的中點就強制倒數（使用者 2026-10-04 選 B）
+  const cap = handoff + Math.floor((fuse - handoff) / 2)
+  return { window: context.window, fuse, nudge: Math.floor((handoff * NUDGE_PCT) / 100), handoff, cap, source }
 }
 
 function sourceLabel(source: Limits['source']): string {
@@ -316,7 +343,7 @@ function sourceLabel(source: Limits['source']): string {
   return `壓縮點的 ${HANDOFF_PCT}%`
 }
 
-async function takeReading($: EngineInterface, e: TurnCompleteInput): Promise<number> {
+async function takeReading($: EngineInterface, e: TurnCompleteInput) {
   const usage = await $.session.usage({ breakdown: 'summary' })
   const tokens = usage.context.tokens ?? 0
   const costUsd = usage.cost?.usd ?? 0
@@ -332,22 +359,26 @@ async function takeReading($: EngineInterface, e: TurnCompleteInput): Promise<nu
       cachePct: u && total > 0 ? Math.round((u.cache_read_input_tokens * 100) / total) : null,
     }))
   }
-  const percent = Math.round(usage.context.percent ?? (tokens * 100) / usage.context.window)
-  await update($, readingsAtom, list => [...list, { tokens, percent, costUsd }].slice(-HISTORY))
+  await update($, readingsAtom, list => [...list, { tokens, costUsd }].slice(-HISTORY))
   await update($, limitsAtom, () => deriveLimits(usage.context))
-  return tokens
 }
 
-async function afterTurn($: EngineInterface, e: TurnCompleteInput, tokens: number) {
+async function afterStop($: EngineInterface) {
   const auto = await read($, autoAtom)
   const limits = await read($, limitsAtom)
-  if ((auto.phase !== 'idle' && auto.phase !== 'deferred') || e.reason !== 'answer' || limits === null || tokens < limits.handoff) {
+  if ((auto.phase !== 'idle' && auto.phase !== 'deferred') || limits === null) {
     return
   }
-  // 還有背景工作就先不交接：它結束時的通知會再跑一個主線回合，到時再判斷
+  // 讀當下的 token 數：Stop 和 turn.complete 誰先發沒有文件保證（不要 breakdown，免費）
+  const tokens = (await $.session.usage()).context.tokens ?? 0
+  if (tokens < limits.handoff) {
+    return
+  }
+  // 還有背景工作就先不交接：它結束時的通知會再跑一個主線回合，到時再判斷；
+  // 到上限還沒結束就照樣倒數（交接檔會寫明還在跑的工作），免得滑到壓縮點被原生摘要取代
   const work = await runningWork($)
-  if (work.length > 0) {
-    await setAuto($, { phase: 'deferred', detail: `${work.length} 個背景工作還在跑（/ctx-relay-now yes 可強制）` })
+  if (work.length > 0 && tokens < limits.cap) {
+    await setAuto($, { phase: 'deferred', detail: `${work.length} 個背景工作還在跑（到 ${k(limits.cap)} 會強制交接；/ctx-relay-now yes 可立刻交接）` })
     return
   }
   const now = await $.clock.now()
@@ -355,7 +386,7 @@ async function afterTurn($: EngineInterface, e: TurnCompleteInput, tokens: numbe
   arm($, COUNTDOWN_MS)
 }
 
-// 在跑的子代理＋追蹤中的背景 Bash。不設逾時作廢（使用者 2026-10-03 選 B）：
+// 在跑的子代理＋上一次 Stop 時引擎回報的背景工作與一次性排程。不設逾時作廢（使用者 2026-10-03 選 B）：
 // 常駐 server 會一直延後，band 顯示原因，要交接就用 /ctx-relay-now yes
 async function runningWork($: EngineInterface): Promise<string[]> {
   let agents: string[] = []
@@ -365,7 +396,7 @@ async function runningWork($: EngineInterface): Promise<string[]> {
     // 查不到就當作可能有工作在跑（寧可延後，/ctx-relay-now yes 可強制）
     agents = [`無法查詢子代理（${String(err).slice(0, 80)}）`]
   }
-  return [...agents, ...[...background.keys()].map(id => `背景 Bash ${id}`)]
+  return [...agents, ...stopWork]
 }
 
 function arm($: EngineInterface, ms: number) {
@@ -443,16 +474,26 @@ async function prepare($: EngineInterface, gen: number) {
     const readings = await read($, readingsAtom)
     const limits = await read($, limitsAtom)
     const tokens = readings.at(-1)?.tokens ?? 0
+    // 強制交接（延後到上限、/ctx-relay-now yes）時還在跑的工作：寫進檔頭，新對話才知道有通知會收不到
+    const work = await runningWork($)
 
-    const r = await $.model.fork({ prompt: forkPrompt({ tokens, limits, git, index, contract }) })
+    const r = await Promise.race([
+      $.model.fork({ prompt: forkPrompt({ tokens, limits, git, index, contract }) }),
+      $.clock.sleep(FORK_TIMEOUT_MS).then(() => null),
+    ])
+    if (r === null) return await fail(`產生交接內容逾時（${FORK_TIMEOUT_MS / 60_000} 分鐘）`)
     if (!r.isAnswered) return await fail(`產生交接內容失敗：${r.reason}`)
     if (!(await isMine())) return
 
-    const { slug, body } = splitSlug(r.text)
-    const thin = checkThin(body, contract)
+    const split = splitSlug(r.text)
+    const slug = split.slug
+    // 協調契約由 mod 原樣附上，不經模型：fork 自己寫的那段一律丟掉
+    const body = [dropSection(split.body, CONTRACT).trim(), ...(contract !== '' ? [`## ${CONTRACT}\n${contract}`] : [])].join('\n\n')
+    const thin = checkThin(body)
     const stamp = formatStamp(await $.clock.now())
     const dir = `${root}/handoff`
-    const path = `${dir}/${stamp}-${slug}.md`
+    // 檔名帶來源 session 與批次編號：同一秒、同 slug 的兩批（或共用 git-common-dir 的兩個 session）不會互相覆寫
+    const path = `${dir}/${stamp}-${slug}-${source.id.slice(0, 8)}-${gen}.md`
     const header = [
       `讀 ${path} 並依其接續執行；先確認 git 狀態與下一步再動手。`,
       `- 時間戳：${stamp}`,
@@ -460,6 +501,7 @@ async function prepare($: EngineInterface, gen: number) {
       `- 來源：branch \`${git.branch || '（非 git）'}\` · cwd \`${cwd}\` · 前一個 session \`${source.id}\`（ctx ≈${k(tokens)}，由 ctx-relay mod 自動交接）`,
       '- unattended: true',
       '- producer: ctx-relay-mod',
+      ...(work.length > 0 ? [`- 交接時仍在跑（完成通知可能收不到）：${work.join('、')}`] : []),
       ...(thin.length > 0 ? [`- thin: ${thin.join('、')}`] : []),
     ].join('\n')
     const content = `${header}\n\n${body.trim()}\n`
@@ -479,6 +521,7 @@ async function prepare($: EngineInterface, gen: number) {
 
     disarm()
     lastHandoff = { path }
+    ownClear = true
     try {
       await $.command.run({ command: 'clear' })
     } catch (err) {
@@ -487,6 +530,8 @@ async function prepare($: EngineInterface, gen: number) {
       await setAuto($, { phase: 'failed', detail: `/clear 失敗：${String(err)}（交接檔在 ${path}）` })
       $.ui.invalidate('ui.render')
       return
+    } finally {
+      ownClear = false
     }
     // 實際引擎在 /clear 後會把 $.state 歸零；這裡再明確設回 idle，新對話才能再次自動交接
     await setAuto($, { phase: 'idle' })
@@ -564,10 +609,10 @@ function forkPrompt(x: { tokens: number; limits: Limits | null; git: Git; index:
     '## 關鍵細節備忘 —— 精確數字、完整錯誤訊息、絕對路徑、決策理由',
     '## 硬約束（結構化） —— 一個 ```yaml 區塊，固定四鍵 stop_status / unresolved_prerequisite / responsible_authority / admissible_fallback，沒有值寫 none，不得省略鍵',
     '## 指標 —— plan、spec、decisions 等更深檔案的路徑',
+    '規則：「已改／將改檔」與你的對話記憶矛盾時以 git 真相為準，並在「關鍵細節備忘」註明修正。git 只證明檔案與 commit 狀態，證明不了測試或檢查跑過：「已驗證」只寫你在對話裡看過結果的項目，其餘列為缺口。',
     ...(x.contract !== ''
-      ? [`## ${CONTRACT} —— 來源交接檔帶有此欄，必須原樣抄下列內容，不得改寫：`, x.contract]
+      ? ['', `### 來源交接檔的「${CONTRACT}」（mod 會把原文附在交接檔末尾；你不要寫這一欄，其他欄位要遵守它）`, x.contract]
       : []),
-    '規則：「已改／將改檔」「已驗證 vs 驗證缺口」與你的對話記憶矛盾時以 git 真相為準，並在「關鍵細節備忘」註明修正。',
     '',
     '### git 真相（mod 剛剛收集）',
     `branch: ${x.git.branch || '（非 git repo）'}`,
@@ -590,19 +635,13 @@ function splitSlug(text: string): { slug: string; body: string } {
   return { slug, body }
 }
 
-// 照 handoff skill 無人值守分支的機器 gate：缺欄記 thin，不阻擋寫檔。
-// 來源帶協調契約時要原樣續傳：比對時只忽略空白差異
-function checkThin(body: string, contract: string): string[] {
+// 照 handoff skill 無人值守分支的機器 gate：缺欄記 thin，不阻擋寫檔
+function checkThin(body: string): string[] {
   const thin: string[] = FIELDS.filter(f => f !== '硬約束（結構化）' && section(body, f) === '')
   const constraints = section(body, '硬約束（結構化）')
   // 只准行內空白：用 \s 會跨行，把下一行的鍵名當成本鍵的值
   if (constraints === '' || CONSTRAINT_KEYS.some(key => !new RegExp(`^[ \\t]*${key}:[ \\t]*\\S`, 'm').test(constraints))) {
     thin.push('硬約束')
-  }
-  if (contract !== '') {
-    const carried = section(body, CONTRACT)
-    if (carried === '') thin.push(CONTRACT)
-    else if (squash(carried) !== squash(contract)) thin.push(`${CONTRACT}（未原樣續傳）`)
   }
   return thin
 }
@@ -619,6 +658,17 @@ function section(text: string, title: string): string {
   const end = rest.search(/^##\s/m)
   const body = (end === -1 ? rest : rest.slice(0, end)).trim()
   return body.replace(/```\w*/g, '').trim() === '' ? '' : body
+}
+
+// 拿掉每一段「## 標題」（每段到下一個「## 」或結尾）
+function dropSection(text: string, title: string): string {
+  const heading = new RegExp(`^##\\s+${escapeRegExp(title)}\\s*$`, 'm')
+  for (let m = heading.exec(text); m; m = heading.exec(text)) {
+    const rest = text.slice(m.index + m[0].length)
+    const end = rest.search(/^##\s/m)
+    text = text.slice(0, m.index) + (end === -1 ? '' : rest.slice(end))
+  }
+  return text
 }
 
 function resumeText(path: string, slug: string): string {
@@ -671,11 +721,6 @@ function formatStamp(ms: number): string {
   const d = new Date(ms)
   const p = (n: number) => String(n).padStart(2, '0')
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
-}
-
-// 只忽略行尾空白與空行，保留縮排和換行（契約可能含 YAML）
-function squash(s: string): string {
-  return s.split('\n').map(line => line.trimEnd()).filter(line => line !== '').join('\n')
 }
 
 function escapeRegExp(s: string): string {

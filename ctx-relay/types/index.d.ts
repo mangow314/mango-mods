@@ -1,11 +1,12 @@
 // 一筆主線回合結束時的讀數
-export type Reading = { tokens: number; percent: number; costUsd: number }
+export type Reading = { tokens: number; costUsd: number }
 
 // 上一個主線回合的收據
 export type Receipt = { deltaTokens: number; deltaCost: number; durationMs: number; cachePct: number | null }
 
-// 門檻（token 數）：fuse＝引擎回報的壓縮點；handoff 來源 auto＝壓縮點 85%、config＝handoffTokens、capped＝設定值超過 auto 改用 auto
-export type Limits = { window: number; fuse: number; nudge: number; handoff: number; source: 'auto' | 'config' | 'capped' }
+// 門檻（token 數）：fuse＝引擎回報的壓縮點；handoff 來源 auto＝壓縮點 85%、config＝handoffTokens、capped＝設定值超過 auto 改用 auto；
+// cap＝有背景工作時延後的上限（交接線與壓縮點的中點）
+export type Limits = { window: number; fuse: number; nudge: number; handoff: number; cap: number; source: 'auto' | 'config' | 'capped' }
 
 // 自動交接狀態機：idle →（deferred ⇄）countdown → preparing → 切換；failed／cancelled／done 為本對話終態。
 // $.state 在 /clear 後歸零，所以新對話一律從 idle 開始。
@@ -18,7 +19,6 @@ declare module 'claude-code' {
       readings: Reading[]
       receipt: Receipt | null
       limits: Limits | null
-      startedAt: number
       auto: Auto
     }
   }
