@@ -5,6 +5,7 @@ import type { Step } from '../types'
 
 // your-turn：主對話每輪結束時，從最後一則回覆（turn.complete 的 answer）抽出要你親手跑的指令：
 // 程式碼區塊裡 sudo 開頭的行（行尾 \ 接下一行）、`! <cmd>`（行內 code 或區塊裡的行）。
+// 清單照回覆裡出現的順序編號，不重排；連續在同一處跑的指令同一框，換地方跑就開新框。
 // 抽到指令就重算清單、打開對話旁的 pane（主動打開：終端機 ≥144 欄才畫，你用 /your-turn 開過一次後降到 110 欄；
 // 沒畫出來就跳 toast 提示打 /your-turn；提示框是空的才拿得到焦點）。
 // pane 有焦點時按數字鍵勾完成；全部勾完出現「回報」，按下替你送出「N/N 完成了」。mod 只整理清單，不代跑任何指令。
@@ -14,10 +15,10 @@ const TITLE = '要你跑的指令'
 // Button 的 hotkey 只收一個數字：前 9 條有數字鍵，第 10 條起只能用滑鼠點
 const MAX_KEYS = 9
 
-// TUI 面板樣式（學 lazygit／btop）：每組一個圓角框，標題嵌在上框線；底部是進度條加 lazygit 式按鍵列。
+// TUI 面板樣式（學 lazygit／btop）：連續在同一處跑的指令一個圓角框，標題嵌在上框線；底部是進度條加 lazygit 式按鍵列。
 // 框線自己用 Text 畫：Box 的 border 會蓋在子元素上面，標題疊不上去（2026-10-05 實測）
 // 配色和終端機一致，用 Gruvbox Dark Hard（morhetz/gruvbox）的 bright 色：黃＝在終端機跑、水綠＝在提示框打、綠＝完成。
-// 組裡還有沒做完的指令時框線用該組顏色，全做完變深灰；做完的指令刪除線＋淡色
+// 框裡還有沒做完的指令時框線用該組顏色，全做完變深灰；做完的指令刪除線＋淡色
 const YELLOW = '#fabd2f'
 const AQUA = '#8ec07c'
 const GREEN = '#b8bb26'
@@ -65,9 +66,8 @@ export const register: Register = on => {
     if (cmds.length === 0) {
       return result
     }
-    // 照分組排：編號就是畫面由上而下的順序，同組內照回覆裡出現的順序
-    const ordered = GROUPS.flatMap(g => cmds.filter(g.has))
-    await update($, stepsAtom, () => ordered.map(cmd => ({ cmd, isDone: false })))
+    // 照回覆裡出現的順序編號，不按分組重排：前後常有依賴（先裝套件才能啟動服務）
+    await update($, stepsAtom, () => cmds.map(cmd => ({ cmd, isDone: false })))
     try {
       const opened = await $.ui.open({ id: PANE, title: TITLE, focus: true })
       if (!opened.isPlaced) $.ui.toast(`your-turn：${cmds.length} 條要你親手跑的指令，終端機太窄沒畫出來，打 /your-turn 打開`, { timeoutMs: 8000 })
@@ -116,14 +116,20 @@ export const register: Register = on => {
         </Box>
       )
     }
-    // 每組一個圓角框，上方空一行，標題嵌在上框線；組裡還有沒做完的指令時框線用該組顏色。沒有指令的組不畫
-    const groups = GROUPS.flatMap(g => {
-      const members = steps.flatMap((s, i) => (g.has(s.cmd) ? [{ s, i }] : []))
-      if (members.length === 0) return []
+    // 照清單順序切框：連續在同一處跑的指令放同一框，換地方跑就開新框，所以同一組可能出現兩個框。
+    // 每框上方空一行，標題嵌在上框線；框裡還有沒做完的指令時框線用該組顏色
+    const runs: { g: (typeof GROUPS)[number]; members: { s: Step; i: number }[] }[] = []
+    steps.forEach((s, i) => {
+      const g = GROUPS.find(x => x.has(s.cmd)) ?? GROUPS[0]
+      const last = runs.at(-1)
+      if (last?.g === g) last.members.push({ s, i })
+      else runs.push({ g, members: [{ s, i }] })
+    })
+    const groups = runs.map(({ g, members }, n) => {
       const frame = members.some(m => !m.s.isDone) ? g.color : DARK_GRAY
       const title = ` ${g.icon} ${g.title} `
-      return [
-        <Box flexDirection="column" marginTop={1}>
+      return (
+        <Box key={`box-${n}`} flexDirection="column" marginTop={1}>
           <Text>
             <Text color={frame}>{'╭─'}</Text>
             <Text color={g.color} bold>{title}</Text>
@@ -131,8 +137,8 @@ export const register: Register = on => {
           </Text>
           {members.map(m => row(m.s, m.i, g.color, frame))}
           <Text color={frame}>{`╰${'─'.repeat(Math.max(0, width - 2))}╯`}</Text>
-        </Box>,
-      ]
+        </Box>
+      )
     })
     // 進度條跟著 pane 寬度縮，最長 16 格
     const track = Math.max(4, Math.min(TRACK_MAX, width - FOOT_FIXED))
@@ -167,7 +173,8 @@ export const register: Register = on => {
   })
 }
 
-// 回覆裡要你親手跑的指令，照出現順序、去重複
+// 回覆裡要你親手跑的指令，照出現順序。同一條在後面的步驟再出現就再列一次（例如最後再 sudo -k 一次）；
+// 緊接著重複的只留一條（「打 `! whoami`，看 `! whoami` 印出誰」）
 function extractCommands(text: string): string[] {
   const cmds: string[] = []
   let inBlock = false
@@ -202,7 +209,7 @@ function extractCommands(text: string): string[] {
       if (!isPlaceholder(cmd)) cmds.push(cmd)
     }
   }
-  return [...new Set(cmds)]
+  return cmds.filter((cmd, i) => cmd !== cmds[i - 1])
 }
 
 // 說明用的佔位寫法（`! <cmd>`）不是真的指令；sudo 區塊裡的 <佔位> 仍算（要你填好再跑）

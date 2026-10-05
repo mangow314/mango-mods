@@ -63,7 +63,7 @@ async function view(ui: Pane) {
 
 const TWO = ['```bash', 'sudo pacman -S foo', 'sudo systemctl enable --now foo.service', '```'].join('\n')
 
-test('抽指令：sudo 區塊每行一條（$ 前綴、行尾 \\ 續行）、! 指令（行內與區塊）；一般指令與 ! <佔位> 不算；照「終端機／提示框」分組；打開 pane 並要焦點', async ($, on) => {
+test('抽指令：sudo 區塊每行一條（$ 前綴、行尾 \\ 續行）、! 指令（行內與區塊）；一般指令與 ! <佔位> 不算；照回覆順序編號，換地方跑就開新框；打開 pane 並要焦點', async ($, on) => {
   const w = world(on)
   await reply($, [
     '先在提示框打 `! whoami` 確認身分，再裝套件：',
@@ -80,21 +80,45 @@ test('抽指令：sudo 區塊每行一條（$ 前綴、行尾 \\ 續行）、! �
     '```',
   ].join('\n'))
   expect(w.opens).toEqual([{ id: 'your-turn', focus: true }])
-  const v = await view(await mount($))
+  const ui = await mount($)
+  const v = await view(ui)
   expect(v.text).toContain('your-turn  6 條指令待你親手跑')
-  // sudo 一組在前、! 一組在後，編號照畫面順序
+  // 編號照回覆順序，不按分組重排
   expect(v.rows).toEqual([
+    '○ ! whoami',
     '○ $ sudo pacman -S foo',
     '○ $ sudo systemctl enable --now foo.service',
     '○ $ sudo cp a.conf /etc/a.conf',
-    '○ ! whoami',
     '○ ! claude plugin list',
     '○ ! gcloud auth login',
   ])
-  expect(v.text.indexOf('在終端機跑（要密碼）')).toBeLessThan(v.text.indexOf('在提示框打'))
+  // 連續在同一處跑的同一框：提示框（1）、終端機（2–4）、提示框（5–6）三個框
+  expect(v.borders).toEqual(['#8ec07c', '#fabd2f', '#8ec07c'])
   // 框線右緣對齊：每列加上引擎畫的「1: 」3 欄、每條下框線，都剛好 pane 寬 60 欄
   expect(v.lines.map(l => l.length + 3)).toEqual([60, 60, 60, 60, 60, 60])
-  expect(v.bottoms.map(b => b.length)).toEqual([60, 60])
+  expect(v.bottoms.map(b => b.length)).toEqual([60, 60, 60])
+  // 只有勾完的那框變深灰，同組的另一框維持原色
+  for (const key of ['step-2', 'step-3', 'step-4']) await ui.press({ key })
+  expect((await view(ui)).borders).toEqual(['#8ec07c', '#504945', '#8ec07c'])
+})
+
+test('同一條指令在後面的步驟再出現就再列一次；緊接著重複提到的只列一次', async ($, on) => {
+  world(on)
+  const ui = await mount($)
+  await reply($, [
+    '先在提示框打 `! whoami`，看 `! whoami` 印出誰，再跑：',
+    '```bash',
+    'sudo -k',
+    'sudo true',
+    '```',
+    '接著打 `! date`，最後再清一次：',
+    '```bash',
+    'sudo -k',
+    '```',
+  ].join('\n'))
+  const v = await view(ui)
+  expect(v.rows).toEqual(['○ ! whoami', '○ $ sudo -k', '○ $ sudo true', '○ ! date', '○ $ sudo -k'])
+  expect(v.borders).toEqual(['#8ec07c', '#fabd2f', '#8ec07c', '#fabd2f'])
 })
 
 test('數字鍵勾選、再按取消；全部勾完出現回報，按下送出「N/N 完成了」', async ($, on) => {

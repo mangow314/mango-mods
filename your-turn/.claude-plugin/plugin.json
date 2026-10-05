@@ -1,6 +1,6 @@
 {
   "name": "your-turn",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "把最後一則回覆裡要你親手跑的指令（程式碼區塊裡 sudo 開頭的行、! <cmd>）列成對話旁的清單；按數字鍵勾完成，全部完成後按回報送出「N/N 完成了」。只整理，不代跑",
   "author": { "name": "Mango" },
   "types": "./types/index.d.ts"
