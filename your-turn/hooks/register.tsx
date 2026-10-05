@@ -10,7 +10,7 @@ import type { Step } from '../types'
 // 每段指令（一個程式碼區塊，或一行裡的行內 `! cmd`）上方帶回覆裡的前一句當說明（等多久、等什麼再跑）。
 // 抽到指令就重算清單、打開對話旁的 pane（主動打開：終端機 ≥144 欄才畫，你用 /your-turn 開過一次後降到 110 欄；
 // 沒畫出來就跳 toast 提示打 /your-turn；提示框是空的才拿得到焦點）。
-// pane 有焦點時按數字鍵勾完成；全部勾完出現「回報」，按下替你送出「N/N 完成了」。mod 只整理清單，不代跑任何指令。
+// pane 有焦點時按數字鍵勾完成、按 q 關掉；全部勾完出現「回報」，按下替你送出「N/N 完成了」。mod 只整理清單，不代跑任何指令。
 
 const PANE = 'your-turn'
 const TITLE = '要你跑的指令'
@@ -84,6 +84,8 @@ export const register: Register = on => {
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Button, Text } = $.ui.resolve(e)
     const steps = await read($, stepsAtom)
+    // 和 away-receipt 一樣按 q 關；引擎內建的 ctrl+x x 要按兩個鍵。清單空的時候也要有，不然 q 沒作用
+    const close = <Button key="close" plain hotkey="q" label="關閉" onPress={() => $.ui.close({ id: PANE })} />
     // 標題是一般文字，不用色塊
     const header = (
       <Text>
@@ -92,7 +94,12 @@ export const register: Register = on => {
       </Text>
     )
     if (steps.length === 0) {
-      return <Box flexDirection="column">{header}</Box>
+      return (
+        <Box flexDirection="column">
+          {header}
+          <Box marginTop={1}>{close}</Box>
+        </Box>
+      )
     }
     const width = e.props.bodyColumns
     const room = Math.max(10, width - ROW_FIXED)
@@ -178,7 +185,11 @@ export const register: Register = on => {
             <Text color={DARK_GRAY}>{TRACK.repeat(track - filled)}</Text>
             <Text color={isAllDone ? GREEN : GRAY}>{` ${done}/${steps.length}`}</Text>
           </Text>
-          <Text>{keys}</Text>
+          {/* 關閉鈕接在按鍵列尾：引擎畫成「q: 關閉」 */}
+          <Box flexDirection="row">
+            <Text>{keys}{sep}</Text>
+            {close}
+          </Box>
         </Box>
         {isAllDone && (
           <Button key="report" variant="primary" label={`回報 ${steps.length}/${steps.length} 完成`} onPress={() => report($, steps.length)} />

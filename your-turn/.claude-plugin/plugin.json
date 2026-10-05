@@ -1,6 +1,6 @@
 {
   "name": "your-turn",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "把最後一則回覆裡要你親手跑的指令（程式碼區塊裡 sudo 開頭的行、! <cmd>、前一句叫你自己跑的 shell 區塊）列成對話旁的清單，每段帶上回覆裡的前一句說明；按數字鍵勾完成，全部完成後按回報送出「N/N 完成了」。只整理，不代跑",
   "author": { "name": "Mango" },
   "license": "MIT",

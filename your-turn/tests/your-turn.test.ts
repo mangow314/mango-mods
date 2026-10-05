@@ -3,16 +3,20 @@ import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 // 測試裡的引擎：記下打開 pane、toast 與替使用者送出的訊息；placed＝false 模擬終端機太窄、pane 沒畫出來
-type World = { opens: { id: string; focus?: true }[]; toasts: string[]; submitted: string[]; placed: boolean }
+type World = { opens: { id: string; focus?: true }[]; closes: string[]; toasts: string[]; submitted: string[]; placed: boolean }
 
 function world(on: On): World {
-  const w: World = { opens: [], toasts: [], submitted: [], placed: true }
+  const w: World = { opens: [], closes: [], toasts: [], submitted: [], placed: true }
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('command.register', (_$, e) => ({ value: { command: e.name } }))
   on('turn.complete', (_$, e) => ({ text: e.answer }))
   on('ui.open', (_$, e) => {
     w.opens.push({ id: e.id, focus: e.focus })
     return { value: w.placed ? { isPlaced: true as const } : { isPlaced: false as const, reason: 'below 144 columns' } }
+  })
+  on('ui.close', (_$, e) => {
+    w.closes.push(e.id)
+    return { value: undefined }
   })
   on('ui.toast', (_$, e) => {
     w.toasts.push(e.text)
@@ -234,4 +238,19 @@ test('指令太長就截斷；還沒有指令時 pane 顯示提示', async ($, o
   await reply($, `\`\`\`\n${long}\n\`\`\``)
   // 40 欄扣掉每列固定的 11 欄（框線與內距 4 欄、編號與 ○ 與 $ 7 欄），指令剩 29 欄
   expect((await view(ui)).rows[0]).toBe(`○ $ ${long.slice(0, 28)}…`)
+})
+
+test('按 q 關掉 pane：有指令時接在按鍵列尾，清單空的時候也有', async ($, on) => {
+  const w = world(on)
+  const ui = await mount($)
+  const close = async () => {
+    const btn = (await ui.findAll({ type: 'Button' })).find(b => b.props.label === '關閉')
+    expect(btn?.props.hotkey).toBe('q')
+    await ui.press({ key: 'close' })
+  }
+  await close()
+  await reply($, TWO)
+  expect((await view(ui)).text).toContain('1–2 勾選 │ 再按一次 取消 │ ')
+  await close()
+  expect(w.closes).toEqual(['your-turn', 'your-turn'])
 })
