@@ -42,14 +42,21 @@ async function mount($: Engine, bodyColumns = 60) {
 
 type Pane = Awaited<ReturnType<typeof mount>>
 
-// labels＝按鈕文字（每列的 ○／✔ 與回報）；rows＝每列畫出的字（○ $ 指令）；struck＝加了刪除線的指令
+// labels＝按鈕文字（每列的 ○／✔ 與回報）；rows＝每列框線內的字（○ $ 指令）；lines＝每列連框線的原樣；
+// struck＝加了刪除線的指令；filled＝進度條塗綠的格數；bottoms＝各組下框線；borders＝各組框線顏色
 async function view(ui: Pane) {
   const labels = (await ui.findAll({ type: 'Button' })).map(b => String(b.props.label))
   const texts = await ui.findAll({ type: 'Text' })
+  const lines = (await ui.findAll({ type: 'Box' })).filter(b => b.key?.startsWith('row-')).map(b => b.text)
+  const bottoms = texts.filter(t => t.text.startsWith('╰'))
   return {
     labels,
-    rows: (await ui.findAll({ type: 'Box' })).filter(b => b.key?.startsWith('row-')).map(b => b.text),
+    lines,
+    rows: lines.map(l => l.replace(/^│ /, '').replace(/ *│$/, '')),
     struck: texts.filter(t => t.props.strikethrough === true).map(t => t.text),
+    filled: texts.find(t => t.props.color === '#b8bb26' && /^━+$/.test(t.text))?.text.length ?? 0,
+    bottoms: bottoms.map(t => t.text),
+    borders: bottoms.map(t => t.props.color),
     text: texts.map(t => t.text).join(' '),
   }
 }
@@ -74,8 +81,7 @@ test('抽指令：sudo 區塊每行一條（$ 前綴、行尾 \\ 續行）、! �
   ].join('\n'))
   expect(w.opens).toEqual([{ id: 'your-turn', focus: true }])
   const v = await view(await mount($))
-  // powerline：段與段之間是 （U+E0B0）
-  expect(v.text).toContain(' your-turn  6 條指令待你親手跑 ')
+  expect(v.text).toContain('your-turn  6 條指令待你親手跑')
   // sudo 一組在前、! 一組在後，編號照畫面順序
   expect(v.rows).toEqual([
     '○ $ sudo pacman -S foo',
@@ -85,7 +91,10 @@ test('抽指令：sudo 區塊每行一條（$ 前綴、行尾 \\ 續行）、! �
     '○ ! claude plugin list',
     '○ ! gcloud auth login',
   ])
-  expect(v.text.indexOf(' 在終端機跑（要密碼）')).toBeLessThan(v.text.indexOf(' 在提示框打'))
+  expect(v.text.indexOf('在終端機跑（要密碼）')).toBeLessThan(v.text.indexOf('在提示框打'))
+  // 框線右緣對齊：每列加上引擎畫的「1: 」3 欄、每條下框線，都剛好 pane 寬 60 欄
+  expect(v.lines.map(l => l.length + 3)).toEqual([60, 60, 60, 60, 60, 60])
+  expect(v.bottoms.map(b => b.length)).toEqual([60, 60])
 })
 
 test('數字鍵勾選、再按取消；全部勾完出現回報，按下送出「N/N 完成了」', async ($, on) => {
@@ -93,14 +102,25 @@ test('數字鍵勾選、再按取消；全部勾完出現回報，按下送出�
   await reply($, TWO)
   const ui = await mount($)
   expect((await view(ui)).labels).not.toContain('回報 2/2 完成')
-  expect((await view(ui)).text).toContain(' 0/2 完成  按 1–2 勾選')
+  const start = await view(ui)
+  expect(start.text).toContain('進度 ')
+  expect(start.text).toContain(' 0/2')
+  expect(start.text).toContain('1–2 勾選 │ 再按一次 取消')
+  // 組裡還有沒做完的：框線用該組顏色（終端機組＝黃）
+  expect(start.borders).toEqual(['#fabd2f'])
   await ui.press({ key: 'step-1' })
+  // 進度條：60 欄時 16 格，勾了 1/2 塗 8 格
+  expect((await view(ui)).filled).toBe(8)
   await ui.press({ key: 'step-2' })
   const done = await view(ui)
   expect(done.rows.map(r => r[0])).toEqual(['✔', '✔'])
   expect(done.struck).toEqual(['sudo pacman -S foo', 'sudo systemctl enable --now foo.service'])
   expect(done.labels).toContain('回報 2/2 完成')
-  expect(done.text).toContain(' 2/2 完成  全部完成')
+  expect(done.text).toContain(' 2/2')
+  expect(done.text).toContain('回報 告訴 Claude 全部完成')
+  expect(done.filled).toBe(16)
+  // 全做完：框線變深灰
+  expect(done.borders).toEqual(['#504945'])
   await ui.press({ key: 'step-2' })
   expect((await view(ui)).labels).not.toContain('回報 2/2 完成')
   await ui.press({ key: 'step-2' })
@@ -143,6 +163,6 @@ test('指令太長就截斷；還沒有指令時 pane 顯示提示', async ($, o
   expect((await view(ui)).text).toContain('沒有要你跑的指令')
   const long = `sudo pacman -S ${'pkg '.repeat(30)}`.trim()
   await reply($, `\`\`\`\n${long}\n\`\`\``)
-  // 40 欄扣掉每列固定的 7 欄，指令剩 33 欄
-  expect((await view(ui)).rows[0]).toBe(`○ $ ${long.slice(0, 32)}…`)
+  // 40 欄扣掉每列固定的 11 欄（框線與內距 4 欄、編號與 ○ 與 $ 7 欄），指令剩 29 欄
+  expect((await view(ui)).rows[0]).toBe(`○ $ ${long.slice(0, 28)}…`)
 })
