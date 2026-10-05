@@ -4,17 +4,17 @@ import type { AgentStatus, On, SessionContextBreakdown } from 'claude-code'
 
 const ROOT = '/repo/.git/harness'
 
-// 8 欄位齊全、硬約束四鍵有值的 fork 輸出
+// 8 欄齊全、硬約束四鍵有值的 fork 輸出：fork 只寫 ASCII 鍵名分段，中文標題由 mod 補
 const GOOD = [
   'SLUG: demo-task',
-  '## 目標 + 最新指令', '做 demo',
-  '## 已改／將改檔', 'a.ts',
-  '## 已驗證 vs 驗證缺口', '單元測試過；e2e 未跑',
-  '## dirty 無關項', '無',
-  '## 下一步具體動作', '跑 e2e',
-  '## 關鍵細節備忘', '門檻 433840',
-  '## 硬約束（結構化）', '```yaml', 'stop_status: 不 commit', 'unresolved_prerequisite: none', 'responsible_authority: 使用者', 'admissible_fallback: none', '```',
-  '## 指標', '~/.claude/plans/x.md',
+  '=== GOAL ===', '做 demo',
+  '=== FILES ===', 'a.ts',
+  '=== VERIFIED ===', '單元測試過；e2e 未跑',
+  '=== DIRTY ===', '無',
+  '=== NEXT ===', '跑 e2e',
+  '=== NOTES ===', '門檻 433840',
+  '=== CONSTRAINTS ===', '```yaml', 'stop_status: 不 commit', 'unresolved_prerequisite: none', 'responsible_authority: 使用者', 'admissible_fallback: none', '```',
+  '=== POINTERS ===', '~/.claude/plans/x.md',
 ].join('\n')
 
 // 測試裡的「引擎」：usage、git、檔案、fork、clear 都由這裡回答
@@ -266,6 +266,9 @@ test('越過交接線：倒數 60 秒後 fork 一次、寫交接檔（檔名帶�
   expect(content).toContain('- unattended: true')
   expect(content).toContain('- producer: ctx-relay-mod')
   expect(content).not.toContain('thin:')
+  expect(content).toContain('## 目標 + 最新指令\n做 demo\n\n## 已改／將改檔\na.ts')
+  expect(content).toContain('## 硬約束（結構化）\n```yaml\nstop_status: 不 commit')
+  expect(content).not.toContain('===')
   expect(w.cleared).toBe(1)
   expect(w.submitted).toHaveLength(1)
   expect(w.submitted[0]).toContain(path)
@@ -285,6 +288,42 @@ test('fork 指示：git 只能修正檔案與 commit 狀態，「已驗證」只
   expect(w.forkPrompts[0]).toContain('git 只證明檔案與 commit 狀態，證明不了測試或檢查跑過')
   expect(w.forkPrompts[0]).toContain('「已驗證」只寫你在對話裡看過結果的項目，其餘列為缺口')
   expect(w.forkPrompts[0]).not.toContain('「已驗證 vs 驗證缺口」與你的對話記憶矛盾時以 git 真相為準')
+  for (const key of ['GOAL', 'FILES', 'VERIFIED', 'DIRTY', 'NEXT', 'NOTES', 'CONSTRAINTS', 'POINTERS']) {
+    expect(w.forkPrompts[0]).toContain(`\`=== ${key} ===\``)
+  }
+  expect(w.forkPrompts[0]).toContain('你不要自己寫 `## ` 標題')
+  expect(w.forkPrompts[0]).not.toMatch(/^## /m)
+})
+
+test('fork 輸出沒有任何分段標記（例如照舊寫 ## 標題）：記失敗、不寫檔、不 clear', async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world($, on, { forkText: 'SLUG: demo-task\n## 目標 + 最新指令\n做 demo\n## 指標\nx\n' })
+  await start($)
+  await turn($, w, 450_000)
+  await clock.advance(60_000)
+  await clock.settle()
+  expect(handoffFiles(w)).toHaveLength(0)
+  expect(w.cleared).toBe(0)
+  expect((await band($)).text).toContain('自動交接失敗：產生的交接內容沒有任何認得的「=== 鍵名 ===」分段標記')
+})
+
+test('fork 分段順序亂、內文帶 ## 標題：mod 照固定順序寫八個標題，內文的 ## 降成 ###', async ($, on) => {
+  const clock = mock.clock(on)
+  const lines = GOOD.split('\n')
+  // POINTERS 搬到最前面；VERIFIED 內文照舊習慣多寫一行中文 ## 標題
+  const shuffled = [lines[0], '=== POINTERS ===', '~/.claude/plans/x.md', ...lines.slice(1, -2)].join('\n')
+    .replace('=== VERIFIED ===\n', '=== VERIFIED ===\n## 已驗證 vs 驗證缺口\n')
+  const w = world($, on, { forkText: shuffled })
+  await start($)
+  await turn($, w, 450_000)
+  await clock.advance(60_000)
+  await clock.settle()
+  const [, content] = handoffFiles(w)[0] ?? ['', '']
+  expect(content.match(/^## /gm)).toHaveLength(8)
+  expect(content.indexOf('## 目標 + 最新指令')).toBeLessThan(content.indexOf('## 指標'))
+  expect(content).toContain('## 已驗證 vs 驗證缺口\n### 已驗證 vs 驗證缺口\n單元測試過；e2e 未跑')
+  expect(content).toContain('## 指標\n~/.claude/plans/x.md')
+  expect(content).not.toContain('thin:')
 })
 
 test('子 agent 回合與中斷回合不觸發', async ($, on) => {
@@ -635,12 +674,12 @@ test('來源交接檔帶協調契約：fork 沒寫，mod 照原文附上', async
   expect(content).not.toContain('thin:')
 })
 
-test('fork 改寫了協調契約（兩段）：mod 丟掉 fork 的每個版本，只留原文', async ($, on) => {
+test('fork 改寫了協調契約（CONTRACT 分段＋內文裡的 ## 協調契約）：分段丟掉、內文降級，只有 mod 附的原文是二級標題', async ($, on) => {
   const clock = mock.clock(on)
   const source = `${ROOT}/handoff/20261003-120000-prev.md`
   const w = world($, on, {
     messages: [{ role: 'user', text: `讀 ${source} 並依其接續執行。` }],
-    forkText: `${GOOD.replace('## 指標', '## 協調契約\n你＝coordinator；可以 push\n\n## 指標')}\n\n## 協調契約\n可以 force push\n`,
+    forkText: `${GOOD.replace('=== POINTERS ===', '=== CONTRACT ===\n你＝coordinator；可以 push\n\n=== POINTERS ===')}\n\n## 協調契約\n可以 force push\n`,
   })
   w.files.set(source, `讀 ${source}\n\n## 協調契約\n你＝coordinator；不 push\n`)
   await start($)
@@ -651,8 +690,20 @@ test('fork 改寫了協調契約（兩段）：mod 丟掉 fork 的每個版本�
   expect(content).not.toContain('可以 push')
   expect(content).not.toContain('可以 force push')
   expect(content.match(/^## 協調契約$/gm)).toHaveLength(1)
-  expect(content).toContain('## 協調契約\n你＝coordinator；不 push')
-  expect(content).toContain('## 指標')
+  expect(content).toContain('## 指標\n~/.claude/plans/x.md\n\n## 協調契約\n你＝coordinator；不 push')
+})
+
+test('fork 鍵名打錯（=== VERIFED ===）：欄位記 thin，內文不丟，附在關鍵細節備忘末尾並標明', async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world($, on, { forkText: GOOD.replace('=== VERIFIED ===', '=== VERIFED ===') })
+  await start($)
+  await turn($, w, 450_000)
+  await clock.advance(60_000)
+  await clock.settle()
+  const [, content] = handoffFiles(w)[0] ?? ['', '']
+  expect(content).toContain('- thin: 已驗證 vs 驗證缺口')
+  expect(content).toContain('## 關鍵細節備忘\n門檻 433840\n\n（fork 寫了未認得的分段 `=== VERIFED ===`，原文照附）\n單元測試過；e2e 未跑\n\n## 硬約束（結構化）')
+  expect(w.cleared).toBe(1)
 })
 
 test('剩幾輪：偶數筆增量取中間兩值平均；第一輪也有收據', async ($, on) => {

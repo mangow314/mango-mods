@@ -21,8 +21,19 @@ const FORK_TIMEOUT_MS = 180_000
 const BARS = '▁▂▃▄▅▆▇█'
 const TAG = '[ctx-relay]'
 
-// handoff skill（~/.claude/skills/handoff/SKILL.md）的 8 欄位，標題一字不改
-const FIELDS = ['目標 + 最新指令', '已改／將改檔', '已驗證 vs 驗證缺口', 'dirty 無關項', '下一步具體動作', '關鍵細節備忘', '硬約束（結構化）', '指標'] as const
+// handoff skill（~/.claude/skills/handoff/SKILL.md）的 8 欄位。中文標題由 mod 寫死，fork 只用左欄的 ASCII 鍵名分段填內文：
+// 模型沒有機會把標題打錯（2026-10-05 實例：標題一個形近字就過不了讀回檢查，整次交接中止）
+const SLOTS = [
+  ['GOAL', '目標 + 最新指令'],
+  ['FILES', '已改／將改檔'],
+  ['VERIFIED', '已驗證 vs 驗證缺口'],
+  ['DIRTY', 'dirty 無關項'],
+  ['NEXT', '下一步具體動作'],
+  ['NOTES', '關鍵細節備忘'],
+  ['CONSTRAINTS', '硬約束（結構化）'],
+  ['POINTERS', '指標'],
+] as const
+const FIELDS = SLOTS.map(([, title]) => title)
 const CONTRACT = '協調契約'
 const CONSTRAINT_KEYS = ['stop_status', 'unresolved_prerequisite', 'responsible_authority', 'admissible_fallback'] as const
 
@@ -487,8 +498,10 @@ async function prepare($: EngineInterface, gen: number) {
 
     const split = splitSlug(r.text)
     const slug = split.slug
-    // 協調契約由 mod 原樣附上，不經模型：fork 自己寫的那段一律丟掉
-    const body = [dropSection(split.body, CONTRACT).trim(), ...(contract !== '' ? [`## ${CONTRACT}\n${contract}`] : [])].join('\n\n')
+    const slots = parseSlots(split.body)
+    if (!SLOTS.some(([key]) => slots.has(key))) return await fail('產生的交接內容沒有任何認得的「=== 鍵名 ===」分段標記')
+    // 協調契約由 mod 原樣附上，不經模型：fork 寫的 CONTRACT 分段與內文裡的「## 協調契約」段都丟掉
+    const body = assemble(slots, contract)
     const thin = checkThin(body)
     const stamp = formatStamp(await $.clock.now())
     const dir = `${root}/handoff`
@@ -598,17 +611,17 @@ async function findSourceHandoff($: EngineInterface, root: string): Promise<stri
 function forkPrompt(x: { tokens: number; limits: Limits | null; git: Git; index: string; contract: string }): string {
   const line = x.limits ? `context 已達 ${k(x.tokens)}，越過自動交接線 ${k(x.limits.handoff)}（壓縮點 ${k(x.limits.fuse)}）` : 'context 已越過自動交接線'
   return [
-    `${TAG} ${line}。使用者不在場，這是無人值守交接：請為接手這段工作的新對話寫交接檔本體。`,
+    `${TAG} ${line}。使用者不在場，這是無人值守交接：請為接手這段工作的新對話寫交接檔內容。`,
     '只輸出交接檔內容：不要呼叫工具、不要寒暄、不要用 code fence 包住整份。',
-    '第一行寫 `SLUG: <任務的 kebab-case 英文 slug>`，接著依序寫下列二級標題，標題文字一字不改，每欄都要有內容：',
-    '## 目標 + 最新指令 —— 當前任務一句話＋使用者最新意圖（盡量用使用者原話）',
-    '## 已改／將改檔 —— 以下方 git 真相為準，列路徑與改了什麼',
-    '## 已驗證 vs 驗證缺口 —— 跑過什麼（精確指令與結果）、還缺什麼；缺口不得寫成已完成',
-    '## dirty 無關項 —— 與本任務無關的 worktree 變更，提醒勿誤 add；沒有寫「無」',
-    '## 下一步具體動作 —— 新對話第一步做什麼',
-    '## 關鍵細節備忘 —— 精確數字、完整錯誤訊息、絕對路徑、決策理由',
-    '## 硬約束（結構化） —— 一個 ```yaml 區塊，固定四鍵 stop_status / unresolved_prerequisite / responsible_authority / admissible_fallback，沒有值寫 none，不得省略鍵',
-    '## 指標 —— plan、spec、decisions 等更深檔案的路徑',
+    '第一行寫 `SLUG: <任務的 kebab-case 英文 slug>`，接著依序寫八欄：每欄以獨立一行 `=== 鍵名 ===` 開頭（鍵名照抄、該行不寫別的字），下一行起寫內文，每欄都要有內容。中文標題由 mod 補上，你不要自己寫 `## ` 標題：',
+    '- `=== GOAL ===`：目標 + 最新指令 —— 當前任務一句話＋使用者最新意圖（盡量用使用者原話）',
+    '- `=== FILES ===`：已改／將改檔 —— 以下方 git 真相為準，列路徑與改了什麼',
+    '- `=== VERIFIED ===`：已驗證 vs 驗證缺口 —— 跑過什麼（精確指令與結果）、還缺什麼；缺口不得寫成已完成',
+    '- `=== DIRTY ===`：dirty 無關項 —— 與本任務無關的 worktree 變更，提醒勿誤 add；沒有寫「無」',
+    '- `=== NEXT ===`：下一步具體動作 —— 新對話第一步做什麼',
+    '- `=== NOTES ===`：關鍵細節備忘 —— 精確數字、完整錯誤訊息、絕對路徑、決策理由',
+    '- `=== CONSTRAINTS ===`：硬約束（結構化） —— 一個 ```yaml 區塊，固定四鍵 stop_status / unresolved_prerequisite / responsible_authority / admissible_fallback，沒有值寫 none，不得省略鍵',
+    '- `=== POINTERS ===`：指標 —— plan、spec、decisions 等更深檔案的路徑',
     '規則：「已改／將改檔」與你的對話記憶矛盾時以 git 真相為準，並在「關鍵細節備忘」註明修正。git 只證明檔案與 commit 狀態，證明不了測試或檢查跑過：「已驗證」只寫你在對話裡看過結果的項目，其餘列為缺口。',
     ...(x.contract !== ''
       ? ['', `### 來源交接檔的「${CONTRACT}」（mod 會把原文附在交接檔末尾；你不要寫這一欄，其他欄位要遵守它）`, x.contract]
@@ -658,6 +671,35 @@ function section(text: string, title: string): string {
   const end = rest.search(/^##\s/m)
   const body = (end === -1 ? rest : rest.slice(0, end)).trim()
   return body.replace(/```\w*/g, '').trim() === '' ? '' : body
+}
+
+// fork 輸出的「=== 鍵名 ===」分段 → 鍵名→內文（含不認得的鍵，由 assemble 處置）；同一鍵出現兩次就接起來，不丟內容
+function parseSlots(text: string): Map<string, string> {
+  const hits = [...text.matchAll(/^===[ \t]*([A-Z_]+)[ \t]*===[ \t]*$/gm)]
+  const slots = new Map<string, string>()
+  hits.forEach((m, i) => {
+    const key = m[1] ?? ''
+    const start = (m.index ?? 0) + m[0].length
+    const end = hits[i + 1]?.index ?? text.length
+    // 內文裡 fork 自己寫的「## 協調契約」段整段丟掉（契約只能來自 mod 附的原文，連降級留著都會誤導讀的人）；
+    // 其餘「## 」降成「### 」：交接檔的二級標題只能是 mod 寫的，否則 section() 會在那裡截斷、把該欄誤判為空。
+    // 具體情境：剛換格式時模型照舊習慣在 === VERIFIED === 下再寫一行「## 已驗證 vs 驗證缺口」，不降級就會記成假 thin
+    const content = dropSection(text.slice(start, end), CONTRACT).trim().replace(/^##(?=\s)/gm, '###')
+    slots.set(key, [slots.get(key), content].filter(s => s !== undefined && s !== '').join('\n'))
+  })
+  return slots
+}
+
+// 八欄依固定順序組成本體，標題由 mod 寫；缺的欄留空，讓 checkThin 記 thin。
+// fork 寫的 CONTRACT 分段丟掉；其他不認得的鍵（多半是鍵名打錯）內文不丟，照附在「關鍵細節備忘」末尾並標明
+function assemble(slots: Map<string, string>, contract: string): string {
+  const known = new Set<string>(SLOTS.map(([key]) => key))
+  const stray = [...slots].filter(([key]) => !known.has(key) && key !== 'CONTRACT')
+  const notes = [slots.get('NOTES') ?? '', ...stray.map(([key, text]) => `（fork 寫了未認得的分段 \`=== ${key} ===\`，原文照附）\n${text}`)]
+    .filter(s => s !== '').join('\n\n')
+  const parts = SLOTS.map(([key, title]) => `## ${title}\n${key === 'NOTES' ? notes : slots.get(key) ?? ''}`.trimEnd())
+  if (contract !== '') parts.push(`## ${CONTRACT}\n${contract}`)
+  return parts.join('\n\n')
 }
 
 // 拿掉每一段「## 標題」（每段到下一個「## 」或結尾）
