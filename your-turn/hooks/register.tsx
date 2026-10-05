@@ -14,18 +14,24 @@ const TITLE = '要你跑的指令'
 // Button 的 hotkey 只收一個數字：前 9 條有數字鍵，第 10 條起只能用滑鼠點
 const MAX_KEYS = 9
 
-// 終端機樣式：標題像 shell 提示字元、分組標題像 # 註解、指令前有 $ 或 !。
+// powerline 樣式：標題、分組、底部狀態都是色塊段，段與段之間用  接起來；指令列前有 $ 或 !。
 // 用 ctx-relay 沒用到的兩個色盲友善色（Okabe-Ito）：紫紅＝強調、藍綠＝提示字元與完成；做完的指令刪除線＋淡色
 const PURPLE = '#CC79A7'
 const GREEN = '#009E73'
-const LABEL = '#7d8794'
+const SLATE = '#3a3f4b'
+const DARK = '#1d1f21'
+const LIGHT = '#f5f7fa'
+const SEP = '' // Nerd Font powerline 實心右三角
 // 每列：引擎畫的「1: 」3 欄＋○／✔＋空白＋「$ 」2 欄
 const ROW_FIXED = 7
 // 分組：sudo 要密碼，在終端機跑；! 開頭的在 Claude 的提示框打
 const GROUPS = [
-  { title: '# 在終端機跑（要密碼）', has: (cmd: string) => !cmd.startsWith('!') },
-  { title: '# 在提示框打', has: (cmd: string) => cmd.startsWith('!') },
+  { icon: '', title: '在終端機跑（要密碼）', has: (cmd: string) => !cmd.startsWith('!') }, // nf-fa-terminal
+  { icon: '', title: '在提示框打', has: (cmd: string) => cmd.startsWith('!') }, // nf-fa-comment
 ] as const
+
+// powerline 的一段：底色、字色、字
+type Seg = { bg: string; fg: string; text: string }
 
 const stepsAtom = atom({ plugin: 'your-turn', key: 'steps' } as const, [] as Step[])
 
@@ -72,13 +78,19 @@ export const register: Register = on => {
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Button, Text } = $.ui.resolve(e)
     const steps = await read($, stepsAtom)
-    const header = (
+    // 一行 powerline：每段 ` 字 ` 塗底色，段尾的  字色＝這段底色、底色＝下一段底色（最後一段後面不塗底）
+    const powerline = (segs: Seg[]) => (
       <Text>
-        <Text color={PURPLE} bold>your-turn</Text>
-        <Text color={GREEN}>{' ❯ '}</Text>
-        <Text color={LABEL}>{steps.length === 0 ? '沒有要你跑的指令' : `${steps.length} 條指令待你親手跑`}</Text>
+        {segs.flatMap((s, i) => [
+          <Text color={s.fg} backgroundColor={s.bg} bold>{` ${s.text} `}</Text>,
+          <Text color={s.bg} backgroundColor={segs[i + 1]?.bg}>{SEP}</Text>,
+        ])}
       </Text>
     )
+    const header = powerline([
+      { bg: PURPLE, fg: DARK, text: 'your-turn' },
+      { bg: SLATE, fg: LIGHT, text: steps.length === 0 ? '沒有要你跑的指令' : `${steps.length} 條指令待你親手跑` },
+    ])
     if (steps.length === 0) {
       return <Box flexDirection="column">{header}</Box>
     }
@@ -101,10 +113,10 @@ export const register: Register = on => {
         </Box>
       )
     }
-    // 每組一行 # 標題接該組的列；沒有指令的組不畫
+    // 每組一段 powerline 標題接該組的列；沒有指令的組不畫
     const groups = GROUPS.flatMap(g => {
       const members = steps.flatMap((s, i) => (g.has(s.cmd) ? [row(s, i)] : []))
-      return members.length === 0 ? [] : [<Text color={LABEL}>{g.title}</Text>, ...members]
+      return members.length === 0 ? [] : [powerline([{ bg: SLATE, fg: LIGHT, text: `${g.icon} ${g.title}` }]), ...members]
     })
     const hint = isAllDone
       ? '全部完成，按「回報」告訴 Claude'
@@ -113,11 +125,10 @@ export const register: Register = on => {
       <Box flexDirection="column">
         {header}
         {groups}
-        <Text color={LABEL}>
-          {'# '}
-          <Text color={isAllDone ? GREEN : PURPLE} bold>{`${done}/${steps.length}`}</Text>
-          {` 完成 · ${hint}`}
-        </Text>
+        {powerline([
+          { bg: isAllDone ? GREEN : PURPLE, fg: isAllDone ? LIGHT : DARK, text: `${done}/${steps.length} 完成` },
+          { bg: SLATE, fg: LIGHT, text: hint },
+        ])}
         {isAllDone && (
           <Button key="report" variant="primary" label={`回報 ${steps.length}/${steps.length} 完成`} onPress={() => report($, steps.length)} />
         )}

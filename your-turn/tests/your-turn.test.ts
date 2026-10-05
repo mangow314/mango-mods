@@ -74,7 +74,8 @@ test('抽指令：sudo 區塊每行一條（$ 前綴、行尾 \\ 續行）、! �
   ].join('\n'))
   expect(w.opens).toEqual([{ id: 'your-turn', focus: true }])
   const v = await view(await mount($))
-  expect(v.text).toContain('your-turn ❯ 6 條指令待你親手跑')
+  // powerline：段與段之間是 （U+E0B0）
+  expect(v.text).toContain(' your-turn  6 條指令待你親手跑 ')
   // sudo 一組在前、! 一組在後，編號照畫面順序
   expect(v.rows).toEqual([
     '○ $ sudo pacman -S foo',
@@ -84,7 +85,7 @@ test('抽指令：sudo 區塊每行一條（$ 前綴、行尾 \\ 續行）、! �
     '○ ! claude plugin list',
     '○ ! gcloud auth login',
   ])
-  expect(v.text.indexOf('# 在終端機跑（要密碼）')).toBeLessThan(v.text.indexOf('# 在提示框打'))
+  expect(v.text.indexOf(' 在終端機跑（要密碼）')).toBeLessThan(v.text.indexOf(' 在提示框打'))
 })
 
 test('數字鍵勾選、再按取消；全部勾完出現回報，按下送出「N/N 完成了」', async ($, on) => {
@@ -92,14 +93,14 @@ test('數字鍵勾選、再按取消；全部勾完出現回報，按下送出�
   await reply($, TWO)
   const ui = await mount($)
   expect((await view(ui)).labels).not.toContain('回報 2/2 完成')
-  expect((await view(ui)).text).toContain('# 0/2 完成 · 按 1–2 勾選')
+  expect((await view(ui)).text).toContain(' 0/2 完成  按 1–2 勾選')
   await ui.press({ key: 'step-1' })
   await ui.press({ key: 'step-2' })
   const done = await view(ui)
   expect(done.rows.map(r => r[0])).toEqual(['✔', '✔'])
   expect(done.struck).toEqual(['sudo pacman -S foo', 'sudo systemctl enable --now foo.service'])
   expect(done.labels).toContain('回報 2/2 完成')
-  expect(done.text).toContain('# 2/2 完成 · 全部完成')
+  expect(done.text).toContain(' 2/2 完成  全部完成')
   await ui.press({ key: 'step-2' })
   expect((await view(ui)).labels).not.toContain('回報 2/2 完成')
   await ui.press({ key: 'step-2' })
