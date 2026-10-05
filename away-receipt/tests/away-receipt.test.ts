@@ -9,16 +9,24 @@ const MIN = 60_000
 
 // 測試裡的 git：每個 repo 的分支、未 commit 檔、新 commit、別的 worktree
 type Repo = { branch: string; files: string[]; commits: string[]; worktrees: string[] }
-// placed＝false 模擬終端機太窄、pane 沒畫出來
-type World = { cost: number; placed: boolean; opens: { id: string; focus?: boolean }[]; closes: string[]; toasts: string[]; gitCalls: string[][] }
+// placed＝false 模擬終端機太窄、pane 沒畫出來；draft＝提示框裡的草稿，fills＝填進提示框的字與方式
+type World = {
+  cost: number; placed: boolean; draft: string; fills: { text: string; mode?: string }[]
+  opens: { id: string; focus?: boolean }[]; closes: string[]; toasts: string[]; gitCalls: string[][]
+}
 
 function world(on: On, repos: Record<string, Partial<Repo>> = {}): World {
-  const w: World = { cost: 0, placed: true, opens: [], closes: [], toasts: [], gitCalls: [] }
+  const w: World = { cost: 0, placed: true, draft: '', fills: [], opens: [], closes: [], toasts: [], gitCalls: [] }
   const all = new Map(Object.entries(repos).map(([root, r]) => [root, { branch: 'main', files: [], commits: [], worktrees: [], ...r }]))
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('command.register', (_$, e) => ({ value: { command: e.name } }))
   on('prompt.submit', (_$, e) => ({ text: e.text }))
   on('prompt.edit', (_$, e) => ({ text: e.text + e.inputText, cursor: e.cursor + e.inputText.length }))
+  on('prompt.read', () => ({ value: { text: w.draft, cursor: w.draft.length } }))
+  on('prompt.fill', (_$, e) => {
+    w.fills.push({ text: e.text, mode: e.mode })
+    return { isFilled: true }
+  })
   on('turn.complete', (_$, e) => ({ text: e.answer }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { tokens: 0, window: 200_000 }, rateLimits: [], cost: { usd: w.cost } } }))
   on('session.cwd', () => ({ value: CWD }))
@@ -177,8 +185,24 @@ test('驗證段：測試指令與 exit code，失敗的紅色；重跑記次數�
   await $.tool.call({ tool: 'Bash', command: 'pytest -q # BG' })
   await receipt($)
   const v = await view(await mount($))
-  expect(v.lines.slice(1)).toEqual(['驗證', '  ✔ exit 0 ×2  npm test', '  ✗ exit 2  npx tsc -p . # FAIL'])
-  expect(v.red).toEqual(['✗ exit 2', 'npx tsc -p . # FAIL'])
+  expect(v.lines.slice(1)).toEqual(['驗證  按 1 把失敗的指令填進提示框', '  ✔ exit 0 ×2  npm test', '  ✗ exit 2  npx tsc -p . # FAIL'])
+  expect(v.red).toEqual(['exit 2  npx tsc -p . # FAIL'])
+})
+
+test('按失敗的測試（數字鍵 1）：把「修這個」填進提示框、關掉收據；草稿有字時接在下一行，不蓋掉', async ($, on) => {
+  const w = world(on)
+  mock.clock(on)
+  await start($)
+  await say($)
+  await $.tool.call({ tool: 'Bash', command: 'make test # FAIL' })
+  await receipt($)
+  const ui = await mount($)
+  await ui.press({ key: 'fix-1' })
+  expect(w.fills).toEqual([{ text: 'make test # FAIL 失敗（exit 2），幫我找出原因並修好。', mode: 'replace' }])
+  expect(w.closes).toEqual(['away-receipt'])
+  w.draft = '先看一下'
+  await ui.press({ key: 'fix-1' })
+  expect(w.fills[1]).toEqual({ text: '\nmake test # FAIL 失敗（exit 2），幫我找出原因並修好。', mode: 'append' })
 })
 
 test('背景工作：通知裡做完和失敗的子代理、shell，失敗的紅色；你送出後重算', async ($, on) => {

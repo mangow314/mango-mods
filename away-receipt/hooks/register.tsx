@@ -10,6 +10,7 @@ import type { Receipt, RepoPart, Task, Test } from '../types'
 // 驗證（跑過的測試指令和 exit code，失敗的紅色）；背景工作（做完或失敗的子代理和 shell，失敗的紅色）。
 // 你上次送出超過 20 分鐘、回來開始打字時自動打開（同一次離開只開一次；開了 Claude 還沒送出過不算），也可以打 /receipt 打開；
 // pane 有焦點時按 q（或點「關閉」）或 ctrl+x x 關掉；自動打開時焦點在提示框，要先 ctrl+x tab。
+// 失敗的測試按數字鍵（或點 ✗）：把「修這個」填進提示框、關掉收據，Enter 就送出。
 //
 // 離開期間的紀錄放模組變數：/clear 會把 $.state 歸零、模組變數保留（repo-ledger 實測），
 // ctx-relay 在你離開時自動 /clear 接續，紀錄才不會斷。$.state 只放打開當下算好的收據，給 pane 畫。
@@ -27,6 +28,8 @@ const GIT = '󰊢' // Nerd Font md-git U+F02A2
 
 // 離開超過這麼久，回來打字時自動打開
 const AWAY_MS = 20 * 60_000
+// Button 的 hotkey 只收一個數字：失敗的測試前 9 條有數字鍵
+const MAX_KEYS = 9
 // 新 commit、未 commit 檔各最多列幾條，其餘寫「還有 N 個」
 const MAX_ITEMS = 10
 
@@ -183,12 +186,28 @@ export const register: Register = on => {
 
     if (r.tests.length > 0) {
       gap('tests-gap')
-      line('tests', <Text color={VALUE} bold>驗證</Text>)
+      const failed = r.tests.filter(t => t.code !== 0)
+      const hint = failed.length === 0 ? '' : `  按 ${failed.length === 1 ? '1' : `1–${Math.min(MAX_KEYS, failed.length)}`} 把失敗的指令填進提示框`
+      line('tests', <Text color={VALUE} bold>驗證</Text>, <Text color={LABEL}>{hint}</Text>)
+      // 失敗的測試是按鈕：按下把「修這個」填進提示框、關掉收據，像 quickfix 跳到該處（前 9 條有數字鍵）
+      let k = 0
       r.tests.forEach((t, j) => {
-        const isOk = t.code === 0
         const runs = t.runs > 1 ? ` ×${t.runs}` : ''
-        line(`test-${j}`, <Text color={isOk ? LABEL : RED}>{`  ${isOk ? '✔' : '✗'} exit ${t.code ?? '?'}${runs}  `}</Text>,
-          <Text color={isOk ? VALUE : RED}>{t.cmd}</Text>)
+        if (t.code === 0) {
+          line(`test-${j}`, <Text color={LABEL}>{`  ✔ exit 0${runs}  `}</Text>, <Text color={VALUE}>{t.cmd}</Text>)
+          return
+        }
+        k += 1
+        const press = () => askFix($, t)
+        lines.push(
+          <Box key={`test-${j}`} flexDirection="row">
+            <Text>{'  '}</Text>
+            {k <= MAX_KEYS
+              ? <Button key={`fix-${k}`} plain hotkey={String(k)} label="✗" onPress={press} />
+              : <Button key={`fix-${k}`} plain label="✗" onPress={press} />}
+            <Text color={RED} wrap="truncate-end">{` exit ${t.code ?? '?'}${runs}  ${t.cmd}`}</Text>
+          </Box>,
+        )
       })
     }
 
@@ -216,6 +235,18 @@ export const register: Register = on => {
       </Box>
     )
   })
+}
+
+// 失敗的測試：把「修這個」填進提示框（草稿是空的就直接放，有字就接在下一行，不蓋掉你打的），再關掉收據回提示框
+async function askFix($: EngineInterface, t: Test) {
+  const text = `${t.cmd} 失敗（exit ${t.code ?? '?'}），幫我找出原因並修好。`
+  const { text: draft } = await $.prompt.read()
+  const filled = await $.prompt.fill(draft === '' ? { text } : { text: `\n${text}`, mode: 'append' })
+  if (!filled.isFilled) {
+    $.ui.toast('away-receipt：提示框現在收不到字（可能有對話框開著），沒有填進去', { timeoutMs: 6000 })
+    return
+  }
+  await $.ui.close({ id: PANE })
 }
 
 // 算好打開當下的收據，存給 pane 畫

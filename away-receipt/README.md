@@ -4,7 +4,7 @@
 不用再問「我離開時你做了什麼」：多久、跑了幾輪、花多少，動過哪些 repo、測試過了沒、背景工作有沒有失敗，一張收據看完。
 mod 只跑 git 查狀態，不代跑其他指令。
 
-實機測過的版本：Claude Code 2.1.289（0.1.0，用 `--plugin-dir` 載入；在 160 欄的 tmux 測過 `/receipt` 打開、新 commit、未 commit 檔、`make test` 失敗 exit 2 標紅、`claude plugin test` exit 0、背景 shell 完成、按 q 關掉、再打 `/receipt` 紀錄還在；送出訊息 22 分鐘後打一個字自動打開、焦點留在提示框、關掉後清空草稿重打不再打開）。mods API 還在 early access，改版後可能要跟著調整。
+實機測過的版本：Claude Code 2.1.289（0.1.0，用 `--plugin-dir` 載入；在 160 欄的 tmux 測過 `/receipt` 打開、新 commit、未 commit 檔、`make test` 失敗 exit 2 標紅、`claude plugin test` exit 0、背景 shell 完成、按 q 關掉、再打 `/receipt` 紀錄還在；送出訊息 22 分鐘後打一個字自動打開、焦點留在提示框、關掉後清空草稿重打不再打開；0.2.0 測過按 1 把失敗的 `make test` 填進提示框、收據關掉、接著打字進提示框）。mods API 還在 early access，改版後可能要跟著調整。
 
 ## pane
 ```
@@ -18,9 +18,9 @@ mod 只跑 git 查狀態，不代跑其他指令。
     ?? away-receipt/
   ⎇ /home/mango/projects/mango-mods-wt1 (feature)
 
-驗證
+驗證  按 1 把失敗的指令填進提示框
   ✔ exit 0 ×3  claude plugin test .
-  ✗ exit 2  make test
+  1: ✗ exit 2  make test
 
 背景工作
   ✔ Agent "研究 API" finished
@@ -42,6 +42,12 @@ q: 關閉
 - `/receipt`：隨時打開，任何寬度都畫。
 - 關掉：pane 有焦點時按 `q` 或 ctrl+x x。用 `/receipt` 打開時 pane 就有焦點；自動打開時焦點留在提示框，要先 ctrl+x tab 切過來（焦點在提示框時 ctrl+x x 關不掉，2026-10-05 實測）。
 - 收據是打開那一刻算好的；之後你送出訊息、Claude 繼續跑，pane 上的內容都不變，下次打開才重算。
+
+## 按失敗的測試
+- 驗證段裡失敗的測試是按鈕：pane 有焦點時按數字鍵（前 9 條，`1: ✗` 的那個數字），或用滑鼠點 ✗。
+- 按下後把「`<指令>` 失敗（exit N），幫我找出原因並修好。」填進提示框，並關掉收據，焦點回到提示框，按 Enter 就送出（2026-10-05 實測）。
+- 提示框是空的就直接放；已經有字時接在下一行，不蓋掉你打的。
+- 提示框收不到字時（例如有對話框開著）跳 toast，收據不關。
 
 ## 怎麼算「離開」
 - 從你自己送出訊息（提示框，或 Remote Control）的那一刻算起，到打開收據為止。
