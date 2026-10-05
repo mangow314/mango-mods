@@ -15,3 +15,6 @@
   tsc 需要先載入一次 mod，引擎才會產生 `.claude-plugin/types/`，這個目錄不進版控。
 - 發布：先調高該 plugin `plugin.json` 的 `version`，然後 commit、push，再跑 `claude plugin marketplace update mango-mods`，最後更新已安裝的版本。
 - 安裝任何 mod 前，先看 `claude plugin validate --json` 列出的 hooks 和 calls 清單（安裝閘見 `~/.claude/rules/safety.md`）。
+
+## 授權
+[MIT](LICENSE)，涵蓋這個 repo 裡所有 plugin。
