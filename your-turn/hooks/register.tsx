@@ -4,8 +4,10 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { Step } from '../types'
 
 // your-turn：主對話每輪結束時，從最後一則回覆（turn.complete 的 answer）抽出要你親手跑的指令：
-// 程式碼區塊裡 sudo 開頭的行（行尾 \ 接下一行）、`! <cmd>`（行內 code 或區塊裡的行）。
+// 程式碼區塊裡 sudo 開頭的行（行尾 \ 接下一行）、`! <cmd>`（行內 code 或區塊裡的行）；
+// 前一句有「你／手動／自己／親手／在終端機／另開」的 shell 區塊，整塊每行都算。
 // 清單照回覆裡出現的順序編號，不重排；連續在同一處跑的指令同一框，換地方跑就開新框。
+// 每段指令（一個程式碼區塊，或一行裡的行內 `! cmd`）上方帶回覆裡的前一句當說明（等多久、等什麼再跑）。
 // 抽到指令就重算清單、打開對話旁的 pane（主動打開：終端機 ≥144 欄才畫，你用 /your-turn 開過一次後降到 110 欄；
 // 沒畫出來就跳 toast 提示打 /your-turn；提示框是空的才拿得到焦點）。
 // pane 有焦點時按數字鍵勾完成；全部勾完出現「回報」，按下替你送出「N/N 完成了」。mod 只整理清單，不代跑任何指令。
@@ -30,9 +32,11 @@ const ROW_FIXED = 11
 // 進度條最長 16 格；同一行另有「進度 」和「 10/10」，約 12 欄
 const TRACK_MAX = 16
 const FOOT_FIXED = 12
-// 分組：sudo 要密碼，在終端機跑；! 開頭的在 Claude 的提示框打
+// 說明行：「│ 」與「 │」4 欄＋縮排 2 欄
+const NOTE_FIXED = 6
+// 分組：sudo 和其他要你另開終端機的指令在終端機跑；! 開頭的在 Claude 的提示框打
 const GROUPS = [
-  { icon: '', color: YELLOW, title: '在終端機跑（要密碼）', has: (cmd: string) => !cmd.startsWith('!') }, // nf-fa-terminal
+  { icon: '', color: YELLOW, title: '在終端機跑', has: (cmd: string) => !cmd.startsWith('!') }, // nf-fa-terminal
   { icon: '', color: AQUA, title: '在提示框打', has: (cmd: string) => cmd.startsWith('!') }, // nf-fa-comment
 ] as const
 
@@ -67,7 +71,7 @@ export const register: Register = on => {
       return result
     }
     // 照回覆裡出現的順序編號，不按分組重排：前後常有依賴（先裝套件才能啟動服務）
-    await update($, stepsAtom, () => cmds.map(cmd => ({ cmd, isDone: false })))
+    await update($, stepsAtom, () => cmds.map(c => ({ ...c, isDone: false })))
     try {
       const opened = await $.ui.open({ id: PANE, title: TITLE, focus: true })
       if (!opened.isPlaced) $.ui.toast(`your-turn：${cmds.length} 條要你親手跑的指令，終端機太窄沒畫出來，打 /your-turn 打開`, { timeoutMs: 8000 })
@@ -116,6 +120,17 @@ export const register: Register = on => {
         </Box>
       )
     }
+    // 說明行：回覆裡這段指令的前一句，淡灰色、縮排 2 欄，太長截斷
+    const noteLine = (note: string, i: number, frame: string) => {
+      const body = clip(note, Math.max(10, width - NOTE_FIXED))
+      return (
+        <Box key={`note-${i + 1}`} flexDirection="row">
+          <Text color={frame}>{'│   '}</Text>
+          <Text color={GRAY}>{body}</Text>
+          <Text color={frame}>{`${' '.repeat(Math.max(0, width - NOTE_FIXED - cols(body)))} │`}</Text>
+        </Box>
+      )
+    }
     // 照清單順序切框：連續在同一處跑的指令放同一框，換地方跑就開新框，所以同一組可能出現兩個框。
     // 每框上方空一行，標題嵌在上框線；框裡還有沒做完的指令時框線用該組顏色
     const runs: { g: (typeof GROUPS)[number]; members: { s: Step; i: number }[] }[] = []
@@ -135,7 +150,7 @@ export const register: Register = on => {
             <Text color={g.color} bold>{title}</Text>
             <Text color={frame}>{`${'─'.repeat(Math.max(0, width - 3 - cols(title)))}╮`}</Text>
           </Text>
-          {members.map(m => row(m.s, m.i, g.color, frame))}
+          {members.flatMap(m => [...(m.s.note ? [noteLine(m.s.note, m.i, frame)] : []), row(m.s, m.i, g.color, frame)])}
           <Text color={frame}>{`╰${'─'.repeat(Math.max(0, width - 2))}╯`}</Text>
         </Box>
       )
@@ -173,16 +188,45 @@ export const register: Register = on => {
   })
 }
 
-// 回覆裡要你親手跑的指令，照出現順序。同一條在後面的步驟再出現就再列一次（例如最後再 sudo -k 一次）；
+// 前一句有這些字的 shell 區塊，整塊每行都是要你跑的指令；
+// 前一句以「我」開頭的不算（「我自己試了一下：」「我在終端機跑了：」是 Claude 說它做了什麼）
+const HINT_RE = /你|手動|自己|親手|在終端機|另開/
+const SELF_RE = /^(?:[-*]\s+|\d+\.\s+)?我/
+// shell 區塊：``` 後面沒有語言標記，或是這幾種
+const SHELL_LANGS = new Set(['', 'bash', 'sh', 'shell', 'zsh', 'console'])
+
+// 回覆裡要你親手跑的指令，照出現順序；每段（一個程式碼區塊，或一行裡的行內 `! cmd`）的第一條帶前一句當 note。
+// 同一條在後面的步驟再出現就再列一次（例如最後再 sudo -k 一次）；
 // 緊接著重複的只留一條（「打 `! whoami`，看 `! whoami` 印出誰」）
-function extractCommands(text: string): string[] {
-  const cmds: string[] = []
+function extractCommands(text: string): { cmd: string; note: string }[] {
+  const found: { cmd: string; note: string }[] = []
   let inBlock = false
+  let isHinted = false
+  // 前一句：區塊外最近一行非空白的字；區塊結束就清掉，連續兩個區塊之間沒有字就不帶
+  let lead = ''
+  // 這一段還沒掛上的說明；和上一條掛出去的一樣就不重複（行內 `! cmd` 那行接著就是程式碼區塊時）
+  let note = ''
+  let lastNote = ''
+  const startSegment = (s: string) => {
+    note = s !== lastNote ? s : ''
+  }
+  const push = (cmd: string) => {
+    found.push({ cmd, note })
+    if (note !== '') lastNote = note
+    note = ''
+  }
   // 區塊裡行尾 \ 的指令：先接起來，到沒有 \ 的那行才收
   let pending = ''
   for (const raw of text.split('\n')) {
     const line = raw.trim()
-    if (/^(```|~~~)/.test(line)) {
+    const fence = /^(?:```|~~~)\s*(\S*)/.exec(line)
+    if (fence) {
+      if (inBlock) {
+        lead = ''
+      } else {
+        isHinted = SHELL_LANGS.has((fence[1] ?? '').toLowerCase()) && HINT_RE.test(lead) && !SELF_RE.test(lead)
+        startSegment(lead)
+      }
       inBlock = !inBlock
       pending = ''
       continue
@@ -191,25 +235,31 @@ function extractCommands(text: string): string[] {
       if (pending !== '') {
         pending = `${pending} ${line.replace(/\\$/, '').trim()}`
         if (!line.endsWith('\\')) {
-          cmds.push(pending)
+          push(pending)
           pending = ''
         }
         continue
       }
-      // 照抄提示字元的寫法（$ sudo …）也算
-      const cmd = /^(?:\$\s+)?(sudo\s.+|!\s+\S.*)$/.exec(line)?.[1]
+      // 照抄提示字元的寫法（$ sudo …）也算；有提示字的區塊每行都算，空行與 # 註解除外
+      const cmd = isHinted
+        ? (line === '' || line.startsWith('#') ? undefined : line.replace(/^\$\s+/, ''))
+        : /^(?:\$\s+)?(sudo\s.+|!\s+\S.*)$/.exec(line)?.[1]
       if (cmd === undefined || (cmd.startsWith('!') && isPlaceholder(cmd))) continue
       if (cmd.endsWith('\\')) pending = cmd.slice(0, -1).trim()
-      else cmds.push(cmd)
+      else push(cmd)
       continue
     }
+    if (line === '') continue
+    const plain = line.replace(/`|\*\*/g, '')
     // `!` 後面要有空白：`!e.agentId`、`!==` 這類程式碼不算
-    for (const m of line.matchAll(/`(!\s+[^`]+)`/g)) {
-      const cmd = (m[1] ?? '').trim()
-      if (!isPlaceholder(cmd)) cmds.push(cmd)
+    const inline = [...line.matchAll(/`(!\s+[^`]+)`/g)].map(m => (m[1] ?? '').trim()).filter(cmd => !isPlaceholder(cmd))
+    if (inline.length > 0) {
+      startSegment(plain)
+      for (const cmd of inline) push(cmd)
     }
+    lead = plain
   }
-  return cmds.filter((cmd, i) => cmd !== cmds[i - 1])
+  return found.filter((f, i) => f.cmd !== found[i - 1]?.cmd)
 }
 
 // 說明用的佔位寫法（`! <cmd>`）不是真的指令；sudo 區塊裡的 <佔位> 仍算（要你填好再跑）

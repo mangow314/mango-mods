@@ -18,7 +18,7 @@
     {
       "name": "your-turn",
       "source": "./your-turn",
-      "description": "把回覆裡要你親手跑的指令（sudo、! <cmd>）列成對話旁可勾選的清單，全部完成後一鍵回報。"
+      "description": "把回覆裡要你親手跑的指令（sudo、! <cmd>、叫你自己跑的 shell 區塊）列成對話旁可勾選的清單，帶上回覆裡的說明，全部完成後一鍵回報。"
     },
     {
       "name": "away-receipt",

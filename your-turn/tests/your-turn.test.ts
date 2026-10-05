@@ -47,11 +47,15 @@ type Pane = Awaited<ReturnType<typeof mount>>
 async function view(ui: Pane) {
   const labels = (await ui.findAll({ type: 'Button' })).map(b => String(b.props.label))
   const texts = await ui.findAll({ type: 'Text' })
-  const lines = (await ui.findAll({ type: 'Box' })).filter(b => b.key?.startsWith('row-')).map(b => b.text)
+  const boxes = await ui.findAll({ type: 'Box' })
+  const lines = boxes.filter(b => b.key?.startsWith('row-')).map(b => b.text)
+  const noteLines = boxes.filter(b => b.key?.startsWith('note-')).map(b => b.text)
   const bottoms = texts.filter(t => t.text.startsWith('╰'))
   return {
     labels,
     lines,
+    noteLines,
+    notes: noteLines.map(l => l.replace(/^│ +/, '').replace(/ *│$/, '')),
     rows: lines.map(l => l.replace(/^│ /, '').replace(/ *│$/, '')),
     struck: texts.filter(t => t.props.strikethrough === true).map(t => t.text),
     filled: texts.find(t => t.props.color === '#b8bb26' && /^━+$/.test(t.text))?.text.length ?? 0,
@@ -59,6 +63,11 @@ async function view(ui: Pane) {
     borders: bottoms.map(t => t.props.color),
     text: texts.map(t => t.text).join(' '),
   }
+}
+
+// 終端機欄寬：中日韓字與全形字 2 欄
+function cols(s: string): number {
+  return [...s].reduce((n, ch) => n + (/[ᄀ-ᅟ⺀-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦]/.test(ch) ? 2 : 1), 0)
 }
 
 const TWO = ['```bash', 'sudo pacman -S foo', 'sudo systemctl enable --now foo.service', '```'].join('\n')
@@ -100,6 +109,42 @@ test('抽指令：sudo 區塊每行一條（$ 前綴、行尾 \\ 續行）、! �
   // 只有勾完的那框變深灰，同組的另一框維持原色
   for (const key of ['step-2', 'step-3', 'step-4']) await ui.press({ key })
   expect((await view(ui)).borders).toEqual(['#8ec07c', '#504945', '#8ec07c'])
+})
+
+test('前一句有提示字的 shell 區塊整塊都列（註解、輸出區塊、沒提示字的、「我」開頭的不列）；每段上方帶前一句當說明，同一句不重複', async ($, on) => {
+  world(on)
+  const ui = await mount($)
+  await reply($, [
+    '請你在終端機登入 gcloud（要開瀏覽器，約 1 分鐘）：',
+    '```bash',
+    'gcloud auth login',
+    '# 登入後再設定專案',
+    '$ gcloud config set project demo',
+    '```',
+    '我剛剛跑了：',
+    '```bash',
+    'ls -la',
+    '```',
+    '我自己在終端機試了一下：',
+    '```bash',
+    'npm run dev',
+    '```',
+    '你會看到這樣的輸出：',
+    '```text',
+    'Credentials saved',
+    '```',
+    '等上面都好了，在提示框打 `! claude plugin list` 確認：',
+    '```',
+    '! claude plugin list',
+    '```',
+  ].join('\n'))
+  const v = await view(ui)
+  expect(v.rows).toEqual(['○ $ gcloud auth login', '○ $ gcloud config set project demo', '○ ! claude plugin list'])
+  expect(v.notes).toEqual(['請你在終端機登入 gcloud（要開瀏覽器，約 1 分鐘）：', '等上面都好了，在提示框打 ! claude plugin list 確認：'])
+  // 說明行也對齊右框線；黃框標題不再寫「要密碼」
+  expect(v.noteLines.map(l => cols(l))).toEqual([60, 60])
+  expect(v.text).toContain('在終端機跑')
+  expect(v.text).not.toContain('要密碼')
 })
 
 test('同一條指令在後面的步驟再出現就再列一次；緊接著重複提到的只列一次', async ($, on) => {

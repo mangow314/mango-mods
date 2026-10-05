@@ -7,7 +7,7 @@
 |---|---|
 | [ctx-relay](ctx-relay/README.md) | 顯示每輪花費與剩餘空間；越過自動交接線時自動產生交接檔，然後 /clear 接續 |
 | [repo-ledger](repo-ledger/README.md) | 列出這個對話動過、還沒 commit 的 repo（分支、未 commit 檔數、未 push、別的 worktree）和本輪改了幾檔 |
-| [your-turn](your-turn/README.md) | 把回覆裡要你親手跑的指令（sudo、`! <cmd>`）列成對話旁可勾選的清單，全部完成後一鍵回報 |
+| [your-turn](your-turn/README.md) | 把回覆裡要你親手跑的指令（sudo、`! <cmd>`、叫你自己跑的 shell 區塊）列成對話旁可勾選的清單，帶上回覆裡的說明，全部完成後一鍵回報 |
 | [away-receipt](away-receipt/README.md) | 離開一段時間回來時，對話旁列出離開期間發生了什麼：多久、幾輪、花多少，動過的 repo、跑過的測試、背景工作 |
 
 ## 開發與發布
