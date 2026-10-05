@@ -8,12 +8,13 @@ const CWD = '/work/app'
 
 // 測試裡的 git：每個 repo 的分支、未 commit 檔、未 push 數、別的 worktree 數
 type Repo = { branch: string; files: string[]; ahead: number; worktrees: number }
-type World = { repos: Map<string, Repo>; gitCalls: string[][] }
+type World = { repos: Map<string, Repo>; gitCalls: string[][]; rawCalls: string[][] }
 
 function world(on: On, repos: Record<string, Partial<Repo>>): World {
   const w: World = {
     repos: new Map(Object.entries(repos).map(([root, r]) => [root, { branch: 'master', files: [], ahead: 0, worktrees: 0, ...r }])),
     gitCalls: [],
+    rawCalls: [],
   }
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('turn.start', (_$, e) => ({ turnId: e.turnId }))
@@ -27,8 +28,10 @@ function world(on: On, repos: Record<string, Partial<Repo>>): World {
     (JSON.stringify(e).includes('FAIL') ? { result: {}, isError: true, text: 'boom' } : { result: {} }) as never)
   on('process.run', (_$, e) => {
     const ok = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
-    const [cmd, , dir = '', sub, ...rest] = e.argv
+    // -c key=value 不影響假 git 的回答，比對前拿掉
+    const [cmd, , dir = '', sub, ...rest] = e.argv.filter((a, i, all) => a !== '-c' && all[i - 1] !== '-c')
     if (cmd !== 'git') return ok('', 127)
+    w.rawCalls.push([...e.argv])
     w.gitCalls.push([dir, sub ?? '', ...rest])
     const root = [...w.repos.keys()].find(r => dir === r || dir.startsWith(`${r}/`))
     const repo = root === undefined ? undefined : w.repos.get(root)
@@ -147,6 +150,15 @@ test('本輪超過 5 檔變橘色；送出新訊息歸零', async ($, on) => {
   ;({ line } = await band($))
   expect(line).not.toContain('本輪')
   expect(line).toContain('app(master) 6')
+})
+
+test('git status 關掉 repo 自訂的 fsmonitor，只 cd 進外來 repo 不會執行它設定的程式', async ($, on) => {
+  const w = world(on, { [CWD]: {}, '/srv/untrusted': {} })
+  await start($)
+  await $.tool.call({ tool: 'Bash', command: 'cd /srv/untrusted && ls' })
+  const status = w.rawCalls.filter(c => c.includes('status'))
+  expect(status.length).toBeGreaterThan(0)
+  for (const argv of status) expect(argv.join(' ')).toContain('-c core.fsmonitor=false status')
 })
 
 test('repo 外的檔案（scratchpad）和失敗的 Edit 都不算', async ($, on) => {

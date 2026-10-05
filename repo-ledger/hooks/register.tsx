@@ -148,7 +148,8 @@ async function refresh($: EngineInterface): Promise<void> {
 }
 
 async function inspect($: EngineInterface, root: string): Promise<RepoRow | null> {
-  const status = await $.process.run(['git', '-C', root, 'status', '--porcelain=v1', '--branch'], { timeoutMs: 10_000 })
+  // repo 自己的 .git/config 若設了 core.fsmonitor，status 會執行它：外來 repo 只 cd 進去就會觸發，關掉
+  const status = await $.process.run(['git', '-C', root, '-c', 'core.fsmonitor=false', 'status', '--porcelain=v1', '--branch'], { timeoutMs: 10_000 })
   if (status.exitCode !== 0) return null
   const [head = '', ...files] = status.stdout.split('\n')
   const worktrees = await $.process.run(['git', '-C', root, 'worktree', 'list', '--porcelain'], { timeoutMs: 5000 })
