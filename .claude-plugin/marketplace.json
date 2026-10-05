@@ -19,6 +19,11 @@
       "name": "your-turn",
       "source": "./your-turn",
       "description": "把回覆裡要你親手跑的指令（sudo、! <cmd>）列成對話旁可勾選的清單，全部完成後一鍵回報。"
+    },
+    {
+      "name": "away-receipt",
+      "source": "./away-receipt",
+      "description": "離開一段時間回來時，對話旁列出離開期間發生了什麼：多久、幾輪、花多少，動過的 repo、跑過的測試、背景工作。"
     }
   ]
 }
