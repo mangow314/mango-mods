@@ -31,3 +31,8 @@
 - 名稱用 repo 根目錄的最後一段：`~/.local/share/chezmoi` 顯示 `chezmoi`，vault 顯示資料夾名。
 - `/clear` 之後追蹤清單保留；hot reload 之後由 `$.state` 讀回。這兩條還沒有實機測過。
 - 需要 PATH 上有 `git`。
+
+## 風險
+- mod 會在追蹤中的 repo 裡自動跑 `git status`、`git worktree list`，repo 自己 `.git/config` 裡的設定會跟著生效。對話只是 cd 進一個外來的 repo，也會觸發。
+- `core.fsmonitor` 已擋：每次 `git status` 都帶 `-c core.fsmonitor=false`，repo 設的 fsmonitor 指令不會執行。
+- 其他會執行指令的設定沒有擋。例如 `filter.<名稱>.clean`：`git status` 比對檔案內容時可能會執行它（推測，沒有實測）。只在你信任的 repo 裡用。
