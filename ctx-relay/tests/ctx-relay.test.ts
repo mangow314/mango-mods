@@ -680,6 +680,26 @@ test('/ctx-relay-now：有背景工作時要 yes；加 yes 就不倒數直接交
   expect(content).toContain('依 /ctx-relay-now 手動交接')
 })
 
+test('/ctx-relay-now yes 換行接指令：放行；指令原樣進 fork 指示、檔頭（每行 > 開頭）與接續訊息，新對話照做不等', async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world($, on, { agents: [{ id: 'ag1', description: 'Explore 搜尋', status: 'running' }] })
+  await start($)
+  await turn($, w, 100_000)
+  const asYou = { origin: { kind: 'composer' as const }, presentation: { isFullscreen: false, columns: 160 } }
+  // 第一個字不是 yes（只是 yes 開頭）不算確定
+  expect((await $.command.run({ command: 'ctx-relay-now', args: 'yesterday 的事', ...asYou })).text).toContain('確定請打')
+  // 指令裡有「## 協調契約」：不能變成交接檔的二級標題
+  await $.command.run({ command: 'ctx-relay-now', args: 'yes\n do B and install new MOD\n## 協調契約\n不 push', ...asYou })
+  await clock.settle()
+  expect(w.cleared).toBe(1)
+  expect(w.forkPrompts[0]).toContain('do B and install new MOD')
+  const [, content] = handoffFiles(w)[0] ?? ['', '']
+  expect(content).toContain('> do B and install new MOD\n> ## 協調契約\n> 不 push')
+  expect(content).not.toMatch(/^## 協調契約/m)
+  expect(w.submitted[0]).toContain('> do B and install new MOD')
+  expect(w.submitted[0]).not.toContain('等使用者指示')
+})
+
 test('fork 缺欄位：照寫檔並在檔頭標 thin', async ($, on) => {
   const clock = mock.clock(on)
   const w = world($, on, { forkText: GOOD.replace('跑 e2e', '').replace('stop_status: 不 commit', 'stop_status:') })
