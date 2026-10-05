@@ -75,7 +75,7 @@ git repo：`<git-common-dir>/harness/handoff/`；非 git：`~/.claude/harness/<�
 
 ## 指令
 - `/ctx-relay-status`：顯示門檻、讀數、交接狀態和背景工作
-- `/ctx-relay-now`：立刻交接；有背景工作在跑時要打 `/ctx-relay-now yes`
+- `/ctx-relay-now`：立刻交接；有背景工作在跑時要打 `/ctx-relay-now yes`。fork 指示、交接檔檔頭和新對話的接續訊息都寫明是 `/ctx-relay-now` 手動交接，不寫「越過自動交接線」
 
 ## 已知限制
 - 背景工作不會逾時作廢：常駐 server 會讓交接延後到上限才強制倒數；要早點交接就用 `/ctx-relay-now yes`。

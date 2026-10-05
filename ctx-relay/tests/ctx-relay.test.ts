@@ -283,6 +283,7 @@ test('越過交接線：倒數 60 秒後 fork 一次、寫交接檔（檔名帶�
   await clock.settle()
   expect(w.forkPrompts).toHaveLength(1)
   expect(w.forkPrompts[0]).toContain(' M a.ts')
+  expect(w.forkPrompts[0]).toContain('越過自動交接線')
   const files = handoffFiles(w)
   expect(files).toHaveLength(1)
   const [path, content] = files[0] ?? ['', '']
@@ -297,6 +298,8 @@ test('越過交接線：倒數 60 秒後 fork 一次、寫交接檔（檔名帶�
   expect(w.submitted).toHaveLength(1)
   expect(w.submitted[0]).toContain(path)
   expect(w.submitted[0]).toContain('不算完成')
+  expect(w.submitted[0]).toContain('已越過自動交接線')
+  expect(content).toContain('由 ctx-relay mod 自動交接')
   await clock.advance(120_000)
   expect(w.cleared).toBe(1)
   expect(w.forkPrompts).toHaveLength(1)
@@ -657,7 +660,7 @@ test('有子代理在跑：延後交接', async ($, on) => {
   expect((await band($)).text).toContain('交接延後')
 })
 
-test('/ctx-relay-now：有背景工作時要 yes；加 yes 就不倒數直接交接', async ($, on) => {
+test('/ctx-relay-now：有背景工作時要 yes；加 yes 就不倒數直接交接；fork 指示、檔頭、接續訊息寫手動交接，不寫越過交接線', async ($, on) => {
   const clock = mock.clock(on)
   const w = world($, on, { agents: [{ id: 'ag1', description: 'Explore 搜尋', status: 'running' }] })
   await start($)
@@ -669,6 +672,12 @@ test('/ctx-relay-now：有背景工作時要 yes；加 yes 就不倒數直接交
   await clock.settle()
   expect(w.forkPrompts).toHaveLength(1)
   expect(w.cleared).toBe(1)
+  const [, content] = handoffFiles(w)[0] ?? ['', '']
+  for (const text of [w.forkPrompts[0] ?? '', content, w.submitted[0] ?? '']) {
+    expect(text).toContain('/ctx-relay-now')
+    expect(text).not.toContain('越過')
+  }
+  expect(content).toContain('依 /ctx-relay-now 手動交接')
 })
 
 test('fork 缺欄位：照寫檔並在檔頭標 thin', async ($, on) => {
