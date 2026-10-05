@@ -1,0 +1,7 @@
+{
+  "name": "repo-ledger",
+  "version": "0.1.0",
+  "description": "提示框上方列出這個對話動過、還沒 commit 的 repo：分支、未 commit 檔案數、未 push 的 commit、別的 worktree、本輪改了幾檔",
+  "author": { "name": "Mango" },
+  "types": "./types/index.d.ts"
+}

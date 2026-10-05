@@ -6,6 +6,7 @@
 | plugin | 用途 |
 |---|---|
 | [ctx-relay](ctx-relay/README.md) | 顯示每輪花費與剩餘空間；越過自動交接線時自動產生交接檔，然後 /clear 接續 |
+| [repo-ledger](repo-ledger/README.md) | 列出這個對話動過、還沒 commit 的 repo（分支、未 commit 檔數、未 push、別的 worktree）和本輪改了幾檔 |
 
 ## 開發與發布
 - 開發時直接載入目錄，不要用已安裝的副本，因為已安裝的 plugin 會按版本快取：
