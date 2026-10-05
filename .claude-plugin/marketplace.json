@@ -14,6 +14,11 @@
       "name": "repo-ledger",
       "source": "./repo-ledger",
       "description": "提示框上方列出這個對話動過、還沒 commit 的 repo，和本輪改了幾檔。"
+    },
+    {
+      "name": "your-turn",
+      "source": "./your-turn",
+      "description": "把回覆裡要你親手跑的指令（sudo、! <cmd>）列成對話旁可勾選的清單，全部完成後一鍵回報。"
     }
   ]
 }
