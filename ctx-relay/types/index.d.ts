@@ -13,6 +13,9 @@ export type Limits = { window: number; fuse: number; nudge: number; handoff: num
 export type AutoPhase = 'idle' | 'deferred' | 'countdown' | 'preparing' | 'done' | 'failed' | 'cancelled'
 export type Auto = { phase: AutoPhase; deadline?: number; detail?: string }
 
+// handoff-pickup：新對話開場時待接手的交接檔（最新一份）；from＝來源 session 前 8 碼（讀不到為空），more＝其他待接手份數
+export type Pickup = { path: string; name: string; mtimeMs: number; from: string; more: number }
+
 declare module 'claude-code' {
   interface PluginState {
     'ctx-relay': {

@@ -26,6 +26,10 @@ type World = {
   cost: number
   sessionId: string
   files: Map<string, string>
+  // fs.list 回報的修改時間（沒設＝0）
+  mtimes: Map<string, number>
+  // $.store
+  store: Map<string, unknown>
   forkText: string | null
   forkPrompts: string[]
   // 設了就讓 fork 卡住，直到測試放行（模擬準備期間的等待）
@@ -60,6 +64,8 @@ function world($: Engine, on: On, patch: Partial<World> = {}): World {
     cost: 0,
     sessionId: 'sid-1',
     files: new Map(),
+    mtimes: new Map(),
+    store: new Map(),
     forkText: GOOD,
     forkPrompts: [],
     hold: null,
@@ -129,7 +135,24 @@ function world($: Engine, on: On, patch: Partial<World> = {}): World {
       ? { value: { isAnswered: false as const, reason: 'nothing-to-fork' as const } }
       : { value: { isAnswered: true as const, text: w.forkText, usage: { input_tokens: 10, output_tokens: 900, cache_read_input_tokens: 400_000, cache_creation_input_tokens: 0 } } }
   })
-  on('fs.exists', (_$, e) => ({ value: w.files.has(e.path) }))
+  // 資料夾沒有自己的項目：底下有檔就算存在
+  on('fs.exists', (_$, e) => ({ value: w.files.has(e.path) || [...w.files.keys()].some(p => p.startsWith(`${e.path}/`)) }))
+  on('fs.list', (_$, e) => {
+    const prefix = `${e.path}/`
+    const entries = new Map<string, 'file' | 'dir'>()
+    for (const p of w.files.keys()) {
+      if (!p.startsWith(prefix)) continue
+      const rest = p.slice(prefix.length)
+      const cut = rest.indexOf('/')
+      entries.set(cut === -1 ? rest : rest.slice(0, cut), cut === -1 ? 'file' : 'dir')
+    }
+    return { value: [...entries].map(([name, kind]) => ({ name, kind, size: 0, mtimeMs: w.mtimes.get(`${prefix}${name}`) ?? 0, isLink: false })) }
+  })
+  on('store.get', (_$, e) => ({ value: w.store.get(e.key) }))
+  on('store.set', (_$, e) => {
+    w.store.set(e.key, e.value)
+    return { value: undefined }
+  })
   on('fs.read', (_$, e) => ({ value: w.files.get(e.path) ?? '' }))
   on('fs.write', (_$, e) => {
     if (w.failWrite) throw new Error('EACCES')
@@ -190,8 +213,9 @@ async function band($: Engine) {
   return { ui, text }
 }
 
+// 交接檔本身（.picked/ 底下的已接手標記不算）
 function handoffFiles(w: World): [string, string][] {
-  return [...w.files.entries()].filter(([p]) => p.startsWith(`${ROOT}/handoff/`))
+  return [...w.files.entries()].filter(([p]) => p.startsWith(`${ROOT}/handoff/`) && !p.includes('/.picked/'))
 }
 
 test('1M：ctx 顯示 token／交接線（百分比和經過時間交給 statusline），收據與剩餘輪數', async ($, on) => {
@@ -804,4 +828,90 @@ test('本 session 已手動交接（載入過 handoff skill）：不倒數', asy
   await clock.advance(120_000)
   expect(w.forkPrompts).toHaveLength(0)
   expect((await band($)).text).toContain('本 session 已手動交接')
+})
+
+const HOUR = 3_600_000
+const HANDOFF = `${ROOT}/handoff/20261005-133853-mod-backlog-sdlc.md`
+const PICKED_HANDOFF = `${ROOT}/handoff/.picked/20261005-133853-mod-backlog-sdlc.md`
+const RESUME = `讀 ${HANDOFF} 並依其接續執行；先確認 git 狀態與下一步再動手。`
+
+// 手動 /handoff 寫的交接檔：檔頭帶來源 session
+function manualHandoff(w: World, path: string, mtimeMs: number) {
+  w.files.set(path, `讀 ${path} 並依其接續執行；先確認 git 狀態與下一步再動手。\n- 時間戳：x\n- 來源：branch \`master\` · cwd \`/repo\` · session \`aafa9505-ddff-43ba-b367-d8d1a1c4fb57\`\n`)
+  w.mtimes.set(path, mtimeMs)
+}
+
+test('handoff-pickup：新對話開場列最新一份待接手（多久前、來源、+N）；按接續送出接續句並記已接手', async ($, on) => {
+  mock.clock(on, { now: 10 * HOUR })
+  const w = world($, on, { store: new Map([['pickupSince', 0]]) })
+  manualHandoff(w, `${ROOT}/handoff/20261005-100000-older.md`, 6 * HOUR)
+  manualHandoff(w, HANDOFF, 7 * HOUR)
+  await start($)
+  const { ui, text } = await band($)
+  expect(text).toContain('待接手：20261005-133853-mod-backlog-sdlc.md（3 小時前，來自 aafa9505） +1')
+  await ui.press({ key: 'pickup' })
+  expect(w.submitted).toEqual([RESUME])
+  expect(w.files.has(PICKED_HANDOFF)).toBe(true)
+  expect((await band($)).text).not.toContain('待接手')
+})
+
+test('handoff-pickup：第一次啟用前就有的、已接手的交接檔都不列', async ($, on) => {
+  mock.clock(on, { now: 10 * HOUR })
+  const w = world($, on)
+  manualHandoff(w, `${ROOT}/handoff/20261005-090000-before.md`, 9 * HOUR)
+  await start($)
+  expect(w.store.get('pickupSince')).toBe(10 * HOUR)
+  expect((await band($)).text).not.toContain('待接手')
+  manualHandoff(w, HANDOFF, 11 * HOUR)
+  w.files.set(PICKED_HANDOFF, '')
+  await w.clear()
+  expect((await band($)).text).not.toContain('待接手')
+})
+
+test('handoff-pickup：/clear 後出現（還沒有讀數也畫）；你貼上路徑送出就記已接手，新回合開始這行收掉', async ($, on) => {
+  mock.clock(on, { now: 10 * HOUR })
+  const w = world($, on, { store: new Map([['pickupSince', 0]]) })
+  await start($)
+  await turn($, w, 100_000)
+  manualHandoff(w, HANDOFF, 10 * HOUR - 60_000)
+  await w.clear()
+  expect((await band($)).text).toContain('待接手：20261005-133853-mod-backlog-sdlc.md（1 分鐘前，來自 aafa9505）')
+  await $.prompt.submit({ text: RESUME, wait: false, origin: { kind: 'composer' } })
+  await $.turn.start({ text: RESUME, turnId: 't-pickup' })
+  expect((await band($)).text).not.toContain('待接手')
+  expect(w.files.has(PICKED_HANDOFF)).toBe(true)
+  await w.clear()
+  expect((await band($)).text).not.toContain('待接手')
+})
+
+test('handoff-pickup：接回舊對話（已有訊息）不列', async ($, on) => {
+  mock.clock(on, { now: 10 * HOUR })
+  const w = world($, on, { store: new Map([['pickupSince', 0]]), messages: [{ role: 'user', text: '之前的訊息' }] })
+  manualHandoff(w, HANDOFF, 9 * HOUR)
+  await start($)
+  expect((await band($)).text).not.toContain('待接手')
+})
+
+test('handoff-pickup：自動交接在 /clear 前就記已接手，之後手動 clear 也不列它', async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world($, on, { store: new Map([['pickupSince', 0]]) })
+  await start($)
+  await turn($, w, 450_000)
+  await clock.advance(60_000)
+  await clock.settle()
+  const [path = ''] = handoffFiles(w)[0] ?? []
+  expect(w.files.has(`${ROOT}/handoff/.picked/${path.slice(path.lastIndexOf('/') + 1)}`)).toBe(true)
+  await w.clear()
+  expect((await band($)).text).not.toContain('待接手')
+})
+
+test('handoff-pickup：接續送出被擋就留著這行，不記已接手', async ($, on) => {
+  mock.clock(on, { now: 10 * HOUR })
+  const w = world($, on, { store: new Map([['pickupSince', 0]]), failSubmit: true })
+  manualHandoff(w, HANDOFF, 9 * HOUR)
+  await start($)
+  await (await band($)).ui.press({ key: 'pickup' })
+  expect(w.submitted).toEqual([])
+  expect(w.files.has(PICKED_HANDOFF)).toBe(false)
+  expect((await band($)).text).toContain('待接手')
 })

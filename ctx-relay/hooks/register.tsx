@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderElement, RenderInput, SessionContextUsage, Timer, TurnCompleteInput } from 'claude-code'
 
-import type { Auto, Limits, Reading, Receipt } from '../types'
+import type { Auto, Limits, Pickup, Reading, Receipt } from '../types'
 
 // ctx-relay：提示框上方一行，顯示每輪花費與距交接線的剩餘空間；
 // 主對話停下（classic.Stop）時 context 越過自動交接線 → 引擎回報沒有背景工作就倒數 60 秒 →
@@ -12,6 +12,11 @@ import type { Auto, Limits, Reading, Receipt } from '../types'
 //
 // /clear 之後（P1 probe 實測）：$.state 歸零、模組變數與 $.clock 計時器保留、session.start 不重跑。
 // 所以要撐過 clear 的東西放模組變數，clear 前先取消計時器。
+//
+// handoff-pickup：新對話開場（session.start 且還沒有訊息，或 /clear 之後）找還沒人接手的交接檔，
+// band 多一行「待接手」＋接續按鈕（hotkey 1）；新回合開始就收掉。
+// 已接手＝<root>/handoff/.picked/<檔名> 空檔：按接續、你送出的訊息含交接檔完整路徑、mod 自己自動交接時寫。
+// 第一次啟用前就有的交接檔（mtime 早於 $.store 的 pickupSince）一律算已接手。
 
 const HISTORY = 12
 const HEADROOM_SAMPLE = 5
@@ -34,6 +39,9 @@ const SLOTS = [
   ['POINTERS', '指標'],
 ] as const
 const FIELDS = SLOTS.map(([, title]) => title)
+// 已接手標記的資料夾：點開頭，handoff skill 用 `ls -t handoff/ | head -1` 找最新交接檔時看不到它
+const PICKED = '.picked'
+const SINCE_KEY = 'pickupSince'
 const CONTRACT = '協調契約'
 const CONSTRAINT_KEYS = ['stop_status', 'unresolved_prerequisite', 'responsible_authority', 'admissible_fallback'] as const
 
@@ -99,6 +107,9 @@ let ownClear = false
 let prepGen = 0
 // userConfig handoffTokens（0＝自動）；改設定會重新載入模組，所以每次 register 讀一次就好
 let handoffTokens = 0
+// 待接手的交接檔（撐過 /clear）與 session.start 時算好的 harness root（prompt.submit 比對路徑用，免得每則訊息都跑 bash）
+let pickup: Pickup | null = null
+let pickupRoot = ''
 
 export const register: Register = (on, options) => {
   handoffTokens = typeof options.handoffTokens === 'number' ? options.handoffTokens : 0
@@ -109,6 +120,13 @@ export const register: Register = (on, options) => {
     prepGen += 1
     stopWork = []
     if (!ownClear) lastHandoff = null
+    pickup = null
+    // 你手動 /clear：接下來是新對話（session.start 不會再跑），在這裡找待接手的交接檔。
+    // mod 自己的 clear 不找：它接著就送出交接檔路徑
+    if (e.reason === 'clear' && !ownClear) {
+      await scanPickup($)
+      $.ui.invalidate('ui.render')
+    }
     return next(e)
   })
 
@@ -120,6 +138,11 @@ export const register: Register = (on, options) => {
     await update($, readingsAtom, list => (list.length > 0 ? list : [{ tokens, costUsd: usage.cost?.usd ?? 0 }]))
     await update($, limitsAtom, () => deriveLimits(usage.context))
     await rearm($)
+    pickupRoot = await harnessRoot($)
+    // 還沒有任何訊息＝新對話；--resume 接回的舊對話與 hot reload 不找
+    if (await $.session.messages().then(m => m.length === 0, () => false)) {
+      await scanPickup($)
+    }
     $.ui.invalidate('ui.render')
     // 名稱衝突會丟例外並中斷本 hook，所以放最後並各自包住
     for (const [name, description] of [
@@ -170,6 +193,10 @@ export const register: Register = (on, options) => {
       if (auto.phase === 'countdown' || auto.phase === 'preparing') {
         await cancel($, '你送出了訊息')
       }
+      // 訊息裡帶交接檔完整路徑＝你接手了那份（手動貼上的接續指令）
+      if (pickupRoot !== '' && e.text.includes('/handoff/')) {
+        for (const m of e.text.matchAll(handoffPattern(pickupRoot, 'g'))) await markPicked($, m[0])
+      }
     }
     return next(e)
   })
@@ -177,6 +204,11 @@ export const register: Register = (on, options) => {
   // 主對話開了新回合（排程、背景通知、別的 session 傳訊；子代理不發 turn.start）：
   // 這次倒數或準備作廢、回到 idle，回合結束時再重新判斷。你親手送出的訊息在上面已改成 cancelled，這裡不動
   on('turn.start', async ($, e, next) => {
+    // 主對話開始跑（你送出、按接續、排程）＝不再是新對話開場，待接手那行收掉
+    if (pickup !== null) {
+      pickup = null
+      $.ui.invalidate('ui.render')
+    }
     const auto = await read($, autoAtom)
     if (auto.phase === 'countdown' || auto.phase === 'preparing') {
       disarm()
@@ -236,9 +268,11 @@ export const register: Register = (on, options) => {
     // band 只有一個：先讓排在下面的 mod 畫（例如 blast-radius 在窄終端機把 Proceed／Cancel 畫在這裡），
     // 自己這行疊在它下面；只回自己的 tree 會把它整個蓋掉
     const below = await next(e)
-    const mine = await drawBand($, e)
-    if (mine === null) return below
-    if (!below) return mine
+    // 待接手那行獨立畫：/clear 後還沒有讀數時 drawBand 回 null，這行仍要出現
+    const mine = [await drawBand($, e), await drawPickup($, e)].filter((x): x is RenderElement => x !== null)
+    const [only, ...rest] = mine
+    if (only === undefined) return below
+    if (!below && rest.length === 0) return only
     const { Box } = $.ui.resolve(e)
     return (
       <Box flexDirection="column">
@@ -332,6 +366,32 @@ async function drawBand($: EngineInterface, e: RenderInput<'AbovePrompt'>): Prom
       <Text color={color} wrap="truncate-end">
         {segments}
       </Text>
+    </Box>
+  )
+}
+
+// 待接手那行；沒有待接手的交接檔時回 null
+async function drawPickup($: EngineInterface, e: RenderInput<'AbovePrompt'>): Promise<RenderElement | null> {
+  const p = pickup
+  if (p === null) return null
+  const { Box, Button, Text } = $.ui.resolve(e)
+  const now = await $.clock.now()
+  const segments = [
+    <Text>{` ${INVADER} 待接手：`}</Text>,
+    <Text color={VALUE} bold>{p.name}</Text>,
+    <Text color={LABEL}>{`（${ago(now - p.mtimeMs)}${p.from === '' ? '' : `，來自 ${p.from}`}）`}</Text>,
+  ]
+  if (p.more > 0) segments.push(<Text color={ORANGE} bold>{` +${p.more}`}</Text>)
+  segments.push(<Text> </Text>)
+  return (
+    <Box flexDirection="row">
+      <Box flexDirection="row" backgroundColor={BG[SKY]}>
+        <Text color={SKY} wrap="truncate-end">
+          {segments}
+        </Text>
+      </Box>
+      <Text> </Text>
+      <Button key="pickup" label="PUSH 1 接續" hotkey="1" onPress={() => pickUp($, p)} />
     </Box>
   )
 }
@@ -473,8 +533,7 @@ async function prepare($: EngineInterface, gen: number) {
     if (!(await isMine())) return
     const source = { id: await $.session.id(), turns: mainTurns }
     const cwd = await $.session.cwd()
-    const rootRun = await $.process.run(['bash', '-c', ROOT_SH, 'ctx-relay', cwd])
-    const root = rootRun.exitCode === 0 ? rootRun.stdout.trim() : ''
+    const root = await harnessRoot($)
     if (root === '') return await fail('無法定位 harness root')
 
     const git = await gitTruth($, cwd)
@@ -534,6 +593,8 @@ async function prepare($: EngineInterface, gen: number) {
 
     disarm()
     lastHandoff = { path }
+    // clear 前就記已接手：新對話開場不會先閃一行「待接手」；送出失敗時 band 另有手動接續的提示
+    await markPicked($, path)
     ownClear = true
     try {
       await $.command.run({ command: 'clear' })
@@ -593,11 +654,16 @@ async function readOr($: EngineInterface, path: string, fallback: string): Promi
   }
 }
 
+// 交接檔的完整路徑 <root>/handoff/<檔名>.md；檔名不含 /，.picked/ 底下的標記檔不算
+function handoffPattern(root: string, flags = ''): RegExp {
+  return new RegExp(`${escapeRegExp(root)}/handoff/[^\\s\`'"）)/]+\\.md`, flags)
+}
+
 // 本對話的來源交接檔：前幾則使用者訊息裡第一個指向 <root>/handoff/*.md 的路徑
 async function findSourceHandoff($: EngineInterface, root: string): Promise<string | null> {
   try {
     const messages = await $.session.messages()
-    const pattern = new RegExp(`${escapeRegExp(root)}/handoff/[^\\s\`'"）)]+\\.md`)
+    const pattern = handoffPattern(root)
     for (const m of messages.filter(x => x.role === 'user').slice(0, 5)) {
       const hit = pattern.exec(m.text)
       if (hit) return hit[0]
@@ -721,6 +787,69 @@ function resumeText(path: string, slug: string): string {
   ].join('\n')
 }
 
+function pickupText(path: string): string {
+  return `讀 ${path} 並依其接續執行；先確認 git 狀態與下一步再動手。`
+}
+
+// 任何一步失敗印空字串
+async function harnessRoot($: EngineInterface): Promise<string> {
+  try {
+    const r = await $.process.run(['bash', '-c', ROOT_SH, 'ctx-relay', await $.session.cwd()])
+    return r.exitCode === 0 ? r.stdout.trim() : ''
+  } catch {
+    return ''
+  }
+}
+
+// 找最新一份還沒人接手的交接檔放進 pickup；找不到或出錯就是 null
+async function scanPickup($: EngineInterface) {
+  pickup = null
+  if (pickupRoot === '') return
+  const dir = `${pickupRoot}/handoff`
+  try {
+    if (!(await $.fs.exists(dir))) return
+    // 第一次啟用時記下時間點：之前就有的交接檔（多半早已接手）不列
+    const stored = await $.store.get(SINCE_KEY)
+    const since = typeof stored === 'number' ? stored : await $.clock.now()
+    if (since !== stored) await $.store.set(SINCE_KEY, since)
+    const picked = new Set((await $.fs.exists(`${dir}/${PICKED}`)) ? (await $.fs.list(`${dir}/${PICKED}`)).map(f => f.name) : [])
+    const waiting = (await $.fs.list(dir))
+      .filter(f => f.kind === 'file' && f.name.endsWith('.md') && f.mtimeMs >= since && !picked.has(f.name))
+      .sort((a, b) => b.mtimeMs - a.mtimeMs)
+    const newest = waiting[0]
+    if (newest === undefined) return
+    const path = `${dir}/${newest.name}`
+    // 手動交接檔頭寫「session `<id>`」，ctx-relay 的寫「前一個 session `<id>`」
+    const from = /session `([0-9a-f]{8})/.exec(await readOr($, path, ''))?.[1] ?? ''
+    pickup = { path, name: newest.name, mtimeMs: newest.mtimeMs, from, more: waiting.length - 1 }
+  } catch (err) {
+    $.ui.log(`${TAG} 找待接手的交接檔失敗：${String(err)}`)
+  }
+}
+
+async function markPicked($: EngineInterface, path: string) {
+  try {
+    await $.fs.write(`${path.slice(0, path.lastIndexOf('/'))}/${PICKED}/${basename(path)}`, '')
+  } catch (err) {
+    $.ui.log(`${TAG} 記錄已接手失敗：${String(err)}`)
+  }
+}
+
+// 按接續：先收掉這行（不會按兩次），送出成功才記已接手；被擋或失敗就放回來
+async function pickUp($: EngineInterface, p: Pickup) {
+  pickup = null
+  $.ui.invalidate('ui.render')
+  try {
+    const sent = await $.prompt.submit({ text: pickupText(p.path), asUser: true })
+    if (sent.drop === undefined) return await markPicked($, p.path)
+    $.ui.log(`${TAG} 接續被擋：${sent.drop}`)
+  } catch (err) {
+    $.ui.log(`${TAG} 接續送出失敗：${String(err)}`)
+  }
+  pickup = p
+  $.ui.invalidate('ui.render')
+}
+
 async function setAuto($: EngineInterface, auto: Auto) {
   await update($, autoAtom, () => auto)
 }
@@ -779,6 +908,13 @@ function k(n: number): string {
 
 function signed(n: number): string {
   return n >= 0 ? `+${k(n)}` : `−${k(-n)}`
+}
+
+function ago(ms: number): string {
+  const m = Math.max(0, Math.floor(ms / 60_000))
+  if (m < 60) return `${m} 分鐘前`
+  const h = Math.floor(m / 60)
+  return h < 48 ? `${h} 小時前` : `${Math.floor(h / 24)} 天前`
 }
 
 function duration(ms: number): string {
