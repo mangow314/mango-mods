@@ -10,6 +10,17 @@
 | [your-turn](your-turn/README.md) | 把回覆裡要你親手跑的指令（sudo、`! <cmd>`、叫你自己跑的 shell 區塊）列成對話旁可勾選的清單，帶上回覆裡的說明，全部完成後一鍵回報 |
 | [away-receipt](away-receipt/README.md) | 離開一段時間回來時，對話旁列出離開期間發生了什麼：多久、幾輪、花多少，動過的 repo、跑過的測試、背景工作 |
 
+## 狀態
+- 個人實驗，只在 Claude Code 2.1.289 測過。mods API 還在 early access，Claude Code 改版後可能要跟著改；不保證相容，也不保證回 issue。
+- 裝之前請先讀程式碼：這些 mod 會跑 git 指令、寫檔；ctx-relay 會自動 /clear，並在新對話送出接續訊息。
+
+## 安裝
+```
+claude plugin marketplace add mangow314/mango-mods
+claude plugin install ctx-relay@mango-mods
+```
+其他 mod 把 `ctx-relay` 換成目錄名。
+
 ## 開發與發布
 - 開發時直接載入目錄，不要用已安裝的副本，因為已安裝的 plugin 會按版本快取：
   `claude --plugin-dir ~/projects/mango-mods/<plugin>`
