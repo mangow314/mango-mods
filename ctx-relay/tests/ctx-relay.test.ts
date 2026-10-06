@@ -712,6 +712,19 @@ test('fork 缺欄位：照寫檔並在檔頭標 thin', async ($, on) => {
   expect(w.cleared).toBe(1)
 })
 
+test('附了指令但交接檔缺硬約束：接續訊息照附原話，但改成先回報、等使用者確認再動手', async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world($, on, { forkText: GOOD.replace('stop_status: 不 commit', 'stop_status:') })
+  await start($)
+  await turn($, w, 100_000)
+  await $.command.run({ command: 'ctx-relay-now', args: 'yes do B', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 160 } })
+  await clock.settle()
+  expect(w.cleared).toBe(1)
+  expect(w.submitted[0]).toContain('> do B')
+  expect(w.submitted[0]).toContain('等使用者確認再動手')
+  expect(w.submitted[0]).not.toContain('不用等使用者再說一次')
+})
+
 test('來源交接檔帶協調契約：fork 沒寫，mod 照原文附上', async ($, on) => {
   const clock = mock.clock(on)
   const source = `${ROOT}/handoff/20261003-120000-prev.md`
