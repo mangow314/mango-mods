@@ -3,10 +3,10 @@ import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 // 測試裡的引擎：記下打開 pane、toast 與替使用者送出的訊息；placed＝false 模擬終端機太窄、pane 沒畫出來
-type World = { opens: { id: string; focus?: true }[]; closes: string[]; toasts: string[]; submitted: string[]; placed: boolean }
+type World = { opens: { id: string; focus?: true }[]; closes: string[]; copies: string[]; toasts: string[]; submitted: string[]; placed: boolean }
 
 function world(on: On): World {
-  const w: World = { opens: [], closes: [], toasts: [], submitted: [], placed: true }
+  const w: World = { opens: [], closes: [], copies: [], toasts: [], submitted: [], placed: true }
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('command.register', (_$, e) => ({ value: { command: e.name } }))
   on('turn.complete', (_$, e) => ({ text: e.answer }))
@@ -17,6 +17,10 @@ function world(on: On): World {
   on('ui.close', (_$, e) => {
     w.closes.push(e.id)
     return { value: undefined }
+  })
+  on('ui.copy', (_$, e) => {
+    w.copies.push(e.text)
+    return { value: { isCopied: true as const } }
   })
   on('ui.toast', (_$, e) => {
     w.toasts.push(e.text)
@@ -253,4 +257,26 @@ test('按 q 關掉 pane：有指令時接在按鍵列尾，清單空的時候也
   expect((await view(ui)).text).toContain('1–2 勾選 │ 再按一次 取消 │ ')
   await close()
   expect(w.closes).toEqual(['your-turn', 'your-turn'])
+})
+
+test('按 y 再按編號：複製那條指令、不勾選，toast 說複製了哪條；複製完回到勾選', async ($, on) => {
+  const w = world(on)
+  await reply($, TWO)
+  const ui = await mount($)
+  await ui.press({ key: 'yank' })
+  const pending = await view(ui)
+  expect(pending.text).toContain('1–2 按編號複製那條指令')
+  expect(pending.labels).toContain('取消複製')
+  await ui.press({ key: 'step-2' })
+  expect(w.copies).toEqual(['sudo systemctl enable --now foo.service'])
+  expect(w.toasts).toEqual(['your-turn：已複製第 2 條'])
+  expect((await view(ui)).struck).toEqual([])
+  await ui.press({ key: 'step-2' })
+  expect((await view(ui)).struck).toEqual(['sudo systemctl enable --now foo.service'])
+  // 再按一次 y 取消：按編號照常勾選
+  await ui.press({ key: 'yank' })
+  await ui.press({ key: 'yank' })
+  await ui.press({ key: 'step-1' })
+  expect(w.copies).toHaveLength(1)
+  expect((await view(ui)).struck).toHaveLength(2)
 })

@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
+import type { EngineInterface, Register, UiPressArgument } from 'claude-code'
 
 import type { Step } from '../types'
 
@@ -10,11 +10,12 @@ import type { Step } from '../types'
 // 每段指令（一個程式碼區塊，或一行裡的行內 `! cmd`）上方帶回覆裡的前一句當說明（等多久、等什麼再跑）。
 // 抽到指令就重算清單、打開對話旁的 pane（主動打開：終端機 ≥144 欄才畫，你用 /your-turn 開過一次後降到 110 欄；
 // 沒畫出來就跳 toast 提示打 /your-turn；提示框是空的才拿得到焦點）。
-// pane 有焦點時按數字鍵勾完成、按 q 關掉；全部勾完出現「回報」，按下替你送出「N/N 完成了」。mod 只整理清單，不代跑任何指令。
+// pane 有焦點時按數字鍵勾完成、按 q 關掉；按 y 再按編號，把那條指令複製到剪貼簿（指令太長、pane 顯示不完時用）。
+// 全部勾完出現「回報」，按下替你送出「N/N 完成了」。mod 只整理清單，不代跑任何指令。
 
 const PANE = 'your-turn'
 const TITLE = '要你跑的指令'
-// Button 的 hotkey 只收一個數字：前 9 條有數字鍵，第 10 條起只能用滑鼠點
+// Button 的 hotkey 只收一個數字或小寫字母：前 9 條有數字鍵，第 10 條起只能用滑鼠點
 const MAX_KEYS = 9
 
 // TUI 面板樣式（學 lazygit／btop）：連續在同一處跑的指令一個圓角框，標題嵌在上框線；底部是進度條加 lazygit 式按鍵列。
@@ -41,6 +42,8 @@ const GROUPS = [
 ] as const
 
 const stepsAtom = atom({ plugin: 'your-turn', key: 'steps' } as const, [] as Step[])
+// 按了 y、等你按編號：這時按編號是複製，不是勾選（像 vim 的 y3）
+const yankAtom = atom({ plugin: 'your-turn', key: 'yank' } as const, false)
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
@@ -72,6 +75,7 @@ export const register: Register = on => {
     }
     // 照回覆裡出現的順序編號，不按分組重排：前後常有依賴（先裝套件才能啟動服務）
     await update($, stepsAtom, () => cmds.map(c => ({ ...c, isDone: false })))
+    await update($, yankAtom, () => false)
     try {
       const opened = await $.ui.open({ id: PANE, title: TITLE, focus: true })
       if (!opened.isPlaced) $.ui.toast(`your-turn：${cmds.length} 條要你親手跑的指令，終端機太窄沒畫出來，打 /your-turn 打開`, { timeoutMs: 8000 })
@@ -84,6 +88,7 @@ export const register: Register = on => {
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Button, Text } = $.ui.resolve(e)
     const steps = await read($, stepsAtom)
+    const isYanking = await read($, yankAtom)
     // 和 away-receipt 一樣按 q 關；引擎內建的 ctrl+x x 要按兩個鍵。清單空的時候也要有，不然 q 沒作用
     const close = <Button key="close" plain hotkey="q" label="關閉" onPress={() => $.ui.close({ id: PANE })} />
     // 標題是一般文字，不用色塊
@@ -114,7 +119,7 @@ export const register: Register = on => {
       const label = i < MAX_KEYS ? mark : `${i + 1}: ${mark}`
       const keyCols = i < MAX_KEYS ? 3 : 0
       const pad = Math.max(0, width - 7 - keyCols - cols(label) - cols(body))
-      const press = () => toggle($, i)
+      const press = (p: UiPressArgument) => (isYanking ? yank($, s.cmd, i, p) : toggle($, i))
       return (
         <Box key={`row-${i + 1}`} flexDirection="row">
           <Text color={frame}>{'│ '}</Text>
@@ -169,11 +174,15 @@ export const register: Register = on => {
     const key = (s: string) => <Text color={GREEN} bold>{s}</Text>
     const sep = <Text color={DARK_GRAY}>{' │ '}</Text>
     const range = `1–${Math.min(MAX_KEYS, steps.length)}`
-    const keys = isAllDone
-      ? [key('回報'), ' 告訴 Claude 全部完成']
-      : e.props.isFocused
-        ? [key(range), ' 勾選', sep, key('再按一次'), ' 取消']
-        : [key('ctrl+x tab'), ' 切過來', sep, key(range), ' 勾選']
+    const keys = isYanking
+      ? [key(range), ' 按編號複製那條指令']
+      : isAllDone
+        ? [key('回報'), ' 告訴 Claude 全部完成']
+        : e.props.isFocused
+          ? [key(range), ' 勾選', sep, key('再按一次'), ' 取消']
+          : [key('ctrl+x tab'), ' 切過來', sep, key(range), ' 勾選']
+    // 再按一次 y 取消複製模式
+    const yankButton = <Button key="yank" plain hotkey="y" label={isYanking ? '取消複製' : '複製'} onPress={() => update($, yankAtom, v => !v)} />
     return (
       <Box flexDirection="column">
         {header}
@@ -185,9 +194,11 @@ export const register: Register = on => {
             <Text color={DARK_GRAY}>{TRACK.repeat(track - filled)}</Text>
             <Text color={isAllDone ? GREEN : GRAY}>{` ${done}/${steps.length}`}</Text>
           </Text>
-          {/* 關閉鈕接在按鍵列尾：引擎畫成「q: 關閉」 */}
+          {/* 複製、關閉鈕接在按鍵列尾：引擎畫成「y: 複製」「q: 關閉」 */}
           <Box flexDirection="row">
             <Text>{keys}{sep}</Text>
+            {yankButton}
+            <Text>{sep}</Text>
             {close}
           </Box>
         </Box>
@@ -280,6 +291,13 @@ function isPlaceholder(cmd: string): boolean {
 
 async function toggle($: EngineInterface, i: number) {
   await update($, stepsAtom, list => list.map((s, j) => (j === i ? { ...s, isDone: !s.isDone } : s)))
+}
+
+// 複製後回到勾選模式；複製本身看不到，用 toast 告訴你複製了哪條。! 開頭的連 ! 一起複製，貼到提示框就能跑
+async function yank($: EngineInterface, cmd: string, i: number, p: UiPressArgument) {
+  await update($, yankAtom, () => false)
+  const copied = await $.ui.copy({ text: cmd, surface: p.surface })
+  $.ui.toast(copied.isCopied ? `your-turn：已複製第 ${i + 1} 條` : `your-turn：沒有複製到（${copied.reason}）`, { timeoutMs: 4000 })
 }
 
 async function report($: EngineInterface, total: number) {

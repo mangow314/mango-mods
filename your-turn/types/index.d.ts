@@ -7,6 +7,8 @@ declare module 'claude-code' {
     'your-turn': {
       // 最近一則帶指令的回覆抽出的清單；$.state 在 /clear 後歸零
       steps: Step[]
+      // 按了 y、等使用者按編號複製
+      yank: boolean
     }
   }
 }
