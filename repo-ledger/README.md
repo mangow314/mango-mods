@@ -6,13 +6,15 @@
 實機測試過的版本：Claude Code 2.1.289（0.1.0，用 `--plugin-dir` 載入；測過兩個 repo 各改一個檔、其中一個 commit 後變打勾、和 ctx-relay 同時顯示）。mods API 還在 early access，改版後可能要跟著調整。
 
 ## band
-`󰊢 repoA(master) 1 · repoB(master) ✓ · 本輪 2 檔`
+![repo-ledger band 實機畫面（上面那行；下面那行是 ctx-relay）](../docs/assets/bands.png)
+
+Claude Code 2.1.290 實機截圖，上面那行是 repo-ledger：`demo-app(main) 1 · 本輪 2 檔`。動過好幾個 repo 時排成一行，例如 `repoA(master) 1 · repoB(master) ✓ · 本輪 2 檔`。
 
 - 每個 repo 顯示 `名稱(分支)`，後面是未 commit 的檔案數（含未追蹤的檔，橘色）；乾淨的顯示灰色打勾。
 - `↑N`：還沒 push 的 commit 數。`⎇N`：這個 repo 另外開的 worktree 數。
 - `本輪 N 檔`：你上次送出訊息以來，Edit／Write 過的 repo 內檔案數；超過 5 檔變橘色，改太多時早點看到。
 - 沒有未 commit 的檔、本輪也沒改檔時，整行不畫。只剩未 push 的 commit 不會讓這行留著。
-- 別的 mod 也畫 band 時（例如 ctx-relay），它的內容在上、這行在下。
+- 別的 mod 也畫 band 時（例如 ctx-relay），兩行上下疊在一起。誰在上由載入順序決定：上圖四個 mod 一起用 `--plugin-dir` 載入時，repo-ledger 在上。
 - 圖示要 Nerd Font，沒有的話開頭會是方框。
 
 ## 追蹤哪些 repo

@@ -38,9 +38,11 @@ echo '{"handoffTokens": "400000"}' | claude plugin configure ctx-relay@mango-mod
 用 `claude --plugin-dir` 載入時讀不到已安裝版本的 `handoffTokens`，交接線會是自動值。
 
 ## band
-`󰯉 󰯉 󰊠  CTX 220K/400K · 本輪 +20K $0.50 12s 90% · STAGE 10 輪 ▁▂▃▅`
+![ctx-relay band 實機畫面（下面那行；上面那行是 repo-ledger）](../docs/assets/bands.png)
 
-8-Bit 街機計分板樣式。倒數時整行換成 `󰯉 CONTINUE? 42s（400K 存檔交接／任發訊息取消）`，旁邊是取消按鈕（按 1）。
+Claude Code 2.1.290 實機截圖，下面那行是 ctx-relay（上面那行是 repo-ledger）：`CTX 51K/142K · 本輪 +51K $0.18 44s 92%`，後面是長條。
+
+8-Bit 街機計分板樣式。倒數時整行換成「CONTINUE? 42s（400K 存檔交接／任發訊息取消）」，旁邊是取消按鈕（按 1）。
 
 - 三隻小怪獸是離交接線的 HP（token ÷ 交接線）：<40% 三隻；<70% 一隻變鬼魂；到提醒線前剩一隻＋兩隻鬼魂；過提醒線換骷髏；越過交接線全是骷髏。
 - 顏色：天藍＝正常、橘＝過提醒線、朱紅＝過交接線／倒數／失敗。底色跟著三態變深藍／暗橘／暗紅。
@@ -57,7 +59,9 @@ git repo：`<git-common-dir>/harness/handoff/`；非 git：`~/.claude/harness/<�
 有 `<同一根目錄>/progress/<session id>/INDEX.md` 的話，會一起交給 fork 參考。
 
 ## 待接手（handoff-pickup）
-`󰯉 待接手：20261005-133853-mod-backlog-sdlc.md（3 小時前，來自 aafa9505） +1  [PUSH 1 接續]`
+![ctx-relay 待接手實機畫面：band 下面多一行，按 1 接續](../docs/assets/ctx-relay-pickup.png)
+
+還有其他沒接手的交接檔時，檔名後面會多一個 `+N`。
 
 | 什麼時候 | 會發生什麼 |
 |---|---|

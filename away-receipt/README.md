@@ -7,27 +7,9 @@ mod 只跑 git 查狀態，不代跑其他指令。
 實機測過的版本：Claude Code 2.1.289（0.1.0，用 `--plugin-dir` 載入；在 160 欄的 tmux 測過 `/receipt` 打開、新 commit、未 commit 檔、`make test` 失敗 exit 2 標紅、`claude plugin test` exit 0、背景 shell 完成、按 q 關掉、再打 `/receipt` 紀錄還在；送出訊息 22 分鐘後打一個字自動打開、焦點留在提示框、關掉後清空草稿重打不再打開；0.2.0 測過按 1 把失敗的 `make test` 填進提示框、收據關掉、接著打字進提示框）。mods API 還在 early access，改版後可能要跟著調整。
 
 ## pane
-```
-離開 7h12m · 跑了 23 輪 · $4.10
+![away-receipt 實機畫面：新 commit、未 commit 檔、一個失敗一個通過的測試](../docs/assets/away-receipt.png)
 
-󰊢 mango-mods (master)
-  新 commit 2 個
-    4a94b5c your-turn 0.2.0：清單照回覆順序
-    f437f18 your-turn：pane 改成 TUI 面板樣式
-  未 commit 1 檔
-    ?? away-receipt/
-  ⎇ /home/mango/projects/mango-mods-wt1 (feature)
-
-驗證  按 1 把失敗的指令填進提示框
-  ✔ exit 0 ×3  claude plugin test .
-  1: ✗ exit 2  make test
-
-背景工作
-  ✔ Agent "研究 API" finished
-  ✗ Background command "npm run build" failed (exit code 1)（failed）
-
-q: 關閉
-```
+Claude Code 2.1.290 實機截圖：這段時間 1 個新 commit、1 個未 commit 檔，`make test` 失敗、`npm test` 通過。有背景工作時，驗證段下面還會多一段「背景工作」；有別的 worktree 時，repo 段多一行 `⎇ <路徑> (<分支>)`。
 
 - 第一行：離開多久（從你上次送出訊息算起）、這段時間主對話跑了幾輪（子代理的不算）、花了多少（session 累計花費的差額）。
 - 每個動過的 repo 一段：分支、離開期間的新 commit（短 hash＋標題）、還沒 commit 的檔（`git status --porcelain` 原樣）、別的 worktree。新 commit、未 commit 檔各最多列 10 條，其餘寫「還有 N 個」。repo 乾淨又沒有新 commit 時只畫一行「✓ 沒有新 commit、沒有未 commit 檔」。
