@@ -11,7 +11,7 @@ import type { Step } from '../types'
 // 抽到指令就重算清單、打開對話旁的 pane（主動打開：終端機 ≥144 欄才畫，你用 /your-turn 開過一次後降到 110 欄；
 // 沒畫出來就跳 toast 提示打 /your-turn；提示框是空的才拿得到焦點）。
 // pane 有焦點時按數字鍵勾完成、按 q 關掉；按 y 再按編號，把那條指令複製到剪貼簿（指令太長、pane 顯示不完時用）。
-// 全部勾完出現「回報」，按下替你送出「N/N 完成了」。mod 只整理清單，不代跑任何指令。
+// 全部勾完出現「回報」，按 r 或點它替你送出「N/N 完成了」。mod 只整理清單，不代跑任何指令。
 
 const PANE = 'your-turn'
 const TITLE = '要你跑的指令'
@@ -177,7 +177,7 @@ export const register: Register = on => {
     const keys = isYanking
       ? [key(range), ' 按編號複製那條指令']
       : isAllDone
-        ? [key('回報'), ' 告訴 Claude 全部完成']
+        ? [key('r'), ' 回報：告訴 Claude 全部完成']
         : e.props.isFocused
           ? [key(range), ' 勾選', sep, key('再按一次'), ' 取消']
           : [key('ctrl+x tab'), ' 切過來', sep, key(range), ' 勾選']
@@ -203,7 +203,7 @@ export const register: Register = on => {
           </Box>
         </Box>
         {isAllDone && (
-          <Button key="report" variant="primary" label={`回報 ${steps.length}/${steps.length} 完成`} onPress={() => report($, steps.length)} />
+          <Button key="report" variant="primary" hotkey="r" label={`回報 ${steps.length}/${steps.length} 完成`} onPress={() => report($, steps.length)} />
         )}
       </Box>
     )

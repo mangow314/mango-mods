@@ -174,7 +174,7 @@ test('同一條指令在後面的步驟再出現就再列一次；緊接著重�
   expect(v.borders).toEqual(['#8ec07c', '#fabd2f', '#8ec07c', '#fabd2f'])
 })
 
-test('數字鍵勾選、再按取消；全部勾完出現回報，按下送出「N/N 完成了」', async ($, on) => {
+test('數字鍵勾選、再按取消；全部勾完出現回報（按 r），按下送出「N/N 完成了」', async ($, on) => {
   const w = world(on)
   await reply($, TWO)
   const ui = await mount($)
@@ -194,7 +194,9 @@ test('數字鍵勾選、再按取消；全部勾完出現回報，按下送出�
   expect(done.struck).toEqual(['sudo pacman -S foo', 'sudo systemctl enable --now foo.service'])
   expect(done.labels).toContain('回報 2/2 完成')
   expect(done.text).toContain(' 2/2')
-  expect(done.text).toContain('回報 告訴 Claude 全部完成')
+  expect(done.text).toContain('r 回報：告訴 Claude 全部完成')
+  const reportBtn = (await ui.findAll({ type: 'Button' })).find(b => b.key === 'report')
+  expect(reportBtn?.props.hotkey).toBe('r')
   expect(done.filled).toBe(16)
   // 全做完：框線變深灰
   expect(done.borders).toEqual(['#504945'])
