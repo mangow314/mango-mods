@@ -1,56 +1,153 @@
 # your-turn
 
-一個 Claude Code mod：把最後一則回覆裡要你親手跑的指令，列成對話旁 pane 裡的清單。
-sudo 這類步驟一定由你自己跑，指令卻常埋在長回覆裡；跑完按數字鍵勾掉，全部勾完按 r 回報，就送出「N/N 完成了」。
-mod 只整理清單，不代跑任何指令。
+> 繁體中文版：[README.zh-TW.md](README.zh-TW.md). The mod's on-screen text is
+> in Traditional Chinese, and it recognizes "run this yourself" hints written
+> in Chinese.
 
-實機測過的版本：Claude Code 2.1.289（0.1.0，用 `--plugin-dir` 載入；測過 141 欄時跳 toast、`/your-turn` 打開、數字鍵勾選、回報按鈕出現；powerline 第一版測過按「回報」送出「3/3 完成了」、新指令整份換掉；TUI 面板這版在 160 欄的 tmux 測過框線標題、右緣對齊、勾完框線變灰、回報按鈕出現；0.2.0 測過照回覆順序切成三個框、只有勾完的那框變灰；0.3.0 測過「請你在終端機登入 gcloud」那塊兩行都列、「我剛剛跑了」的 ls 不列、每段上方的說明行、全勾後出現回報；0.6.0 在 2.1.290 測過全勾後按 r 送出「5/5 完成了」）。mods API 還在 early access，改版後可能要跟著調整。
+A Claude Code mod that turns the commands Claude's last reply asks you to run
+yourself into a checklist in a pane beside the conversation.
+Steps like `sudo` are always yours to run, yet the commands are often buried in
+a long reply. Tick each one off with its number key once it has run; when all
+are ticked, press `r` to report, which sends "N/N 完成了" ("N/N done").
+The mod only organizes the list; it never runs a command for you.
 
-## pane
-![your-turn 實機畫面：5 條指令分成兩框，勾掉 2 條](../docs/assets/your-turn.png)
+Tested on: Claude Code 2.1.289 (0.1.0, loaded with `--plugin-dir`; tested the
+toast at 141 columns, opening with `/your-turn`, ticking with number keys, and
+the report button appearing; the first, powerline-style version was tested
+sending "3/3 完成了" from the report button and replacing the whole list on new
+commands; the TUI-panel version was tested in a 160-column tmux for frame
+titles, right-edge alignment, frames turning gray when done, and the report
+button; 0.2.0 was tested splitting into three frames in reply order with only
+the finished frame turning gray; 0.3.0 was tested listing both lines of a
+"請你在終端機登入 gcloud" ("please log in to gcloud in your terminal") block,
+not listing an `ls` after "我剛剛跑了" ("I just ran"), the note line above each
+step, and the report button after ticking everything; 0.6.0 was tested on
+2.1.290 sending "5/5 完成了" by pressing `r` after ticking everything). The
+mods API is still in early access, so a Claude Code release may require
+changes.
 
-Claude Code 2.1.290 實機截圖：回覆要你親手跑 5 條指令，分成「在終端機跑」「在提示框打」兩框，已勾掉 1、2。全部勾完時：
+## The pane
 
-![your-turn 全部勾完：框線變灰，按 r 回報](../docs/assets/your-turn-done.png)
+![your-turn in a live session: 5 commands in two frames, 2 ticked off](../docs/assets/your-turn.png)
 
-分組圖示是 Nerd Font 的 U+F120、U+F075，沒有 Nerd Font 的話會是方框。
+A live Claude Code 2.1.290 session: the reply asks you to run 5 commands by
+hand, split into two frames, 在終端機跑 ("run in a terminal") and 在提示框打
+("type in the prompt"); 1 and 2 are ticked. With everything ticked:
 
-- TUI 面板樣式（學 lazygit、btop）：標題是一般文字；連續在同一處跑的指令一個圓角框，組名嵌在上框線；底部是進度條加 lazygit 式按鍵列。標題、每組、底部之間各空一行。
-- 配色和終端機一致，用 Gruvbox Dark Hard 的 bright 色：黃 `#fabd2f`＝在終端機跑，水綠 `#8ec07c`＝在提示框打，綠 `#b8bb26`＝完成與按鍵。框裡還有沒做完的指令時，框線用該組顏色；整框做完，框線變深灰 `#504945`。
-- 框線用文字畫：Box 自帶的框線會蓋在子元素上面，組名疊不上去（2026-10-05 實測）。右框線靠 pane 寬度和欄寬計算對齊，中日韓字算 2 欄。
-- 底部進度條做完的格子塗綠、其餘深灰，最長 16 格，pane 窄時跟著縮。
-- 照在哪裡跑分組：sudo 和其他要你另開終端機的指令放「在終端機跑」；`!` 開頭的放「在提示框打」（在 Claude 的提示框打）。
-- 每段指令（一個程式碼區塊，或一行裡的行內 `! cmd`）上方有一行淡灰說明，照抄回覆裡的前一句（例如「等安裝完再啟動服務：」「要跑約 2 分鐘：」），太長截斷。前一句是程式碼區塊外最近一行非空白的字；行內 `! cmd` 用它所在的那一行。同一句只出現一次；兩個程式碼區塊中間沒有字時，後一塊不帶說明。
-- 編號照回覆裡出現的順序，不按分組重排。連續在同一處跑的指令放同一框，換地方跑就開新框，所以同一組可能出現兩個框（例如先 `! whoami`、再 3 條 sudo、再 `! claude plugin list`，會畫成提示框 1、終端機 2–4、提示框 5 三個框）。
-- 每列：編號、○／✔、指令（太長就截斷）。做完的指令加刪除線並變淡。
-- 再按一次數字鍵取消勾選。前 9 條有數字鍵，第 10 條起只能用滑鼠點。
-- 按 q 關掉清單（和 away-receipt 一樣）。「q: 關閉」接在按鍵列尾；清單空的時候也有。
-- 按 y 再按編號（像 vim 的 `y3`），把那條指令複製到剪貼簿，不會勾選；指令太長、pane 顯示不完時用。按了 y 之後按鍵列改成「1–3 按編號複製那條指令」，再按一次 y 取消。複製後跳 toast「已複製第 N 條」，回到勾選模式。`!` 開頭的指令連 `!` 一起複製，貼到提示框就能跑。第 10 條起沒有數字鍵，按了 y 之後用滑鼠點那條的 ○。
-- pane 沒有焦點時，按鍵列改成「ctrl+x tab 切過來 │ 1–3 勾選」。
-- 全部勾完，按鍵列改成「r 回報：告訴 Claude 全部完成」，底部出現「[ 回報 N/N 完成 ]」按鈕，按 r（或滑鼠點）替你送出「N/N 完成了」（來源標成 your-turn，模型看到的是原文）。
+![your-turn with everything ticked: gray frames, press r to report](../docs/assets/your-turn-done.png)
 
-## 哪些算「要你跑的指令」
-- 程式碼區塊裡 `sudo` 開頭的行。照抄提示字元的 `$ sudo …` 也算；行尾 `\` 會接下一行。
-- `! <指令>`：行內 code（例如 `` `! gcloud auth login` ``）或程式碼區塊裡的行。`!` 後面要有空白，`!e.agentId`、`!==` 這類程式碼不算；說明用的佔位寫法（含 `<…>` 的 `! <cmd>`）也不算。
-- 前一句有「你」「手動」「自己」「親手」「在終端機」「另開」任一的 shell 程式碼區塊（語言標記是 bash／sh／shell／zsh／console，或沒有標記）：整塊每一行都算，空行與 `#` 註解除外。例如「請你在終端機登入 gcloud：」接著的 `gcloud auth login`。前一句以「我」開頭的不算（「我自己試了一下：」「我在終端機跑了：」是 Claude 在說它做了什麼）。
-- 其他程式碼區塊裡的一般指令（例如前一句是「我剛剛跑了：」的 `ls`、`git status`）不算。
-- 同一條指令在後面的步驟再出現，就再列一次（例如開頭和最後各 `sudo -k` 一次）；緊接著重複提到的只列一次（「打 `! whoami`，看 `! whoami` 印出誰」）。
-- 分組只看寫法：`!` 開頭的進「在提示框打」（`! sudo …` 也進這組），其他都進「在終端機跑」。
+The group icons are Nerd Font U+F120 and U+F075; without a Nerd Font they
+render as boxes.
 
-## 指令
-- `/your-turn`：打開清單，任何寬度都畫。
+- TUI-panel style (after lazygit and btop): the title is plain text; each run
+  of consecutive commands that run in the same place gets a rounded frame with
+  the group name set into its top border; at the bottom, a progress bar and a
+  lazygit-style key bar. One blank line separates the title, each group, and
+  the bottom.
+- Colors match the terminal, using Gruvbox Dark Hard's bright colors: yellow
+  `#fabd2f` = run in a terminal, aqua `#8ec07c` = type in the prompt, green
+  `#b8bb26` = done and keys. While a frame still has unfinished commands, its
+  border uses the group color; once all are done, it turns dark gray
+  `#504945`.
+- Frames are drawn with text: a Box's own border is painted over its
+  children, so the group name cannot sit on it (measured 2026-10-05). The
+  right border is aligned by computing the pane width and column widths; CJK
+  characters count as 2 columns.
+- In the bottom progress bar, done cells are green and the rest dark gray, up
+  to 16 cells, shrinking with a narrow pane.
+- Grouped by where the command runs: `sudo` and other commands you run in a
+  separate terminal go under 在終端機跑; commands starting with `!` go under
+  在提示框打 (typed into Claude's prompt).
+- Above each step (one code block, or the inline `` `! cmd` `` on one line) is
+  a dim gray note: the sentence before it in the reply, copied as is (for
+  example "wait for the install, then start the service:" or "takes about 2
+  minutes:"), truncated if too long. That sentence is the nearest non-blank
+  line outside a code block; an inline `! cmd` uses its own line. Each
+  sentence appears only once; when two code blocks have no text between them,
+  the second gets no note.
+- Numbering follows the reply's order; groups are not reordered. Consecutive
+  commands that run in the same place share a frame, and a change of place
+  starts a new one, so one group can have two frames (for example
+  `! whoami`, then 3 `sudo` commands, then `! claude plugin list` draws three
+  frames: prompt 1, terminal 2–4, prompt 5).
+- Each row: number, ○ / ✔, command (truncated if too long). Done commands are
+  struck through and dimmed.
+- Press the number key again to untick. The first 9 commands have number keys;
+  from the 10th on, click with the mouse.
+- Press `q` to close the list (as in away-receipt). "q: 關閉" ("close") sits at
+  the end of the key bar, also when the list is empty.
+- Press `y`, then a number (like vim's `y3`), to copy that command to the
+  clipboard without ticking it; useful when a command is too long for the
+  pane. After `y`, the key bar changes to "1–3 按編號複製那條指令" ("press a
+  number to copy that command"); press `y` again to cancel. After copying, a
+  toast says "已複製第 N 條" ("copied #N") and the list goes back to ticking.
+  Commands starting with `!` are copied with the `!`, ready to paste into the
+  prompt. From the 10th command on there is no number key: after `y`, click
+  that command's ○.
+- When the pane is not focused, the key bar reads "ctrl+x tab 切過來 │ 1–3 勾選"
+  ("ctrl+x tab to switch here │ 1–3 to tick").
+- With everything ticked, the key bar reads "r 回報：告訴 Claude 全部完成" ("r
+  report: tell Claude everything is done") and a "[ 回報 N/N 完成 ]" button
+  appears at the bottom; press `r` (or click it) to send "N/N 完成了" for you
+  (labeled as coming from your-turn; the model sees the original text).
 
-## 什麼時候更新
-- 主對話每輪結束時讀最後一則回覆（`turn.complete` 的 answer）。子代理的回合不算。
-- 抽到指令：清單重算，並打開 pane、要焦點。
-- 沒抽到指令：清單不動，也不打開。
-- `/clear` 之後清單清空（`$.state` 歸零）。
+## What counts as "a command for you to run"
 
-## 已知限制
-- 自動打開屬於「主動打開」：終端機要 144 欄以上才畫出來。不夠寬時 pane 等著不畫，改跳一個 toast 提示打 `/your-turn`。用 `/your-turn` 開過一次（之後沒有手動關掉）的話，自動打開的門檻降到 110 欄（2026-10-05 實測：141 欄的 tmux pane 沒有自動打開）。
-- 數字鍵和 q 只在 pane 有焦點時有效。自動打開時提示框是空的才拿得到焦點；你按 Esc 回到提示框後，要 ctrl+x tab 切回 pane。
-- 只看這一輪最後一則回覆的文字；同一輪裡工具呼叫之前的訊息不在裡面。
-- 程式碼區塊裡寫成腳本示範的 `sudo` 行也會列進來。
-- 前一句有「你」之類提示字、但區塊其實是輸出範例（沒標語言，例如「你會看到：」接著一段沒標語言的輸出）時，輸出的每行也會被當成指令列進來。標成 `text` 等非 shell 語言的不會。
-- 說明只抄前一句，不判斷前後依賴；回覆把等待說明寫在指令後面時帶不進來。
-- 指令裡有 emoji 時，右框線可能歪一格（欄寬計算沒處理 emoji）。
+- Lines in a code block starting with `sudo`. A copied prompt, `$ sudo …`,
+  counts too; a trailing `\` joins the next line.
+- `! <command>`: inline code (for example `` `! gcloud auth login` ``) or a
+  line in a code block. The `!` must be followed by a space, so code like
+  `!e.agentId` or `!==` does not count; neither does a placeholder such as
+  `! <cmd>` (anything containing `<…>`).
+- A shell code block (language tag bash / sh / shell / zsh / console, or no
+  tag) whose preceding sentence contains any of 你 ("you"), 手動 ("manually"),
+  自己 ("yourself"), 親手 ("by hand"), 在終端機 ("in a terminal"), 另開 ("open
+  another"): every line of the block counts, except blank lines and `#`
+  comments. For example `gcloud auth login` after "請你在終端機登入 gcloud：".
+  A preceding sentence that starts with 我 ("I") does not count ("我自己試了一下："
+  / "I tried it myself:", "我在終端機跑了：" / "I ran in the terminal:" are
+  Claude describing what it did).
+- Ordinary commands in other code blocks (for example `ls` or `git status`
+  after "我剛剛跑了：" / "I just ran:") do not count.
+- A command that appears again in a later step is listed again (for example
+  `sudo -k` at both the start and the end); one mentioned twice in a row is
+  listed once ("打 `! whoami`，看 `! whoami` 印出誰" / "type `! whoami` and see
+  who `! whoami` prints").
+- Grouping looks only at the form: commands starting with `!` go under
+  在提示框打 (`! sudo …` included), everything else under 在終端機跑.
+
+## Commands
+
+- `/your-turn`: opens the list, drawn at any width.
+
+## When it updates
+
+- At the end of every main-conversation turn it reads the last reply (the
+  answer of `turn.complete`). Subagent turns do not count.
+- Commands found: the list is rebuilt, and the pane opens and takes focus.
+- No commands found: the list is left alone and the pane does not open.
+- After `/clear` the list is empty (`$.state` is reset).
+
+## Known limits
+
+- Automatic opening is a "proactive open": the terminal must be at least 144
+  columns wide for it to draw. When narrower, the pane waits undrawn and a
+  toast suggests typing `/your-turn`. Once you have opened it with
+  `/your-turn` (and not closed it by hand since), the threshold for automatic
+  opening drops to 110 columns (measured 2026-10-05: a 141-column tmux pane did
+  not open automatically).
+- Number keys and `q` work only while the pane has focus. On automatic opening
+  it gets focus only if the prompt is empty; after you press Esc to go back to
+  the prompt, use ctrl+x tab to switch back to the pane.
+- Only the text of the turn's last reply is read; messages earlier in the same
+  turn, before tool calls, are not included.
+- `sudo` lines written as a script example in a code block are listed too.
+- When the preceding sentence has a hint like 你 but the block is really
+  sample output (untagged, for example "你會看到：" / "you will see:" followed
+  by untagged output), every output line is listed as a command. Blocks tagged
+  `text` or another non-shell language are not.
+- The note is only the preceding sentence, with no understanding of
+  dependencies; a waiting instruction written after the command is not
+  picked up.
+- With an emoji in a command, the right border may be off by one column (the
+  column-width calculation does not handle emoji).

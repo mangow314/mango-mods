@@ -15,8 +15,8 @@ one directory per plugin.
 hand; the pane lists them in order, grouped by where they run, with the
 sentence from the reply that explains each step. Two are ticked off.*
 
-> 繁體中文版：[README.zh-TW.md](README.zh-TW.md). The mods' on-screen text and
-> the per-plugin READMEs are in Traditional Chinese.
+> 繁體中文版：[README.zh-TW.md](README.zh-TW.md); each plugin's README also
+> has a `README.zh-TW.md`. The mods' on-screen text is in Traditional Chinese.
 
 | Plugin | What it does |
 | --- | --- |

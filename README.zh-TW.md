@@ -9,7 +9,7 @@
 
 *your-turn 實機畫面：Claude 的回覆要你親手跑 5 條指令，pane 照順序列出來，按在哪裡跑分框，每段帶上回覆裡說明那一步的句子；已經勾掉 2 條。*
 
-> English: [README.md](README.md)。這份是它的繁體中文對譯。
+> English: [README.md](README.md)。這份是它的繁體中文對譯；各 plugin 的中文說明在該目錄的 `README.zh-TW.md`。
 
 | plugin | 用途 |
 |---|---|

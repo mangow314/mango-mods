@@ -1,99 +1,219 @@
 # ctx-relay
 
-一個 Claude Code mod，在提示框上方顯示一行 band：目前 context／交接線、每輪花費、離交接線還剩幾輪。
-主對話越過自動交接線時，它會自動交接：產生交接檔，`/clear`，在新對話接續。
-新對話開場時，如果有還沒人接手的交接檔，band 多一行「待接手」，按 1 就送出接續指令。
+> 繁體中文版：[README.zh-TW.md](README.zh-TW.md). The mod's on-screen text and
+> the handoff files it writes are in Traditional Chinese.
 
-實機測試過的版本：Claude Code 2.1.289（0.5.0，用 `--plugin-dir` 載入；測過倒數、按鈕取消、打字取消、完整自動交接、與 blast-radius 共存）。mods API 還在 early access，改版後可能要跟著調整。
+A Claude Code mod that draws a band above the prompt: current context / the
+handoff line, this turn's cost, and roughly how many turns are left before the
+handoff line.
+When the main conversation crosses the automatic handoff line, it hands off on
+its own: it writes a handoff file, runs `/clear`, and resumes in the new
+conversation.
+When a new conversation starts and there is a handoff file nobody has picked
+up, the band gets a second line, 待接手 ("waiting to be picked up"); press 1 to
+send the resume prompt.
 
-## 會做什麼
-| 什麼時候 | 會發生什麼 |
-|---|---|
-| 主對話停下（Stop），context ≥ 交接線 | Claude Code 回報還有背景工作（shell、子代理、monitor、workflow…）或一次性排程時，延後交接，band 顯示原因；循環排程不擋。沒有的話，倒數 60 秒 |
-| 延後中 context 到上限（交接線與壓縮點的中點） | 照樣倒數，交接檔頭寫明還在跑的工作（完成通知可能收不到） |
-| 別的 Stop hook 擋下（回合其實沒結束） | 不判斷，等真正停下的那次 |
-| 倒數中 | 按「取消自動交接」（hotkey 1）或送出任何訊息就取消，這段對話之後只提醒 |
-| 倒數或準備中有新回合開始（排程、背景通知、別的 session 傳訊） | 這次切換作廢，回合結束再重新判斷 |
-| 倒數結束 | mod 收集 git 狀態和 progress INDEX → `$.model.fork` 只填 handoff skill 8 欄位的內文，每欄用一行 `=== 鍵名 ===`（GOAL／FILES／VERIFIED／DIRTY／NEXT／NOTES／CONSTRAINTS／POINTERS）分段（3 分鐘沒回就放棄）→ mod 自己寫死 8 個中文 `## ` 標題組成交接檔，模型沒有機會把標題打錯 → 機器檢查（缺欄位就標 `thin:`；一個分段標記都沒有就記失敗）→ 附上來源交接檔的協調契約原文 → 寫檔並讀回確認 → 確認對話沒變動 → `/clear` → 在新對話送出交接檔路徑和接手規則 |
-| 任何一步在 `/clear` 之前失敗 | 留在原對話，band 顯示原因，不重試 |
+Tested on: Claude Code 2.1.289 (0.5.0, loaded with `--plugin-dir`; tested the
+countdown, cancelling by button, cancelling by typing, a full automatic
+handoff, and running alongside blast-radius). The mods API is still in early
+access, so a Claude Code release may require changes.
 
-協調契約由 mod 原樣附上，不經模型：fork 寫的 `=== CONTRACT ===` 分段和內文裡的「## 協調契約」段一律丟掉。fork 內文裡其他 `## ` 行會降成 `### `，交接檔的二級標題只有 mod 寫的那幾個。鍵名打錯（例如 `=== VERIFED ===`）的分段：該欄記 `thin:`，內文不丟，附在「關鍵細節備忘」末尾並標明。
+## What it does
 
-## 門檻
-- 壓縮點：Claude Code 自己回報的 auto-compact 觸發點（`$.session.usage({ breakdown })` 的 `autoCompactThreshold`）。auto-compact 關掉時改用模型窗。
-- 交接線：設定 `handoffTokens` 就用設定值；沒設（0）就用壓縮點的 85%。設定值超過壓縮點的 85% 時（例如換到 200K 模型），改用 85%，`/ctx-relay-status` 會註明。
-- 橘色提醒線：交接線的 88%。
-- 延後上限：有背景工作時，最多延後到交接線與壓縮點的中點。
+| When | What happens |
+| --- | --- |
+| The main conversation stops (Stop) with context ≥ the handoff line | If Claude Code reports background work (shells, subagents, monitors, workflows, …) or a one-shot scheduled task, the handoff is deferred and the band shows why; recurring schedules do not block it. Otherwise a 60-second countdown starts |
+| While deferred, context reaches the cap (halfway between the handoff line and the compaction point) | The countdown runs anyway; the handoff file header lists the work still running (its completion notice may never arrive) |
+| Another Stop hook blocks the stop (the turn has not really ended) | No decision; wait for the stop that really ends the turn |
+| During the countdown | Press 取消自動交接 ("cancel automatic handoff", hotkey 1) or send any message to cancel; for the rest of this conversation it only reminds you |
+| A new turn starts during the countdown or preparation (a schedule, a background notification, a message from another session) | This switch is dropped; it decides again when the turn ends |
+| The countdown ends | The mod collects git state and the progress INDEX → `$.model.fork` fills in only the body of the handoff skill's 8 fields, one `=== KEY ===` line per field (GOAL / FILES / VERIFIED / DIRTY / NEXT / NOTES / CONSTRAINTS / POINTERS) (gives up after 3 minutes without an answer) → the mod assembles the handoff file under 8 hard-coded Chinese `## ` headings, so the model has no chance to mistype a heading → machine check (a missing field is marked `thin:`; no section marker at all counts as a failure) → the source handoff file's coordination contract is appended verbatim → write the file and read it back → confirm the conversation has not changed → `/clear` → send the handoff file path and the pickup rules in the new conversation |
+| Any step fails before `/clear` | Stays in the original conversation, the band shows why, no retry |
 
-設定交接線：`/config` 裡的 ctx-relay 那一列，或在 shell 跑：
+The mod appends the coordination contract verbatim, without the model: a
+`=== CONTRACT ===` section written by the fork, and any `## 協調契約`
+("coordination contract") section in its body, are always dropped. Any other
+`## ` line in the fork's body is demoted to `### `, so the only second-level
+headings in a handoff file are the mod's own. A section whose key is mistyped
+(for example `=== VERIFED ===`): that field is marked `thin:`, and its body is
+kept, appended at the end of 關鍵細節備忘 ("key details") with a note.
+
+## Thresholds
+
+- Compaction point: the auto-compact trigger Claude Code reports itself
+  (`autoCompactThreshold` from `$.session.usage({ breakdown })`). With
+  auto-compact off, the model's context window is used instead.
+- Handoff line: the `handoffTokens` setting if set; if not (0), 85% of the
+  compaction point. A setting above 85% of the compaction point (for example
+  after switching to a 200K model) falls back to 85%, and
+  `/ctx-relay-status` says so.
+- Orange warning line: 88% of the handoff line.
+- Deferral cap: with background work, the handoff can be deferred at most to
+  halfway between the handoff line and the compaction point.
+
+Set the handoff line from the ctx-relay row in `/config`, or from a shell:
 
 ```bash
 echo '{"handoffTokens": "400000"}' | claude plugin configure ctx-relay@mango-mods --values-stdin
 ```
 
-從 shell 改的設定，要重開 Claude Code 或在 session 裡跑 `/reload-plugins` 才生效。端到端測試可以把它設得很低（例如 1）。
+A setting changed from the shell takes effect after restarting Claude Code or
+running `/reload-plugins` in the session. For end-to-end tests you can set it
+very low (for example 1).
 
-注意：設了 `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` 時，Claude Code 回報的壓縮點可能沒有套用這個百分比。2.1.288 實測：`CLAUDE_CODE_AUTO_COMPACT_WINDOW=600000`、`CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=88` 時，回報 567,000（=600,000−33,000）。2.1.289 實測窗 120,000：回報 87,000，實際在 context 從 86,412 漲到 88,335 的那一輪壓縮；回報值和 (120,000−20,000)×88%＝88,000 都落在這個範圍，分不出哪個對。600K 窗時真正的壓縮點仍可能是 510K、528K 或 567K。用了這個環境變數，就請設 `handoffTokens`。
+Note: with `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` set, the compaction point Claude
+Code reports may not apply that percentage. Measured on 2.1.288: with
+`CLAUDE_CODE_AUTO_COMPACT_WINDOW=600000` and
+`CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=88`, it reported 567,000 (=600,000−33,000).
+Measured on 2.1.289 with a 120,000 window: it reported 87,000, and compaction
+happened on the turn where context grew from 86,412 to 88,335; both the
+reported value and (120,000−20,000)×88% = 88,000 fall in that range, so it is
+impossible to tell which is right. With a 600K window the real compaction point
+may still be 510K, 528K, or 567K. If you use this environment variable, set
+`handoffTokens`.
 
-用 `claude --plugin-dir` 載入時讀不到已安裝版本的 `handoffTokens`，交接線會是自動值。
+When loaded with `claude --plugin-dir`, the installed copy's `handoffTokens`
+is not read, so the handoff line is the automatic value.
 
-## band
-![ctx-relay band 實機畫面（下面那行；上面那行是 repo-ledger）](../docs/assets/bands.png)
+## The band
 
-Claude Code 2.1.290 實機截圖，下面那行是 ctx-relay（上面那行是 repo-ledger）：`CTX 51K/142K · 本輪 +51K $0.18 44s 92%`，後面是長條。
+![ctx-relay band in a live session (bottom line; the top line is repo-ledger)](../docs/assets/bands.png)
 
-8-Bit 街機計分板樣式。倒數時整行換成「CONTINUE? 42s（400K 存檔交接／任發訊息取消）」，旁邊是取消按鈕（按 1）。
+A live Claude Code 2.1.290 session. The bottom line is ctx-relay (the top line
+is repo-ledger): `CTX 51K/142K · 本輪 +51K $0.18 44s 92%` (本輪 = "this
+turn"), followed by the bars.
 
-- 三隻小怪獸是離交接線的 HP（token ÷ 交接線）：<40% 三隻；<70% 一隻變鬼魂；到提醒線前剩一隻＋兩隻鬼魂；過提醒線換骷髏；越過交接線全是骷髏。
-- 顏色：天藍＝正常、橘＝過提醒線、朱紅＝過交接線／倒數／失敗。底色跟著三態變深藍／暗橘／暗紅。
-- `220K/400K`：目前 context／交接線。`90%`：本輪 cache 命中率（整輪請求加總）。佔模型窗的百分比和經過時間不在 band 上，看 statusline。
-- 「STAGE N 輪」＝剩約 N 輪到交接線，從第 2 輪結束起出現（第一筆增量含系統提示，不算）。
-- 長條只在終端機寬度 ≥110 欄時顯示；長條高度對交接線，滿格＝到交接線。
-- 別的 mod 也畫 band 時（例如 blast-radius 在窄終端機把 Proceed／Cancel 畫在這裡），它的內容在上、ctx-relay 這行在下。高度不夠或對方不讓位時，ctx-relay 這行會看不到，見「已知限制」。
-- 圖示要 Nerd Font（例如 Symbols Nerd Font 補字），沒有的話三隻小怪獸會變成方框。
-- 在 tmux 裡，Claude Code 預設只用 256 色，暗色底會變成 #00005f 這類亮很多的顏色。tmux 有開 RGB 的話，設 `CLAUDE_CODE_TMUX_TRUECOLOR=1` 才會照原色畫。
+Styled like an 8-bit arcade scoreboard. During the countdown the whole line
+becomes "CONTINUE? 42s（400K 存檔交接／任發訊息取消）" ("handing off at 400K;
+send any message to cancel"), with a cancel button next to it (press 1).
 
-## 交接檔放哪裡
-git repo：`<git-common-dir>/harness/handoff/`；非 git：`~/.claude/harness/<目錄名>-<sha256 前 8 碼>/handoff/`。
-檔名：`<時間戳>-<slug>-<來源 session id 前 8 碼>-<批次號>.md`，同一秒的兩批或共用同一個 git-common-dir 的兩個 session 不會互相覆寫。
-有 `<同一根目錄>/progress/<session id>/INDEX.md` 的話，會一起交給 fork 參考。
+- The three little monsters are your HP before the handoff line (tokens ÷
+  handoff line): below 40%, three monsters; below 70%, one turns into a ghost;
+  up to the warning line, one monster and two ghosts; past the warning line,
+  skulls; past the handoff line, all skulls.
+- Colors: sky blue = normal, orange = past the warning line, vermillion = past
+  the handoff line / counting down / failed. The background follows the three
+  states: dark blue / dark orange / dark red.
+- `220K/400K`: current context / handoff line. `90%`: this turn's cache hit
+  rate (summed over every request in the turn). The share of the model window
+  and the elapsed time are not on the band; see your status line.
+- `STAGE N 輪` ("N turns") = about N turns left before the handoff line. It
+  appears from the end of the 2nd turn on (the first increment includes the
+  system prompt and is not counted).
+- The bars appear only when the terminal is at least 110 columns wide; their
+  height is relative to the handoff line, and a full bar = at the handoff line.
+- When another mod also draws a band (for example blast-radius, which draws
+  Proceed / Cancel here in a narrow terminal), its content goes on top and the
+  ctx-relay line below. When there is not enough height, or the other mod does
+  not give way, the ctx-relay line can be hidden; see "Known limits".
+- The icons need a Nerd Font (for example Symbols Nerd Font as a fallback);
+  without one the three monsters render as boxes.
+- Inside tmux, Claude Code uses only 256 colors by default, so the dark
+  backgrounds turn into much brighter colors such as #00005f. If tmux has RGB
+  enabled, set `CLAUDE_CODE_TMUX_TRUECOLOR=1` to get the original colors.
 
-## 待接手（handoff-pickup）
-![ctx-relay 待接手實機畫面：band 下面多一行，按 1 接續](../docs/assets/ctx-relay-pickup.png)
+## Where handoff files go
 
-還有其他沒接手的交接檔時，檔名後面會多一個 `+N`。
+In a git repo: `<git-common-dir>/harness/handoff/`; outside git:
+`~/.claude/harness/<directory name>-<first 8 chars of sha256>/handoff/`.
+File name: `<timestamp>-<slug>-<first 8 chars of the source session id>-<batch number>.md`,
+so two batches in the same second, or two sessions sharing one
+git-common-dir, never overwrite each other.
+If `<same root>/progress/<session id>/INDEX.md` exists, it is passed to the
+fork as well.
 
-| 什麼時候 | 會發生什麼 |
-|---|---|
-| 新對話開場（啟動時對話還沒有任何訊息；`--resume` 接回的舊對話不算），或你手動 `/clear` 之後 | 找交接檔資料夾裡還沒人接手的交接檔，列最新一份；其他還沒接手的份數標在 `+N` |
-| 提示框是空的時候按 1（或點按鈕） | 送出「讀 <完整路徑> 並依其接續執行；先確認 git 狀態與下一步再動手。」，這份記為已接手 |
-| 主對話開始新回合（你送出訊息、按接續、排程） | 這行收掉 |
+## Waiting to be picked up (handoff-pickup)
 
-- 「已接手」記在 `<交接檔資料夾>/.picked/<交接檔檔名>`（空檔），交接檔本身不動。點開頭的資料夾，handoff skill 用 `ls -t` 找最新交接檔時看不到它。
-- 這三種情況會記已接手：按接續；你送出的訊息含某份交接檔的完整路徑（手動貼上接續指令）；ctx-relay 自動交接（在 `/clear` 之前就記，新對話開場不會列它）。
-- 第一次啟用時，ctx-relay 把當下時間記在自己的 store（`pickupSince`）：修改時間早於它的交接檔一律當作已接手，不會一裝好就列出一堆舊檔。
-- 「多久前」依檔案的修改時間；「來自」取交接檔內文第一個 `session \`<id>\`` 的前 8 碼，讀不到就不顯示。
-- 按 1 送出的訊息，來源會標成 ctx-relay（mod 代送，模型看到的是原文）。
-- 待接手這行還在時，在空的提示框打「1」會按到接續，不會打進提示框。倒數的取消鈕也是 1，但倒數只會在回合結束後出現，那時待接手這行已經收掉，兩者不會同時在。
-- 接續送出被擋（例如 settings 的 hook 拒絕）時，這行留著，也不記已接手。
+![ctx-relay pickup line in a live session: an extra line under the band, press 1 to resume](../docs/assets/ctx-relay-pickup.png)
 
-## 指令
-- `/ctx-relay-status`：顯示門檻、讀數、交接狀態和背景工作
-- `/ctx-relay-now`：立刻交接；有背景工作在跑時要打 `/ctx-relay-now yes`。fork 指示、交接檔檔頭和新對話的接續訊息都寫明是 `/ctx-relay-now` 手動交接，不寫「越過自動交接線」
-  - 後面可以接最新指令，例如 `/ctx-relay-now yes` 換行再打「做 B 並安裝新 mod」。第一個字是 `yes` 才算確定；其餘文字是指令。沒有背景工作時不用 `yes`，整段參數都算指令。
-  - 指令原話會交給 fork 寫「目標 + 最新指令」和「下一步」，也原樣寫進交接檔檔頭和接續訊息（每行加 `> `，指令裡的 `## ` 不會變成交接檔的標題）。
-  - 附了指令時，接續訊息請新對話核對完 git 狀態就照指令做，不再等你說一次。沒附指令時照舊：回報現況後等你指示。
-  - 例外：交接檔缺「硬約束」（檔頭 `thin` 有「硬約束」）時，這個任務的限制可能沒寫進去，接續訊息改成先回報打算怎麼照指令做，等你確認再動手。
+The line reads: 待接手 ("waiting to be picked up"), the file name, (2 小時前，來自
+1f3a9c2e = "2 hours ago, from 1f3a9c2e"), and the button `PUSH 1 接續`
+("resume"). When more handoff files are waiting, a `+N` follows the file name.
 
-## 已知限制
-- 背景工作不會逾時作廢：常駐 server 會讓交接延後到上限才強制倒數；要早點交接就用 `/ctx-relay-now yes`。
-- 指令看到的背景工作是上一次主對話停下時的清單，加上當下在跑的子代理。
-- 子代理可能同時出現在 Claude Code 的背景工作清單和子代理清單，延後原因的數字會多算。
-- agent-bridge 送出、還沒回覆的任務偵測不到：`/clear` 前請自己確認。
-- 跟 blast-radius 一起用、終端機窄到它把攔截框畫在 band 位置時（實測 80 欄會；200 欄它改用側邊窗格，不受影響），攔截期間 ctx-relay 這行可能看不到。按鈕照常可按，攔截結束 band 就回來。
-  - 終端機高度至少 42 行才放得下兩者（2.1.289 實測，攔截框列 2 個檔案、共 11 行：41 行以下顯示「↓ 2 more」）。框裡列的檔案越多，需要的行數越多。
-  - blast-radius 先畫時，它不把位置交給下一個 mod，多高都看不到。哪個 mod 先畫由載入順序決定，官方文件沒寫。
-- 交接內容由 fork 產生，機器檢查只看欄位有沒有空，不保證內容正確。新對話會被要求先用 git 核對。
-- `/clear` 之後 `$.state` 會歸零；模組變數和計時器會保留（實測），所以 mod 在 clear 前會先取消計時器。
-- 需要 PATH 上有 `bash` 和 `git`；非 git 目錄還要 `realpath`（GNU，支援 `-m`），以及 `sha256sum` 或 `shasum`。
-- 交接檔路徑的演算法照抄 mango 的 dotfiles `hooks/_lib/harness-paths.sh`，讓兩邊的 handoff 檔放在同一處；改一邊要改另一邊。
+| When | What happens |
+| --- | --- |
+| A new conversation starts (no messages yet at startup; an old conversation reopened with `--resume` does not count), or after you run `/clear` yourself | Look for handoff files in the handoff folder that nobody has picked up, and show the newest; the count of the others goes in `+N` |
+| Press 1 while the prompt is empty (or click the button) | Sends "讀 <full path> 並依其接續執行；先確認 git 狀態與下一步再動手。" ("Read <full path> and continue from it; check git state and the next step before acting."), and marks this file as picked up |
+| The main conversation starts a new turn (you send a message, press resume, a schedule fires) | The line goes away |
+
+- "Picked up" is recorded as `<handoff folder>/.picked/<handoff file name>`
+  (an empty file); the handoff file itself is not touched. Because the folder
+  name starts with a dot, the handoff skill's `ls -t` for the newest handoff
+  file does not see it.
+- A file is marked as picked up in three cases: you press resume; a message you
+  send contains the full path of a handoff file (you pasted a resume prompt by
+  hand); ctx-relay hands off automatically (marked before `/clear`, so the new
+  conversation does not list it).
+- On first enable, ctx-relay stores the current time in its own store
+  (`pickupSince`): handoff files modified before that count as picked up, so a
+  fresh install does not list a pile of old files.
+- "How long ago" uses the file's modification time; "from" is the first 8
+  characters of the first `session \`<id>\`` in the handoff file, and is
+  omitted if not found.
+- The message sent by pressing 1 is labeled as coming from ctx-relay (the mod
+  sends it for you; the model sees the original text).
+- While the pickup line is shown, typing "1" into an empty prompt presses
+  resume instead of typing. The countdown's cancel button is also 1, but the
+  countdown only appears after a turn ends, when the pickup line is already
+  gone, so the two never appear together.
+- If sending the resume prompt is blocked (for example by a hook in settings),
+  the line stays and the file is not marked as picked up.
+
+## Commands
+
+- `/ctx-relay-status`: shows thresholds, readings, handoff state, and
+  background work.
+- `/ctx-relay-now`: hand off right away; with background work running, type
+  `/ctx-relay-now yes`. The fork instructions, the handoff file header, and the
+  resume message in the new conversation all say this was a manual
+  `/ctx-relay-now` handoff, not "crossed the automatic handoff line".
+  - You can append your latest instruction, for example `/ctx-relay-now yes`,
+    a newline, then "do B and install the new mod". Only a first word of `yes`
+    counts as confirmation; the rest is the instruction. Without background
+    work, `yes` is not needed and all the arguments are the instruction.
+  - The instruction is passed verbatim to the fork for writing the "goal +
+    latest instruction" and "next step" fields, and written verbatim into the
+    handoff file header and the resume message (each line prefixed with `> `,
+    so a `## ` in the instruction never becomes a handoff file heading).
+  - With an instruction attached, the resume message tells the new
+    conversation to check git state and then follow the instruction, without
+    waiting for you to repeat it. Without one, as before: report the current
+    state and wait for you.
+  - Exception: when the handoff file is missing 硬約束 ("hard constraints";
+    the header's `thin` lists 硬約束), the task's constraints may not have been
+    written down, so the resume message instead asks the new conversation to
+    first report how it plans to follow the instruction and wait for your
+    confirmation.
+
+## Known limits
+
+- Background work never times out: a long-running server defers the handoff
+  until the cap forces a countdown; to hand off earlier, use
+  `/ctx-relay-now yes`.
+- The background work the commands see is the list from the last time the
+  main conversation stopped, plus the subagents running right now.
+- A subagent may appear in both Claude Code's background-work list and its
+  subagent list, so the count in the deferral reason can be too high.
+- Tasks sent through agent-bridge and not yet answered are not detected:
+  check them yourself before `/clear`.
+- With blast-radius, when the terminal is narrow enough that it draws its
+  interception box where the band goes (it does at 80 columns; at 200 columns
+  it uses a side pane and is unaffected), the ctx-relay line may be hidden
+  during the interception. The buttons still work, and the band comes back
+  when the interception ends.
+  - The terminal needs at least 42 rows to fit both (measured on 2.1.289,
+    with 2 files listed in the box, 11 rows in total: at 41 rows or fewer it
+    shows "↓ 2 more"). The more files the box lists, the more rows it needs.
+  - When blast-radius draws first, it does not pass the slot on to the next
+    mod, so no height is enough. Which mod draws first depends on load order,
+    which the official docs do not specify.
+- The handoff content comes from the fork; the machine check only looks for
+  empty fields and does not guarantee the content is correct. The new
+  conversation is asked to check against git first.
+- After `/clear`, `$.state` is reset; module variables and timers survive
+  (measured), so the mod cancels its timers before clearing.
+- Needs `bash` and `git` on PATH; outside git, also `realpath` (GNU, with
+  `-m`) and `sha256sum` or `shasum`.
+- The handoff path algorithm is copied from mango's dotfiles
+  `hooks/_lib/harness-paths.sh`, so both put handoff files in the same place;
+  change one, change the other.
