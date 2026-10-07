@@ -19,7 +19,6 @@ import type { Auto, Limits, Pickup, Reading, Receipt } from '../types'
 // 第一次啟用前就有的交接檔（mtime 早於 $.store 的 pickupSince）一律算已接手。
 
 const HISTORY = 12
-const HEADROOM_SAMPLE = 5
 const COUNTDOWN_MS = 60_000
 // fork 沒有取消參數：超過這個時間就放棄等待、記失敗，不 clear（回來的結果不再使用）
 const FORK_TIMEOUT_MS = 180_000
@@ -58,6 +57,12 @@ const DOT = '#464e5a'
 const INVADER = '󰯉' // Nerd Font md-space_invaders U+F0BC9
 const GHOST = '󰊠' // md-ghost U+F02A0
 const SKULL = '󰚌' // md-skull U+F068C
+// cache 冷暖：熱＝大多命中（便宜），冷＝大多重算（貴，例如閒置超過 cache 存活時間）
+const FIRE = '󰈸' // md-fire U+F0238
+const THERMO = '󰔏' // md-thermometer U+F050F
+const SNOW = '󰜗' // md-snowflake U+F0717
+const CACHE_HOT = 80
+const CACHE_WARM = 40
 // HP 分段取自設計稿（token ÷ 交接線），不是引擎數字：<40% 三隻、<70% 一隻變鬼、提醒線前剩一隻
 const HP_FULL = 0.4
 const HP_HALF = 0.7
@@ -187,11 +192,15 @@ export const register: Register = (on, options) => {
   })
 
   on('prompt.submit', async ($, e, next) => {
-    // 你親手送出（或遠端轉來你的訊息）＝人在場 → 取消倒數或進行中的準備
+    // 你親手送出（或遠端轉來你的訊息）＝人在場 → 這次倒數或準備作廢、回到 idle，
+    // 這輪結束時還在線上就重新倒數（只延後不停用，使用者 2026-10-08 選 A；要停用按取消鈕）
     if (e.origin.kind === 'composer' || e.origin.kind === 'bridge') {
       const auto = await read($, autoAtom)
       if (auto.phase === 'countdown' || auto.phase === 'preparing') {
-        await cancel($, '你送出了訊息')
+        disarm()
+        prepGen += 1
+        await setAuto($, { phase: 'idle' })
+        $.ui.invalidate('ui.render')
       }
       // 訊息裡帶交接檔完整路徑＝你接手了那份（手動貼上的接續指令）
       if (pickupRoot !== '' && e.text.includes('/handoff/')) {
@@ -202,7 +211,7 @@ export const register: Register = (on, options) => {
   })
 
   // 主對話開了新回合（排程、背景通知、別的 session 傳訊；子代理不發 turn.start）：
-  // 這次倒數或準備作廢、回到 idle，回合結束時再重新判斷。你親手送出的訊息在上面已改成 cancelled，這裡不動
+  // 這次倒數或準備作廢、回到 idle，回合結束時再重新判斷（你親手送出的訊息在上面已先處理）
   on('turn.start', async ($, e, next) => {
     // 主對話開始跑（你送出、按接續、排程）＝不再是新對話開場，待接手那行收掉
     if (pickup !== null) {
@@ -320,7 +329,7 @@ async function drawBand($: EngineInterface, e: RenderInput<'AbovePrompt'>): Prom
           <Text color={color} bold wrap="truncate-end">
             {` ${INVADER} CONTINUE? `}
             <Text color={VALUE}>{`${left}s`}</Text>
-            <Text color={LABEL}>{`（${k(limits.handoff)} 存檔交接／任發訊息取消） `}</Text>
+            <Text color={LABEL}>{`（${k(limits.handoff)} 存檔交接／發訊息延到下輪） `}</Text>
           </Text>
         </Box>
         <Text> </Text>
@@ -352,11 +361,10 @@ async function drawBand($: EngineInterface, e: RenderInput<'AbovePrompt'>): Prom
   if (receipt) {
     segments.push(sep(), <Text color={LABEL}>本輪 </Text>, <Text color={VALUE} bold>{`${signed(receipt.deltaTokens)} $${receipt.deltaCost.toFixed(2)}`}</Text>)
     segments.push(<Text color={LABEL}>{` ${duration(receipt.durationMs)}`}</Text>)
-    if (receipt.cachePct !== null) segments.push(<Text>{` ${receipt.cachePct}%`}</Text>)
-  }
-  const turnsLeft = headroomTurns(readings, limits.handoff)
-  if (turnsLeft !== null) {
-    segments.push(sep(), <Text color={LABEL}>STAGE </Text>, <Text color={color === SKY ? VALUE : color} bold>{String(turnsLeft)}</Text>, <Text color={LABEL}> 輪</Text>)
+    if (receipt.cachePct !== null) {
+      const [glyph, c] = receipt.cachePct >= CACHE_HOT ? [FIRE, ORANGE] : receipt.cachePct >= CACHE_WARM ? [THERMO, LABEL] : [SNOW, SKY]
+      segments.push(<Text> </Text>, <Text color={c}>{glyph}</Text>, <Text>{`${receipt.cachePct}%`}</Text>)
+    }
   }
   if (isWide && readings.length >= 2) segments.push(<Text>{` ${spark(readings, limits.handoff)}`}</Text>)
   if (status !== '') segments.push(sep(), <Text>{status}</Text>)
@@ -885,7 +893,6 @@ async function setAuto($: EngineInterface, auto: Auto) {
   await update($, autoAtom, () => auto)
 }
 
-// 剩幾輪＝(交接線 − 現在) ÷ 近幾輪正增量的中位數；樣本不足回 null
 // 三隻小怪獸：鬼魂灰色，其餘用狀態色（undefined＝沿用外層）；過提醒線換骷髏，越過交接線全骷髏
 function hp(tokens: number, limits: Limits): [string, string | undefined][] {
   const ratio = tokens / limits.handoff
@@ -895,23 +902,6 @@ function hp(tokens: number, limits: Limits): [string, string | undefined][] {
         : ratio >= HP_FULL ? [INVADER, INVADER, GHOST]
           : [INVADER, INVADER, INVADER]
   return lives.map(glyph => [glyph, glyph === GHOST ? LABEL : undefined])
-}
-
-function headroomTurns(readings: readonly Reading[], handoff: number): number | null {
-  const deltas: number[] = []
-  readings.forEach((r, i) => {
-    const prev = readings[i - 1]
-    // prev.tokens 為 0 的那一筆是 session 起點基準，那段增量含系統提示載入，不算一般回合
-    if (prev && prev.tokens > 0 && r.tokens > prev.tokens) deltas.push(r.tokens - prev.tokens)
-  })
-  const sample = deltas.slice(-HEADROOM_SAMPLE).sort((a, b) => a - b)
-  const mid = Math.floor(sample.length / 2)
-  const hi = sample[mid]
-  const lo = sample.length % 2 === 0 ? sample[mid - 1] : hi
-  if (hi === undefined || lo === undefined) return null
-  const median = (lo + hi) / 2
-  const left = handoff - (readings.at(-1)?.tokens ?? 0)
-  return left <= 0 ? 0 : Math.floor(left / median)
 }
 
 // 長條高度對交接線：滿格＝到交接線

@@ -218,19 +218,22 @@ function handoffFiles(w: World): [string, string][] {
   return [...w.files.entries()].filter(([p]) => p.startsWith(`${ROOT}/handoff/`) && !p.includes('/.picked/'))
 }
 
-test('1M：ctx 顯示 token／交接線（百分比和經過時間交給 statusline），收據與剩餘輪數', async ($, on) => {
+test('1M：ctx 顯示 token／交接線（百分比和經過時間交給 statusline）與收據，不顯示剩餘輪數', async ($, on) => {
   mock.clock(on, { now: 1_000_000 })
   const w = world($, on)
   await start($)
   await turn($, w, 200_000)
   await turn($, w, 220_000)
   const { text } = await band($)
-  // 引擎壓縮點 510400；交接線 ×85%＝433840 → (433840−220000)/20000＝10.7
+  // 引擎壓縮點 510400；交接線 ×85%＝433840
   expect(text).toContain('CTX 220K/434K')
   expect(text).not.toContain('22%')
   expect(text).toContain('本輪 +20K $0.50')
-  expect(text).toContain('12s 90%')
-  expect(text).toContain('STAGE 10 輪')
+  expect(text).toContain('12s')
+  // cache 90%＝熱（火焰）
+  expect(text).toContain('󰈸')
+  expect(text).toContain('90%')
+  expect(text).not.toContain('STAGE')
 })
 
 test('非 1M：引擎回報的壓縮點低，交接線跟著變低', async ($, on) => {
@@ -378,7 +381,7 @@ test('按鈕取消後本對話不再自動交接', async ($, on) => {
   expect((await band($)).text).toContain('自動交接已取消')
 })
 
-test('倒數中你親手送出訊息就取消', async ($, on) => {
+test('倒數中你親手送出訊息只延後：這輪結束還在線上就重新倒數', async ($, on) => {
   const clock = mock.clock(on)
   const w = world($, on)
   await start($)
@@ -387,6 +390,11 @@ test('倒數中你親手送出訊息就取消', async ($, on) => {
   await clock.advance(120_000)
   expect(w.submitted).toEqual(['我還在'])
   expect(w.cleared).toBe(0)
+  expect((await band($)).text).not.toContain('自動交接已取消')
+  await turn($, w, 470_000)
+  await clock.advance(60_000)
+  await clock.settle()
+  expect(w.cleared).toBe(1)
 })
 
 test('fork 失敗：不寫檔、不 clear，band 顯示原因', async ($, on) => {
@@ -772,16 +780,12 @@ test('fork 鍵名打錯（=== VERIFED ===）：欄位記 thin，內文不丟，�
   expect(w.cleared).toBe(1)
 })
 
-test('剩幾輪：偶數筆增量取中間兩值平均；第一輪也有收據', async ($, on) => {
+test('第一輪也有收據', async ($, on) => {
   mock.clock(on)
   const w = world($, on)
   await start($)
   await turn($, w, 260_000)
   expect((await band($)).text).toContain('本輪 +260K')
-  await turn($, w, 270_000)
-  await turn($, w, 300_000)
-  // 增量 10000、30000（起點那段不算）→ 中位數 20000 → (433840−300000)/20000＝6.7
-  expect((await band($)).text).toContain('STAGE 6 輪')
 })
 
 test('別的 mod 也畫 band（例如 blast-radius 的按鈕）：兩邊都畫出來', async ($, on) => {

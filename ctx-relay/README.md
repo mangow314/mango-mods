@@ -4,8 +4,7 @@
 > the handoff files it writes are in Traditional Chinese.
 
 A Claude Code mod that draws a band above the prompt: current context / the
-handoff line, this turn's cost, and roughly how many turns are left before the
-handoff line.
+handoff line, and this turn's cost.
 When the main conversation crosses the automatic handoff line, it hands off on
 its own: it writes a handoff file, runs `/clear`, and resumes in the new
 conversation.
@@ -25,7 +24,7 @@ access, so a Claude Code release may require changes.
 | The main conversation stops (Stop) with context ≥ the handoff line | If Claude Code reports background work (shells, subagents, monitors, workflows, …) or a one-shot scheduled task, the handoff is deferred and the band shows why; recurring schedules do not block it. Otherwise a 60-second countdown starts |
 | While deferred, context reaches the cap (halfway between the handoff line and the compaction point) | The countdown runs anyway; the handoff file header lists the work still running (its completion notice may never arrive) |
 | Another Stop hook blocks the stop (the turn has not really ended) | No decision; wait for the stop that really ends the turn |
-| During the countdown | Press 取消自動交接 ("cancel automatic handoff", hotkey 1) or send any message to cancel; for the rest of this conversation it only reminds you |
+| During the countdown | Press 取消自動交接 ("cancel automatic handoff", hotkey 1) to cancel; for the rest of this conversation it only reminds you. Sending any message only postpones it: if you are still past the line when that turn ends, the countdown starts again |
 | A new turn starts during the countdown or preparation (a schedule, a background notification, a message from another session) | This switch is dropped; it decides again when the turn ends |
 | The countdown ends | The mod collects git state and the progress INDEX → `$.model.fork` fills in only the body of the handoff skill's 8 fields, one `=== KEY ===` line per field (GOAL / FILES / VERIFIED / DIRTY / NEXT / NOTES / CONSTRAINTS / POINTERS) (gives up after 3 minutes without an answer) → the mod assembles the handoff file under 8 hard-coded Chinese `## ` headings, so the model has no chance to mistype a heading → machine check (a missing field is marked `thin:`; no section marker at all counts as a failure) → the source handoff file's coordination contract is appended verbatim → write the file and read it back → confirm the conversation has not changed → `/clear` → send the handoff file path and the pickup rules in the new conversation |
 | Any step fails before `/clear` | Stays in the original conversation, the band shows why, no retry |
@@ -84,8 +83,8 @@ is repo-ledger): `CTX 51K/142K · 本輪 +51K $0.18 44s 92%` (本輪 = "this
 turn"), followed by the bars.
 
 Styled like an 8-bit arcade scoreboard. During the countdown the whole line
-becomes "CONTINUE? 42s（400K 存檔交接／任發訊息取消）" ("handing off at 400K;
-send any message to cancel"), with a cancel button next to it (press 1).
+becomes "CONTINUE? 42s（400K 存檔交接／發訊息延到下輪）" ("handing off at 400K;
+a message postpones it to the next turn"), with a cancel button next to it (press 1).
 
 - The three little monsters are your HP before the handoff line (tokens ÷
   handoff line): below 40%, three monsters; below 70%, one turns into a ghost;
@@ -95,11 +94,10 @@ send any message to cancel"), with a cancel button next to it (press 1).
   the handoff line / counting down / failed. The background follows the three
   states: dark blue / dark orange / dark red.
 - `220K/400K`: current context / handoff line. `90%`: this turn's cache hit
-  rate (summed over every request in the turn). The share of the model window
+  rate (summed over every request in the turn), with an icon for how warm it
+  is: ≥80% fire (hot), 40–79% thermometer, <40% snowflake (cold — usually the
+  cache expired while idle, so this turn cost more). The share of the model window
   and the elapsed time are not on the band; see your status line.
-- `STAGE N 輪` ("N turns") = about N turns left before the handoff line. It
-  appears from the end of the 2nd turn on (the first increment includes the
-  system prompt and is not counted).
 - The bars appear only when the terminal is at least 110 columns wide; their
   height is relative to the handoff line, and a full bar = at the handoff line.
 - When another mod also draws a band (for example blast-radius, which draws
