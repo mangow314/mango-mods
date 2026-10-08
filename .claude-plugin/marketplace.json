@@ -11,6 +11,11 @@
       "description": "每輪花費與剩餘空間；越過自動交接線時自動產生交接檔並 /clear 接續。"
     },
     {
+      "name": "sitrep",
+      "source": "./sitrep",
+      "description": "回覆戰況簡報：正文下方一個結論框（狀態、一句結論、可收合段落、待決題目），提示框上方一行待決列可鍵盤選答。"
+    },
+    {
       "name": "repo-ledger",
       "source": "./repo-ledger",
       "description": "提示框上方列出這個對話動過、還沒 commit 的 repo，和本輪改了幾檔。"

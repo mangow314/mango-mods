@@ -21,6 +21,7 @@ sentence from the reply that explains each step. Two are ticked off.*
 | Plugin | What it does |
 | --- | --- |
 | [ctx-relay](ctx-relay/README.md) | Band with context size and per-turn cost. Past the handoff line it writes a handoff file, runs `/clear`, and resumes in the new conversation |
+| [sitrep](sitrep/README.md) | Under each reply, a box with the status, a one-line outcome, what you have to do, collapsed sections (changes, checks) and the questions waiting on you; one row above the prompt answers them from the keyboard |
 | [repo-ledger](repo-ledger/README.md) | Band listing every repo this conversation touched that still has uncommitted changes: branch, uncommitted files, unpushed commits, other worktrees, files edited this turn |
 | [your-turn](your-turn/README.md) | Lists the commands you must run yourself (`sudo`, `! <cmd>`, shell blocks addressed to you) in a pane you tick off; when all are done, press `r` to tell Claude |
 | [away-receipt](away-receipt/README.md) | When you come back after a while, a pane shows what happened: how long, how many turns, the cost, repos touched, tests run, background tasks |

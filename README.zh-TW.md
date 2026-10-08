@@ -14,6 +14,7 @@
 | plugin | 用途 |
 |---|---|
 | [ctx-relay](ctx-relay/README.md) | 顯示每輪花費與剩餘空間；越過自動交接線時自動產生交接檔，然後 /clear 接續 |
+| [sitrep](sitrep/README.md) | 每則回覆下方一個結論框：狀態、一句結論、你要做的事、可收合的段落（變更、驗證）、待你決定的題目；提示框上方一行待決列可用鍵盤選答 |
 | [repo-ledger](repo-ledger/README.md) | 列出這個對話動過、還沒 commit 的 repo（分支、未 commit 檔數、未 push、別的 worktree）和本輪改了幾檔 |
 | [your-turn](your-turn/README.md) | 把回覆裡要你親手跑的指令（sudo、`! <cmd>`、叫你自己跑的 shell 區塊）列成對話旁可勾選的清單，帶上回覆裡的說明，全部完成後按 r 回報 |
 | [away-receipt](away-receipt/README.md) | 離開一段時間回來時，對話旁列出離開期間發生了什麼：多久、幾輪、花多少，動過的 repo、跑過的測試、背景工作 |
