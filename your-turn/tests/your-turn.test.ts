@@ -155,6 +155,40 @@ test('前一句有提示字的 shell 區塊整塊都列（註解、輸出區塊�
   expect(v.text).not.toContain('要密碼')
 })
 
+test('沒標語言的區塊每行都以英數符號開頭、沒有箭頭與框線字才整塊列：中文 prompt、加註記的輸出不列、不打開 pane；有中文行的只取 sudo 行；續行不看', async ($, on) => {
+  const w = world(on)
+  await reply($, [
+    'Prompt 在下面，整段複製。<PATH> 要換成你存檔的實際路徑：',
+    '```',
+    '你是這個家用網路設定的審查者，不負責改任何檔案。',
+    '## 讀這些檔',
+    '1. <PATH>/rb450-redacted.rsc',
+    'Phase A（盲審）：只看上面的設定檔。',
+    '```',
+    '你的碟現在長這樣：',
+    '```',
+    'sda3/Users    78G   ← Windows 使用者設定檔',
+    'sdc1/mango   421G',
+    '```',
+  ].join('\n'))
+  expect(w.opens).toEqual([])
+  await reply($, [
+    '照這個順序你自己做：',
+    '```',
+    '先備份設定檔',
+    'sudo cp a.conf a.conf.bak',
+    '```',
+    '然後在終端機打：',
+    '```',
+    'tmux',
+    'printf "%s\\n" \\',
+    '  你好',
+    '```',
+  ].join('\n'))
+  const ui = await mount($)
+  expect((await view(ui)).rows).toEqual(['○ $ sudo cp a.conf a.conf.bak', '○ $ tmux', '○ $ printf "%s\\n" 你好'])
+})
+
 test('同一條指令在後面的步驟再出現就再列一次；緊接著重複提到的只列一次', async ($, on) => {
   world(on)
   const ui = await mount($)

@@ -5,7 +5,8 @@ import type { Step } from '../types'
 
 // your-turn：主對話每輪結束時，從最後一則回覆（turn.complete 的 answer）抽出要你親手跑的指令：
 // 程式碼區塊裡 sudo 開頭的行（行尾 \ 接下一行）、`! <cmd>`（行內 code 或區塊裡的行）；
-// 前一句有「你／手動／自己／親手／在終端機／另開」的 shell 區塊，整塊每行都算。
+// 前一句有「你／手動／自己／親手／在終端機／另開」的 shell 區塊，整塊每行都算；
+// 沒標語言的區塊要每行都以英數符號開頭、沒有箭頭和框線字才算（整段中文 prompt、框線圖只取 sudo 與 ! 行）。
 // 清單照回覆裡出現的順序編號，不重排；連續在同一處跑的指令同一框，換地方跑就開新框。
 // 每段指令（一個程式碼區塊，或一行裡的行內 `! cmd`）上方帶回覆裡的前一句當說明（等多久、等什麼再跑）。
 // 抽到指令就重算清單、打開對話旁的 pane（主動打開：終端機 ≥144 欄才畫，你用 /your-turn 開過一次後降到 110 欄；
@@ -214,7 +215,7 @@ export const register: Register = on => {
 // 前一句以「我」開頭的不算（「我自己試了一下：」「我在終端機跑了：」是 Claude 說它做了什麼）
 const HINT_RE = /你|手動|自己|親手|在終端機|另開/
 const SELF_RE = /^(?:[-*]\s+|\d+\.\s+)?我/
-// shell 區塊：``` 後面沒有語言標記，或是這幾種
+// shell 區塊：``` 後面是這幾種語言標記，或沒有標記（沒有標記的還要過 isShellLike）
 const SHELL_LANGS = new Set(['', 'bash', 'sh', 'shell', 'zsh', 'console'])
 
 // 回覆裡要你親手跑的指令，照出現順序；每段（一個程式碼區塊，或一行裡的行內 `! cmd`）的第一條帶前一句當 note。
@@ -239,14 +240,16 @@ function extractCommands(text: string): { cmd: string; note: string }[] {
   }
   // 區塊裡行尾 \ 的指令：先接起來，到沒有 \ 的那行才收
   let pending = ''
-  for (const raw of text.split('\n')) {
+  const lines = text.split('\n')
+  for (const [n, raw] of lines.entries()) {
     const line = raw.trim()
     const fence = /^(?:```|~~~)\s*(\S*)/.exec(line)
     if (fence) {
       if (inBlock) {
         lead = ''
       } else {
-        isHinted = SHELL_LANGS.has((fence[1] ?? '').toLowerCase()) && HINT_RE.test(lead) && !SELF_RE.test(lead)
+        const lang = (fence[1] ?? '').toLowerCase()
+        isHinted = SHELL_LANGS.has(lang) && HINT_RE.test(lead) && !SELF_RE.test(lead) && (lang !== '' || isShellLike(lines, n + 1))
         startSegment(lead)
       }
       inBlock = !inBlock
@@ -282,6 +285,23 @@ function extractCommands(text: string): { cmd: string; note: string }[] {
     lead = plain
   }
   return found.filter((f, i) => f.cmd !== found[i - 1]?.cmd)
+}
+
+// 沒標語言的區塊從 from 行起到結束 fence：空行、# 註解與接在行尾 \ 後面的續行以外，
+// 每行（去掉 $ 提示字）都以英數符號開頭、行內沒有箭頭（→ ←）和框線字（─ │ ┌），才當 shell。
+// 不符合的是說明、要你貼去別處的 prompt、圖或加了註記的輸出，不是指令
+function isShellLike(lines: string[], from: number): boolean {
+  let isContinued = false
+  for (const raw of lines.slice(from)) {
+    const line = raw.trim()
+    if (/^(?:```|~~~)/.test(line)) break
+    const isSkipped = isContinued || line === '' || line.startsWith('#')
+    isContinued = line.endsWith('\\')
+    if (isSkipped) continue
+    const cmd = line.replace(/^\$\s+/, '')
+    if (!/^[\x21-\x7e]/.test(cmd) || /[←-⇿─-╿]/.test(cmd)) return false
+  }
+  return true
 }
 
 // 說明用的佔位寫法（`! <cmd>`）不是真的指令；sudo 區塊裡的 <佔位> 仍算（要你填好再跑）

@@ -104,9 +104,14 @@ render as boxes.
   自己 ("yourself"), 親手 ("by hand"), 在終端機 ("in a terminal"), 另開 ("open
   another"): every line of the block counts, except blank lines and `#`
   comments. For example `gcloud auth login` after "請你在終端機登入 gcloud：".
-  A preceding sentence that starts with 我 ("I") does not count ("我自己試了一下："
-  / "I tried it myself:", "我在終端機跑了：" / "I ran in the terminal:" are
-  Claude describing what it did).
+  An untagged block counts as a whole only if every such line starts with an
+  ASCII character and contains no arrows (→ ←) or box-drawing characters
+  (─ │ ┌); continuation lines after a trailing `\` are not checked. Otherwise
+  (a prompt for you to copy elsewhere, a diagram drawn for you, output
+  annotated with `←`) only its `sudo` and `! ` lines count. A preceding
+  sentence that starts with 我 ("I") does not count ("我自己試了一下：" / "I
+  tried it myself:", "我在終端機跑了：" / "I ran in the terminal:" are Claude
+  describing what it did).
 - Ordinary commands in other code blocks (for example `ls` or `git status`
   after "我剛剛跑了：" / "I just ran:") do not count.
 - A command that appears again in a later step is listed again (for example
@@ -142,10 +147,11 @@ render as boxes.
 - Only the text of the turn's last reply is read; messages earlier in the same
   turn, before tool calls, are not included.
 - `sudo` lines written as a script example in a code block are listed too.
-- When the preceding sentence has a hint like 你 but the block is really
-  sample output (untagged, for example "你會看到：" / "you will see:" followed
-  by untagged output), every output line is listed as a command. Blocks tagged
-  `text` or another non-shell language are not.
+- When the preceding sentence has a hint like 你 but an untagged block is
+  really sample output or an English prompt, every line starts with an ASCII
+  character, and no line has arrows or box-drawing characters (for example
+  "你的環境有這幾個變數：" / "your environment has these variables:" followed
+  by `XMODIFIERS=@im=fcitx`), every line is listed as a command. Blocks tagged `text` or another non-shell language are not.
 - The note is only the preceding sentence, with no understanding of
   dependencies; a waiting instruction written after the command is not
   picked up.
