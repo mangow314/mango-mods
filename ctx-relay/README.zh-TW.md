@@ -63,6 +63,7 @@ echo '{"handoffTokens": "400000"}' | claude plugin configure ctx-relay@mango-mod
 - 只用前景色，沒有底色。
 - 不到 80 欄就拿掉進度條（圖示和數字保留）；還是放不下的部分從尾端截掉。
 - 倒數時整行換成 `󰚌 Handoff in 42s · at 400K · send a message to postpone`，旁邊是 `Cancel [1]` 按鈕。
+- 交接後（自動交接，或按待接手那行的 `Resume [1]`），狀態寫 `Resumed from <檔名> · next: <下一步欄的第一行> · /ctx-relay-notes`，自動交接還會跳一個 toast。你一打字，next 那段就收掉。
 - `/clear` 成功但接續訊息送不出去時，這行顯示 `Cleared, but <原因>. Type: 讀 <路徑> 並依其接續`。「Type:」後面維持中文，因為那是要你貼進對話的接續指令。
 - 別的 mod 也畫 band 時（例如 blast-radius 在窄終端機把 Proceed／Cancel 畫在這裡），它的內容在上、ctx-relay 這行在下。高度不夠或對方不讓位時，ctx-relay 這行會看不到，見「已知限制」。
 - 圖示、雪花、膠囊（U+EE00–EE05，Nerd Fonts 3.0 起才有）都要 Nerd Font（例如 Symbols Nerd Font 補字），沒有的話會變成方框。
@@ -110,6 +111,7 @@ git repo：`<git-common-dir>/harness/handoff/`；非 git：`~/.claude/harness/<�
 
 ## 指令
 - `/ctx-relay-status`：顯示門檻、讀數、交接狀態、背景工作、快取 TTL（附判定來源）和剩餘時間，以及最近 3 次交接失敗。每次交接失敗（/clear 之前）都會追加到 `<harness root>/ctx-relay/failures.jsonl`（時間、自動或手動、token、你離開幾分鐘、原因；留最近 100 筆）
+- `/ctx-relay-notes`：打開（再打一次關掉）一個總覽，內容取自這個對話接手的交接檔（沒有就拿 `handoff/` 最新一份），加上檔頭那個來源 session 的 `INDEX.md` 進度。分兩頁：`s` 接續頁（下一步、禁止事項、缺口，再來是目標、階段、改動檔案），`v` 證據頁（已驗證原文、交接檔來源）。只用一個強調色加灰字；紅黃綠只染 ✓ ▲ ✗ 這些符號。長字自動換行。pane 自己畫深色底，終端機透明背景下也一樣好讀。pane 打開時讀一次檔；按 `r` 把接續指令填進輸入框（不送出）並關掉 pane，按 `q` 關閉。
 - `/ctx-relay-now`：立刻交接；有背景工作在跑時要打 `/ctx-relay-now yes`。fork 指示、交接檔檔頭和新對話的接續訊息都寫明是 `/ctx-relay-now` 手動交接，不寫「越過自動交接線」
   - 後面可以接最新指令，例如 `/ctx-relay-now yes` 換行再打「做 B 並安裝新 mod」。第一個字是 `yes` 才算確定；其餘文字是指令。沒有背景工作時不用 `yes`，整段參數都算指令。
   - 指令原話會交給 fork 寫「目標 + 最新指令」和「下一步」，也原樣寫進交接檔檔頭和接續訊息（每行加 `> `，指令裡的 `## ` 不會變成交接檔的標題）。

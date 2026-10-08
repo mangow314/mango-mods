@@ -660,6 +660,96 @@ test('交接後你又手動 /clear：band 不再說「接續自」舊交接檔',
   expect((await band($)).text).not.toContain('Resumed from')
 })
 
+test('交接成功：band 寫「Resumed from …· next: 下一步 · /ctx-relay-notes」並跳 toast；你一打字下一步就收掉', async ($, on) => {
+  const clock = mock.clock(on)
+  const toasts: string[] = []
+  on('ui.toast', (_$, e) => {
+    toasts.push(e.text)
+    return { value: undefined }
+  })
+  const w = world($, on)
+  await start($)
+  await turn($, w, 450_000)
+  await clock.advance(60_000)
+  await clock.settle()
+  await turn($, w, 30_000)
+  expect((await band($)).text).toMatch(/Resumed from \S+\.md · next: 跑 e2e · \/ctx-relay-notes/)
+  expect(toasts.some(t => t.includes('/ctx-relay-notes'))).toBe(true)
+  await $.prompt.submit({ text: '好', wait: false, origin: { kind: 'composer' } })
+  const text = (await band($)).text
+  expect(text).toContain('Resumed from')
+  expect(text).not.toContain('next: 跑 e2e')
+})
+
+test('/ctx-relay-notes：總覽卡（下一步、目標、已驗證／缺口、禁止事項、進度），r 把接續指令填進輸入框，再打一次關掉', async ($, on) => {
+  const clock = mock.clock(on)
+  const panes = new Set<string>()
+  const fills: string[] = []
+  on('ui.panes', () => ({ value: [...panes].map(id => ({ id, title: id, isShown: true, isFocused: false, isPlaced: true })) }))
+  on('ui.open', (_$, e) => {
+    panes.add(e.id)
+    return { value: { isPlaced: true as const } }
+  })
+  on('ui.close', (_$, e) => {
+    panes.delete(e.id)
+    return { value: undefined }
+  })
+  on('prompt.fill', (_$, e) => {
+    fills.push(e.text)
+    return { isFilled: true }
+  })
+  const w = world($, on, {
+    forkText: GOOD.replace('=== VERIFIED ===', '=== VERIFIED ===\n- 已驗證：59 pass\n- 缺口：GitHub 渲染未看'),
+  })
+  w.files.set(`${ROOT}/progress/sid-1/INDEX.md`, '# demo 任務\nphase: 2 等截圖')
+  await start($)
+  await turn($, w, 450_000)
+  await clock.advance(60_000)
+  await clock.settle()
+  const notesCmd = () => $.command.run({ command: 'ctx-relay-notes', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 160 } })
+  await notesCmd()
+  expect(panes.has('ctx-relay-notes')).toBe(true)
+  const ui = await $.ui.mount({
+    plugin: 'ctx-relay',
+    surface: 'terminal',
+    component: 'Pane',
+    requestId: 'ctx-relay-notes',
+    props: { title: 'ctx-relay notes', isFocused: false, bodyColumns: 80, placement: 'dock' as const, scroll: { offset: 0, bodyRows: 40 }, view: {} },
+  })
+  const texts = async () => (await ui.findAll({ type: 'Text' })).map(t => t.text).join('\n')
+  // 接續頁：下一步 → 禁止 → 缺口 → 背景；數字前置；DONE 原文不在這頁
+  let text = await texts()
+  expect(text).toContain('auto handoff')
+  expect(text).toContain('1 NEXT')
+  expect(text).toContain('1.\n跑 e2e')
+  expect(text).toContain('不 commit')
+  expect(text).toContain('GitHub 渲染未看')
+  expect(text).toContain('做 demo')
+  expect(text).toContain('2 等截圖 (demo 任務)')
+  expect(text).toContain('1 listed in the handoff · dirty: 無')
+  expect(text).not.toContain('59 pass')
+  expect(text.indexOf('NEXT')).toBeLessThan(text.indexOf("DON'T"))
+  expect(text.indexOf("DON'T")).toBeLessThan(text.indexOf('GAPS'))
+  // 長字換行不截斷；pane 有自己的實心底，不靠終端機透明背景
+  expect((await ui.findAll({ type: 'Text' })).find(t => t.text === '跑 e2e')?.props.wrap).toBe('wrap')
+  expect((await ui.findAll({ type: 'Box' }))[0]?.props.backgroundColor).toBe('#181818')
+  expect(await ui.findAll({ type: 'Markdown' })).toHaveLength(0)
+  // v：證據頁有已驗證原文與交接檔路徑
+  await ui.press({ key: 'view-evidence' })
+  text = await texts()
+  expect(text).toContain('59 pass')
+  expect(text).toMatch(/demo-task\S*\.md/)
+  expect(text).not.toContain('跑 e2e')
+  await ui.press({ key: 'view-resume' })
+  expect(await texts()).toContain('跑 e2e')
+  await ui.press({ key: 'resume' })
+  expect(fills[0]).toMatch(/^讀 \S+demo-task\S+\.md 並依其接續/)
+  expect(panes.has('ctx-relay-notes')).toBe(false)
+  await notesCmd()
+  await notesCmd()
+  expect(panes.has('ctx-relay-notes')).toBe(false)
+})
+
 test('倒數中你手動 /clear（session.end）：計時器停掉，不交接', async ($, on) => {
   const clock = mock.clock(on)
   const w = world($, on)

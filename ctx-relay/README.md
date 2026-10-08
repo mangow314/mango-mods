@@ -115,6 +115,10 @@ One line, left to right:
 - During the countdown the whole line becomes
   `󰚌 Handoff in 42s · at 400K · send a message to postpone`, with a
   `Cancel [1]` button next to it.
+- After a handoff (automatic, or `Resume [1]` on a pending one) the status
+  reads `Resumed from <file> · next: <first line of the next-step field> ·
+  /ctx-relay-notes`, and an automatic handoff also shows a toast. The "next"
+  part goes away as soon as you type.
 - If `/clear` succeeded but the resume message could not be sent, the line
   reads `Cleared, but <reason>. Type: 讀 <path> 並依其接續`. The part after
   "Type:" stays in Chinese because it is what you paste into the conversation.
@@ -226,6 +230,16 @@ follows.
   three handoff failures. Every failed handoff (before `/clear`) is appended
   to `<harness root>/ctx-relay/failures.jsonl` (time, auto or manual, tokens,
   minutes since you last typed, reason; last 100 kept).
+- `/ctx-relay-notes`: opens (or, typed again, closes) an overview of the
+  handoff file this conversation resumed from (or the newest one in
+  `handoff/`), plus the phase from the `INDEX.md` of the session named in its
+  header. Two pages: `s` resume (next steps, don'ts, gaps, then goal, phase
+  and files) and `v` evidence (the verified notes as written, and where the
+  handoff came from). One accent color and gray text; red, yellow and green
+  mark only the ✓ ▲ ✗ symbols. Long lines wrap. The pane paints its own dark
+  background, so it reads the same over a transparent terminal. The files are
+  read when the pane opens. `r` puts the resume message in the prompt (not
+  sent) and closes the pane; `q` closes it.
 - `/ctx-relay-now`: hand off right away; with background work running, type
   `/ctx-relay-now yes`. The fork instructions, the handoff file header, and the
   resume message in the new conversation all say this was a manual

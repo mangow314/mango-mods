@@ -69,6 +69,20 @@ const BAR_COLUMNS = 80
 const LABEL = '#7d8794'
 const VALUE = '#f5f7fa'
 const DOT = '#464e5a'
+// notes pane 自帶實心深底，不靠終端機透明背景；色值與對比（APCA Lc 為自算估值）見 scratchpad tui-ux/r3-color-ux.md。
+// 深底上 Okabe-Ito 原色偏暗（Lc 33–56），pane 內改用自訂深底語意色；色盲靠符號（✓ ▲ ✗）＋文字區分。band 不動
+const N = {
+  PANE: '#181818',
+  CARD: '#262626',
+  RULE: '#5a616b',
+  TITLE: '#f5f7fa',
+  TEXT: '#e6e9ee',
+  MUTED: '#b1b8bf',
+  ACCENT: '#6CC0F0',
+  SUCCESS: '#3DD68C',
+  WARNING: '#F0C040',
+  DANGER: '#FF8F66',
+}
 const INVADER = '󰯉' // Nerd Font md-space_invaders U+F0BC9
 const GHOST = '󰊠' // md-ghost U+F02A0
 const SKULL = '󰚌' // md-skull U+F068C
@@ -134,6 +148,13 @@ let handoffTokens = 0
 // 待接手的交接檔（撐過 /clear）與 session.start 時算好的 harness root（prompt.submit 比對路徑用，免得每則訊息都跑 bash）
 let pickup: Pickup | null = null
 let pickupRoot = ''
+// 接手後 band 上的「下一步」（取自交接檔的「下一步具體動作」第一行）；你一打字就收掉
+let resumeNext = ''
+// /ctx-relay-notes pane 的內容：打開時讀檔整理一次存在這裡，render 只畫（band 每 250ms 重畫，不能每幀讀檔）
+let notes: Notes | null = null
+type NotesView = 'resume' | 'evidence'
+let notesView: NotesView = 'resume'
+const NOTES = 'ctx-relay-notes'
 // 你上一次親手送出訊息的時間（交接失敗紀錄用：失敗時你離開多久）
 let lastTypedAt: number | null = null
 
@@ -175,6 +196,7 @@ export const register: Register = (on, options) => {
     for (const [name, description] of [
       ['ctx-relay-status', 'ctx-relay: thresholds, readings, auto handoff state and background work'],
       ['ctx-relay-now', 'ctx-relay: write a handoff file now and /clear to resume (add yes when background work runs; text after it is passed on)'],
+      [NOTES, 'ctx-relay: open or close a pane with the latest handoff file and its session progress (INDEX.md)'],
     ] as const) {
       try {
         await $.command.register({ name, description })
@@ -218,6 +240,10 @@ export const register: Register = (on, options) => {
     // 這輪結束時還在線上就重新倒數（只延後不停用，使用者 2026-10-08 選 A；要停用按取消鈕）
     if (e.origin.kind === 'composer' || e.origin.kind === 'bridge') {
       lastTypedAt = await $.clock.now()
+      if (resumeNext !== '') {
+        resumeNext = ''
+        $.ui.invalidate('ui.render')
+      }
       const auto = await read($, autoAtom)
       if (auto.phase === 'countdown' || auto.phase === 'preparing') {
         disarm()
@@ -288,6 +314,23 @@ export const register: Register = (on, options) => {
         ...(await failureStatus($)),
       ].join('\n'),
     }
+  })
+
+  // 你打的指令＝asked：任何寬度都畫；再打一次關掉
+  on('command.run', { command: NOTES }, async $ => {
+    if ((await $.ui.panes()).some(p => p.id === NOTES)) {
+      await $.ui.close({ id: NOTES })
+      return { text: `${TAG} closed the notes pane` }
+    }
+    notes = await loadNotes($)
+    notesView = 'resume'
+    await $.ui.open({ id: NOTES, title: 'ctx-relay notes', focus: true })
+    return { text: `${TAG} opened the notes pane` }
+  })
+
+  on('ui.render', { component: 'Pane' }, async ($, e, next) => {
+    if (e.requestId !== NOTES) return next(e)
+    return drawNotes($, e)
   })
 
   on('command.run', { command: 'ctx-relay-now' }, async ($, e) => {
@@ -376,7 +419,7 @@ async function drawBand($: EngineInterface, e: RenderInput<'AbovePrompt'>): Prom
   if (auto.phase === 'idle' && lastHandoff) {
     ;[status, statusColor] = lastHandoff.error
       ? [clearedButFailed(lastHandoff), VERMILION]
-      : [`Resumed from ${basename(lastHandoff.path)}`, LABEL]
+      : [`Resumed from ${basename(lastHandoff.path)}${resumeNext === '' ? '' : ` · next: ${resumeNext}`} · /${NOTES}`, LABEL]
   }
 
   // 圖示與進度條用比例色、標籤灰、數值白
@@ -746,6 +789,10 @@ async function prepare($: EngineInterface, gen: number, isManual: boolean, note:
     try {
       const sent = await $.prompt.submit({ text: resumeText(path, slug, isManual, note, thin.includes('硬約束')) })
       if (sent.drop !== undefined) lastHandoff = { path, error: `the resume message was blocked: ${sent.drop}` }
+      else {
+        resumeNext = firstLine(section(content, '下一步具體動作'))
+        $.ui.toast(`${TAG} handed off to a new conversation; /${NOTES} shows the handoff file and progress`, { timeoutMs: 8000 })
+      }
     } catch (err) {
       lastHandoff = { path, error: `the resume message failed: ${String(err)}` }
     }
@@ -823,6 +870,204 @@ async function failureStatus($: EngineInterface): Promise<string[]> {
     }
   })
   return [`handoff failures: ${lines.length} recorded (${root}/ctx-relay/failures.jsonl)`, ...recent]
+}
+
+// notes pane：這次接手的交接檔（沒有就拿 handoff/ 裡最新一份）整理成總覽卡，加上檔頭來源 session 的 INDEX.md 進度。
+// 先給結論、原文不進這頁（使用者 2026-10-08：原文直接塞進 pane 沒人想看，選 B 先做總覽頁＋r/q）
+type Notes =
+  | { kind: 'none'; reason: string }
+  | {
+      kind: 'file'
+      path: string
+      name: string
+      mtimeMs: number
+      from: string
+      branch: string
+      how: string
+      thin: string
+      next: string[]
+      moreNext: number
+      goal: string
+      verified: string
+      gaps: string
+      raw: string[]
+      dont: string[]
+      task: string
+      phase: string
+      files: number
+      dirty: string
+    }
+
+async function loadNotes($: EngineInterface): Promise<Notes> {
+  const root = await harnessRoot($)
+  if (root === '') return { kind: 'none', reason: 'Cannot locate the harness root.' }
+  const dir = `${root}/handoff`
+  const list = (await $.fs.exists(dir)) ? (await $.fs.list(dir)).filter(f => f.kind === 'file' && f.name.endsWith('.md')) : []
+  const want = lastHandoff ? basename(lastHandoff.path) : ''
+  const file = list.find(f => f.name === want) ?? list.sort((a, b) => b.mtimeMs - a.mtimeMs)[0]
+  if (file === undefined) return { kind: 'none', reason: 'No handoff file yet.' }
+  const path = `${dir}/${file.name}`
+  const text = await readOr($, path, '')
+  const session = /session `([^`\s]+)`/.exec(text)?.[1] ?? ''
+  const index = session === '' ? '' : await readOr($, `${root}/progress/${session}/INDEX.md`, '')
+  const items = (title: string) => section(text, title).split('\n').map(l => l.trim()).filter(l => l !== '' && !l.startsWith('```'))
+  const bullet = (l: string) => l.replace(/^(?:[-*]|\d+[.)])\s+/, '')
+  // 下一步：有清單就取清單項（略過子項的說明行），沒有清單就整段每行一項
+  const nextLines = items(SLOTS[4][1])
+  const listed = nextLines.filter(l => /^(?:[-*]|\d+[.)])\s/.test(l))
+  const next = (listed.length > 0 ? listed : nextLines).map(bullet)
+  const check = items(SLOTS[2][1]).map(bullet)
+  const after = (re: RegExp) => check.filter(l => re.test(l)).map(l => l.replace(/^[^：:]*[：:]\s*/, '')).join(' · ')
+  const stop = /stop_status:\s*(.+)/.exec(section(text, SLOTS[6][1]))?.[1] ?? ''
+  return {
+    kind: 'file',
+    path,
+    name: file.name.replace(/\.md$/, ''),
+    mtimeMs: file.mtimeMs,
+    from: session.slice(0, 8),
+    branch: /branch[：:]?\s*`?([^`（(\s·]+)/.exec(text)?.[1] ?? '',
+    how: /手動交接/.test(text) ? 'manual handoff' : /自動交接/.test(text) ? 'auto handoff' : 'handoff skill',
+    thin: /^- thin: (.+)$/m.exec(text)?.[1] ?? '',
+    next: next.slice(0, 3),
+    moreNext: Math.max(0, next.length - 3),
+    goal: bullet(items(SLOTS[0][1])[0] ?? ''),
+    verified: after(/^已驗證/),
+    gaps: after(/^(?:缺口|驗證缺口|未驗證)/),
+    raw: check.slice(0, 2),
+    dont: stop.split(/[；;]/).map(x => x.trim()).filter(x => x !== ''),
+    task: /^#\s+(.+)$/m.exec(index)?.[1] ?? '',
+    phase: /^phase:\s*(.+)$/m.exec(index)?.[1] ?? '',
+    files: (l => l.filter(x => /^[-*]\s/.test(x)).length || l.length)(items(SLOTS[1][1])),
+    dirty: bullet(items(SLOTS[3][1])[0] ?? ''),
+  }
+}
+
+// 總覽卡（2026-10-09 TUI 競品研究＋codex/agy 互評定稿，scratchpad tui-ux/design.md）：
+// 一個強調色＋灰階，語意色只染符號；順序 NEXT → DON'T → GAPS → 背景；DONE 原文與來源放 evidence 頁
+async function drawNotes($: EngineInterface, e: RenderInput<'Pane'>): Promise<RenderElement> {
+  const { Box, Button, Text } = $.ui.resolve(e)
+  const n = notes
+  const close = <Button key="close" plain hotkey="q" label="close" onPress={() => $.ui.close({ id: NOTES })} />
+  if (n === null || n.kind === 'none') {
+    return (
+      <Box flexDirection="column" backgroundColor={N.PANE} paddingX={1} paddingY={1}>
+        <Text color={N.TEXT}>{n?.reason ?? 'Not loaded.'}</Text>
+        <Box marginTop={1}>{close}</Box>
+      </Box>
+    )
+  }
+  const now = await $.clock.now()
+  // 區塊標題：符號染語意色、標籤亮白、數字前置，細線吃剩下的寬（扣 pane 左右 padding；不夠 3 格就不畫）
+  const head = (key: string, sym: string, symColor: string, label: string, count?: number) => {
+    const title = `${sym} ${count === undefined ? '' : `${count} `}${label} `
+    const fill = e.props.bodyColumns - 2 - title.length
+    return (
+      <Box key={key} flexDirection="row" marginTop={1}>
+        <Text color={symColor} bold>{`${sym} `}</Text>
+        <Text color={N.TITLE} bold>{`${count === undefined ? '' : `${count} `}${label}`}</Text>
+        {fill >= 3 ? <Text color={N.RULE}>{` ${'─'.repeat(fill)}`}</Text> : <Text>{''}</Text>}
+      </Box>
+    )
+  }
+  const para = (key: string, text: string, color = N.TEXT) => (
+    <Box key={key} paddingLeft={2}><Text color={color} wrap="wrap">{text}</Text></Box>
+  )
+  const field = (key: string, label: string, text: string) => (
+    <Box key={key} flexDirection="row">
+      <Box width={9} flexShrink={0}><Text color={N.MUTED}>{label}</Text></Box>
+      <Box flexGrow={1} flexShrink={1}><Text color={N.TEXT} wrap="wrap">{text}</Text></Box>
+    </Box>
+  )
+  const tab = (view: NotesView, hotkey: string, label: string) => (
+    <Box key={`tab-${view}`} backgroundColor={notesView === view ? N.CARD : undefined} paddingX={1}>
+      <Button key={`view-${view}`} plain hotkey={hotkey} label={label} dimColor={notesView !== view} onPress={() => showNotes($, view)} />
+    </Box>
+  )
+  const meta = [n.from === '' ? '' : `from ${n.from}`, n.how, n.thin === '' ? '' : `thin: ${n.thin}`].filter(x => x !== '').join(' · ')
+  const body: RenderElement[] = [
+    <Box key="title" flexDirection="row" backgroundColor={N.CARD} paddingX={1}>
+      <Text color={N.TITLE} bold wrap="truncate-end">{n.branch === '' ? n.name : n.branch}</Text>
+      <Box flexGrow={1} />
+      <Text color={N.MUTED}>{`  ${ago(now - n.mtimeMs)}`}</Text>
+    </Box>,
+    <Box key="meta" paddingX={1}><Text color={N.MUTED} wrap="truncate-end">{meta}</Text></Box>,
+    <Box key="tabs" flexDirection="row" marginTop={1}>
+      {tab('resume', 's', 'resume')}
+      {tab('evidence', 'v', 'evidence')}
+      <Box flexGrow={1} />
+      <Button key="resume" plain hotkey="r" label="fill resume" onPress={() => resumeFromNotes($)} />
+      <Text>{'  '}</Text>
+      {close}
+    </Box>,
+  ]
+  if (notesView === 'resume') {
+    body.push(head('next-h', '▶', N.ACCENT, 'NEXT', n.next.length + n.moreNext))
+    if (n.next.length === 0) body.push(para('next-none', 'No next step written; read the gaps and goal first.', N.MUTED))
+    n.next.forEach((t, i) => body.push(
+      <Box key={`next-${i}`} flexDirection="row">
+        <Box width={2} flexShrink={0}><Text color={N.ACCENT}>{'▌'}</Text></Box>
+        <Box width={3} flexShrink={0}><Text color={N.ACCENT} bold>{`${i + 1}.`}</Text></Box>
+        <Box flexGrow={1} flexShrink={1}><Text color={i === 0 ? N.TITLE : N.TEXT} bold={i === 0} wrap="wrap">{t}</Text></Box>
+      </Box>,
+    ))
+    if (n.moreNext > 0) body.push(<Box key="next-more" paddingLeft={5}><Text color={N.MUTED} wrap="wrap">{`+${n.moreNext} more in the handoff file (path on evidence)`}</Text></Box>)
+    if (n.dont.length > 0) {
+      body.push(head('dont-h', '✗', N.DANGER, "DON'T", n.dont.length))
+      body.push(
+        <Box key="dont" paddingLeft={2}>
+          <Text wrap="wrap">{n.dont.flatMap((d, i) => [
+            ...(i > 0 ? [<Text key={`ds-${i}`} color={N.MUTED}>{' · '}</Text>] : []),
+            <Text key={`d-${i}`} color={N.TEXT}>{d}</Text>,
+          ])}</Text>
+        </Box>,
+      )
+    }
+    body.push(head('gap-h', '▲', N.WARNING, 'GAPS'))
+    body.push(n.gaps === '' ? para('gap', 'None recorded.', N.MUTED) : para('gap', n.gaps))
+    body.push(<Box key="ctx-gap" marginTop={1} />)
+    if (n.goal !== '') body.push(field('goal', 'goal', n.goal))
+    if (n.task !== '' || n.phase !== '') body.push(field('phase', 'phase', [n.phase, n.task === '' ? '' : `(${n.task})`].filter(x => x !== '').join(' ')))
+    body.push(field('files', 'files', `${n.files} listed in the handoff${n.dirty === '' ? '' : ` · dirty: ${n.dirty}`}`))
+  } else {
+    body.push(head('ok-h', '✓', N.SUCCESS, 'VERIFIED'))
+    if (n.verified !== '') body.push(para('ok', n.verified))
+    else if (n.raw.length > 0) {
+      body.push(para('raw-h', 'Check notes (not classified):', N.MUTED))
+      n.raw.forEach((t, i) => body.push(para(`raw-${i}`, t)))
+    } else body.push(para('ok', 'No verified items recorded.', N.MUTED))
+    body.push(head('src-h', '·', N.MUTED, 'SOURCE'))
+    body.push(field('src-file', 'file', `${n.name}.md`))
+    body.push(field('src-path', 'path', n.path))
+    if (n.from !== '') body.push(field('src-from', 'session', n.from))
+    body.push(field('src-how', 'how', n.how))
+    if (n.dirty !== '') body.push(field('src-dirty', 'dirty', n.dirty))
+  }
+  return <Box flexDirection="column" backgroundColor={N.PANE} paddingX={1} paddingY={1}>{body}</Box>
+}
+
+// 切分頁：換頁、重畫、捲回頂端（同一個 pane 共用捲動位置，不回頂會停在上一頁的位置）。
+// 捲不動不影響換頁；測試環境沒有 ui.scroll 的實作會丟錯，所以吞掉
+async function showNotes($: EngineInterface, view: NotesView) {
+  notesView = view
+  $.ui.invalidate('ui.render')
+  await $.ui.scroll({ to: 'start', in: NOTES }).catch(() => undefined)
+}
+
+// r：把接續指令填進輸入框（不送出），關掉 pane 回到輸入框
+async function resumeFromNotes($: EngineInterface) {
+  if (notes === null || notes.kind !== 'file') return
+  const filled = await $.prompt.fill({ text: pickupText(notes.path) })
+  if (!filled.isFilled) {
+    $.ui.toast(`${TAG} could not fill the prompt (${filled.refusal ?? 'unknown reason'})`, { timeoutMs: 4000 })
+    return
+  }
+  await $.ui.close({ id: NOTES })
+}
+
+// 段落第一個非空行，去掉清單符號與編號
+function firstLine(text: string): string {
+  const line = text.split('\n').map(l => l.trim()).find(l => l !== '') ?? ''
+  return line.replace(/^(?:[-*]|\d+[.)])\s+/, '')
 }
 
 async function readOr($: EngineInterface, path: string, fallback: string): Promise<string> {
@@ -1053,7 +1298,11 @@ async function pickUp($: EngineInterface, p: Pickup) {
   $.ui.invalidate('ui.render')
   try {
     const sent = await $.prompt.submit({ text: pickupText(p.path), asUser: true })
-    if (sent.drop === undefined) return await markPicked($, p.path)
+    if (sent.drop === undefined) {
+      lastHandoff = { path: p.path }
+      resumeNext = firstLine(section(await readOr($, p.path, ''), '下一步具體動作'))
+      return await markPicked($, p.path)
+    }
     $.ui.log(`${TAG} resume was blocked: ${sent.drop}`)
   } catch (err) {
     $.ui.log(`${TAG} resume failed: ${String(err)}`)
