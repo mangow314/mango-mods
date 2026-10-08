@@ -1,0 +1,8 @@
+{
+  "name": "sitrep",
+  "version": "0.1.0",
+  "description": "回覆戰況簡報：請模型在回覆最後附一段 ui-summary，畫面上藏起來，改在正文下方畫圓角結論框（一句結論、可收合的段落、按選項填入提示框不送出的待決題目）；沒附摘要的回合標成無摘要，子代理回報那列換成第一句",
+  "author": { "name": "Mango" },
+  "license": "MIT",
+  "types": "./types/index.d.ts"
+}
