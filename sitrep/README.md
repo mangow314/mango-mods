@@ -52,8 +52,9 @@ and is not in the marketplace yet.
 - A background task's notification row (subagent, background shell…) starts
   with its status: dim `✓` completed, red `!` failed, dim `–` killed.
 - Background subagents dispatched in a turn are listed in that turn's box
-  (`◌ Explore  description  執行中`) and switch to `✓` with their run time
-  when they finish; the engine's own rows stay as they are.
+  (`⠋ Explore  description  執行中 42s`, the spinner and elapsed time tick
+  every 250 ms while any subagent runs) and switch to `✓` with their run
+  time when they finish; the engine's own rows stay as they are.
 - A status pane (experimental, being redesigned): `/sitrep-pane` opens or
   closes it; it never opens by itself. Top to bottom: needs you (one tinted block
   per question; focus the pane and press an option's letter), running

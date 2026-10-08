@@ -1,4 +1,4 @@
-import { expect, test } from 'claude-code/testing'
+import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
@@ -235,13 +235,23 @@ test('dot 區塊：跟 ASCII 圖一樣畫灰底原文，標籤附粗算的節點
   expect(runs).toHaveLength(0)
 })
 
-test('結論框：這一輪派出的背景子代理列在框裡，跑完自動換成 ✓ 和耗時', async ($, on) => {
+test('結論框：這一輪派出的背景子代理列在框裡，跑的時候轉圈＋已跑時間，跑完換成 ✓ 和耗時', async ($, on) => {
+  const clock = mock.clock(on)
   world(on)
   const agent = { id: 'a1', description: '摘要 ctx-relay README', type: 'Explore', status: 'running' as const }
   on('agent.list', () => ({ value: [agent] }))
   await $.turn.complete({ answer: REPLY, durationMs: 6_000, isAborted: false, turnId: 't1', reason: 'answer' })
   const ui = await message($, REPLY)
-  expect(await texts(ui)).toContain('◌  Explore   摘要 ctx-relay README   執行中')
+  const row = async () => (await texts(ui)).match(/([⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏])  Explore   摘要 ctx-relay README   執行中 (\d+s)/)
+  const first = await row()
+  expect(first?.[2]).toBe('0s')
+  // 每 250ms 一幀：字形換下一個；3 秒後已跑時間跟著走
+  await clock.advance(250)
+  await ui.redraw()
+  expect((await row())?.[1]).not.toBe(first?.[1])
+  await clock.advance(2_750)
+  await ui.redraw()
+  expect((await row())?.[2]).toBe('3s')
   await $.turn.complete({ answer: '摘要', durationMs: 4_000, isAborted: false, turnId: 't2', reason: 'answer', agentId: 'a1' })
   await ui.redraw()
   expect(await texts(ui)).toContain('✓  Explore   摘要 ctx-relay README   4s')

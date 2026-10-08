@@ -22,8 +22,11 @@ const FENCE_RE = /^```ui-summary[^\n]*\n([\s\S]*?)\n?^```[^\n]*\n?/gm
 const KEEP_TURNS = 50
 const KEEP_AGENTS = 50
 const PANE = 'sitrep'
-// pane「進行中」已跑時間的重畫計時器（模組層，同一時間只開一個）
+// 子代理在跑時的重畫計時器（模組層，同一時間只開一個）：每 250ms 一幀，轉圈字形與已跑時間跟著走
 let tick: Timer | null = null
+let frame = 0
+const SPIN = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+const spin = () => SPIN[frame % SPIN.length]
 // 顏色只給「需要你」：黃＝等你決定；紅＝卡住；其餘灰階（第三輪設計稿的安靜版）
 const YELLOW = '#F0E442'
 const RED = '#e0745a'
@@ -149,11 +152,14 @@ export const register: Register = on => {
     }
     const found = findSummary(e.answer)
     await trackAgents($, found?.id)
-    // 有子代理在跑時每 5 秒重畫一次，pane「進行中」的已跑時間才會走；都跑完就停
+    // 有子代理在跑時每 250ms 重畫一次：轉圈字形和已跑時間證明它還活著（使用者 2026-10-08 選轉圈）；都跑完就停
     if (!tick && (await read($, agentsAtom)).some(a => !(a.status in TASK_MARKS))) {
-      tick = $.clock.every(5000, () => {
+      tick = $.clock.every(250, () => {
         void read($, agentsAtom).then(list => {
-          if (list.some(a => !(a.status in TASK_MARKS))) return $.ui.invalidate('ui.render')
+          if (list.some(a => !(a.status in TASK_MARKS))) {
+            frame++
+            return $.ui.invalidate('ui.render')
+          }
           tick?.cancel()
           tick = null
         })
@@ -471,11 +477,11 @@ async function drawPane($: EngineInterface, e: RenderEvent, width: number) {
   }
   sections.push({ title: `需要你 · ${left + userNext.length}`, color: YELLOW, rows: need, max: 8 })
 
-  // 進行中：◐ 子代理／背景 描述，已跑時間靠右
+  // 進行中：轉圈字形＋子代理／背景 描述，已跑時間靠右
   const now = await $.clock.now().catch(() => null)
   const runningRow = (key: string, label: string, since: number | undefined) => (
     <Box key={key} flexDirection="row">
-      <Text color={BLUE}>{'◐ '}</Text>
+      <Text color={BLUE}>{`${spin()} `}</Text>
       <Text>{clip(label, width - 10)}</Text>
       <Box flexGrow={1} />
       <Text color={DIM}>{now !== null && since !== undefined ? duration(now - since) : ''}</Text>
@@ -619,13 +625,15 @@ async function trackAgents($: EngineInterface, card: string | undefined) {
   })
 }
 
-// 結論框裡這一輪派出去的背景子代理：◌ 執行中；跑完照通知列的符號（✓ 完成、! 失敗、– 中止）
+// 結論框裡這一輪派出去的背景子代理：轉圈＋執行中 已跑時間；跑完照通知列的符號（✓ 完成、! 失敗、– 中止）
 async function agentRows($: EngineInterface, e: RenderEvent, card: string) {
   const agents = (await read($, agentsAtom)).filter(a => a.card === card)
   const { Text } = $.ui.resolve(e)
+  const now = await $.clock.now().catch(() => null)
   return agents.map(a => {
-    const mark = TASK_MARKS[a.status] ?? { glyph: '◌', color: DIM }
-    const state = a.status === 'completed' ? (a.durationMs !== undefined ? duration(a.durationMs) : '完成') : a.status === 'failed' ? '失敗' : a.status === 'killed' ? '已中止' : '執行中'
+    const mark = TASK_MARKS[a.status] ?? { glyph: spin(), color: BLUE }
+    const running = now !== null && a.startedAt !== undefined ? `執行中 ${duration(now - a.startedAt)}` : '執行中'
+    const state = a.status === 'completed' ? (a.durationMs !== undefined ? duration(a.durationMs) : '完成') : a.status === 'failed' ? '失敗' : a.status === 'killed' ? '已中止' : running
     return (
       <Text key={`agent-${a.id}`}>
         <Text color={mark.color} bold>{`${mark.glyph} `}</Text>
