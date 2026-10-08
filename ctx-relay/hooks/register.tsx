@@ -791,7 +791,12 @@ async function prepare($: EngineInterface, gen: number, isManual: boolean, note:
       if (sent.drop !== undefined) lastHandoff = { path, error: `the resume message was blocked: ${sent.drop}` }
       else {
         resumeNext = firstLine(section(content, '下一步具體動作'))
-        $.ui.toast(`${TAG} handed off to a new conversation; /${NOTES} shows the handoff file and progress`, { timeoutMs: 8000 })
+        // 交接後是 notes 唯一獨有價值的時刻（新對話沒有歷史，官方 recap 沒東西可總結）：自動開一次，不搶輸入框焦點。
+        // 太窄放不下或開不了就退回 toast 提示；開 pane 只是顯示，失敗不影響交接
+        notes = await loadNotes($)
+        notesView = 'resume'
+        const shown = await $.ui.open({ id: NOTES, title: 'ctx-relay notes' }).then(o => o.isPlaced, () => false)
+        $.ui.toast(shown ? `${TAG} handed off to a new conversation; the notes pane shows the handoff (q closes)` : `${TAG} handed off to a new conversation; /${NOTES} shows the handoff file and progress`, { timeoutMs: 8000 })
       }
     } catch (err) {
       lastHandoff = { path, error: `the resume message failed: ${String(err)}` }
@@ -992,11 +997,9 @@ async function drawNotes($: EngineInterface, e: RenderInput<'Pane'>): Promise<Re
     </Box>,
     <Box key="meta" paddingX={1}><Text color={N.MUTED} wrap="truncate-end">{meta}</Text></Box>,
     <Box key="tabs" flexDirection="row" marginTop={1}>
-      {tab('resume', 's', 'resume')}
+      {tab('resume', 's', 'status')}
       {tab('evidence', 'v', 'evidence')}
       <Box flexGrow={1} />
-      <Button key="resume" plain hotkey="r" label="fill resume" onPress={() => resumeFromNotes($)} />
-      <Text>{'  '}</Text>
       {close}
     </Box>,
   ]
@@ -1051,17 +1054,6 @@ async function showNotes($: EngineInterface, view: NotesView) {
   notesView = view
   $.ui.invalidate('ui.render')
   await $.ui.scroll({ to: 'start', in: NOTES }).catch(() => undefined)
-}
-
-// r：把接續指令填進輸入框（不送出），關掉 pane 回到輸入框
-async function resumeFromNotes($: EngineInterface) {
-  if (notes === null || notes.kind !== 'file') return
-  const filled = await $.prompt.fill({ text: pickupText(notes.path) })
-  if (!filled.isFilled) {
-    $.ui.toast(`${TAG} could not fill the prompt (${filled.refusal ?? 'unknown reason'})`, { timeoutMs: 4000 })
-    return
-  }
-  await $.ui.close({ id: NOTES })
 }
 
 // 段落第一個非空行，去掉清單符號與編號

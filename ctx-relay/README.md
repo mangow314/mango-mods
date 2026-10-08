@@ -230,16 +230,17 @@ follows.
   three handoff failures. Every failed handoff (before `/clear`) is appended
   to `<harness root>/ctx-relay/failures.jsonl` (time, auto or manual, tokens,
   minutes since you last typed, reason; last 100 kept).
-- `/ctx-relay-notes`: opens (or, typed again, closes) an overview of the
-  handoff file this conversation resumed from (or the newest one in
-  `handoff/`), plus the phase from the `INDEX.md` of the session named in its
-  header. Two pages: `s` resume (next steps, don'ts, gaps, then goal, phase
-  and files) and `v` evidence (the verified notes as written, and where the
-  handoff came from). One accent color and gray text; red, yellow and green
-  mark only the ✓ ▲ ✗ symbols. Long lines wrap. The pane paints its own dark
-  background, so it reads the same over a transparent terminal. The files are
-  read when the pane opens. `r` puts the resume message in the prompt (not
-  sent) and closes the pane; `q` closes it.
+- `/ctx-relay-notes`: opens (or, typed again, closes) a notes pane for
+  checking where things stood: the handoff file this conversation resumed
+  from (or the newest one in `handoff/`), plus the phase from the `INDEX.md`
+  of the session named in its header. After an automatic handoff it opens by
+  itself once, without taking the prompt's focus, when the terminal is wide
+  enough; otherwise the toast points to the command. Two pages: `s` status
+  (next steps, don'ts, gaps, then goal, phase and files) and `v` evidence
+  (the verified notes as written, and where the handoff came from). One
+  accent color and gray text; red, yellow and green mark only the ✓ ▲ ✗
+  symbols. Long lines wrap. The pane paints its own dark background, so it
+  reads the same over a transparent terminal. `q` closes it.
 - `/ctx-relay-now`: hand off right away; with background work running, type
   `/ctx-relay-now yes`. The fork instructions, the handoff file header, and the
   resume message in the new conversation all say this was a manual
