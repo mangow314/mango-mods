@@ -1,21 +1,23 @@
 # ctx-relay
 
-> 繁體中文版：[README.zh-TW.md](README.zh-TW.md). The mod's on-screen text and
-> the handoff files it writes are in Traditional Chinese.
+> 繁體中文版：[README.zh-TW.md](README.zh-TW.md). The band and commands are in
+> English; the handoff files it writes and the resume prompts it sends are in
+> Traditional Chinese.
 
 A Claude Code mod that draws a band above the prompt: current context / the
-handoff line, and this turn's cost.
+handoff line, this turn's cost, and how long the prompt cache stays warm.
 When the main conversation crosses the automatic handoff line, it hands off on
 its own: it writes a handoff file, runs `/clear`, and resumes in the new
 conversation.
 When a new conversation starts and there is a handoff file nobody has picked
-up, the band gets a second line, 待接手 ("waiting to be picked up"); press 1 to
-send the resume prompt.
+up, the band gets a second line, Pending handoff; press 1 to send the resume
+prompt.
 
 Tested on: Claude Code 2.1.289 (0.5.0, loaded with `--plugin-dir`; tested the
 countdown, cancelling by button, cancelling by typing, a full automatic
-handoff, and running alongside blast-radius). The mods API is still in early
-access, so a Claude Code release may require changes.
+handoff, and running alongside blast-radius), and 2.1.294 (the current band
+and the cache countdown). The mods API is still in early access, so a Claude
+Code release may require changes.
 
 ## What it does
 
@@ -24,7 +26,7 @@ access, so a Claude Code release may require changes.
 | The main conversation stops (Stop) with context ≥ the handoff line | If Claude Code reports background work (shells, subagents, monitors, workflows, …) or a one-shot scheduled task, the handoff is deferred and the band shows why; recurring schedules do not block it. Otherwise a 60-second countdown starts |
 | While deferred, context reaches the cap (halfway between the handoff line and the compaction point) | The countdown runs anyway; the handoff file header lists the work still running (its completion notice may never arrive) |
 | Another Stop hook blocks the stop (the turn has not really ended) | No decision; wait for the stop that really ends the turn |
-| During the countdown | Press 取消自動交接 ("cancel automatic handoff", hotkey 1) to cancel; for the rest of this conversation it only reminds you. Sending any message only postpones it: if you are still past the line when that turn ends, the countdown starts again |
+| During the countdown | Press Cancel (hotkey 1) to cancel; for the rest of this conversation it only reminds you. Sending any message only postpones it: if you are still past the line when that turn ends, the countdown starts again |
 | A new turn starts during the countdown or preparation (a schedule, a background notification, a message from another session) | This switch is dropped; it decides again when the turn ends |
 | The countdown ends | The mod collects git state and the progress INDEX → `$.model.fork` fills in only the body of the handoff skill's 8 fields, one `=== KEY ===` line per field (GOAL / FILES / VERIFIED / DIRTY / NEXT / NOTES / CONSTRAINTS / POINTERS) (gives up after 3 minutes without an answer) → the mod assembles the handoff file under 8 hard-coded Chinese `## ` headings, so the model has no chance to mistype a heading → machine check (a missing field is marked `thin:`; no section marker at all counts as a failure) → the source handoff file's coordination contract is appended verbatim → write the file and read it back → confirm the conversation has not changed → `/clear` → send the handoff file path and the pickup rules in the new conversation |
 | Any step fails before `/clear` | Stays in the original conversation, the band shows why, no retry |
@@ -78,39 +80,97 @@ is not read, so the handoff line is the automatic value.
 
 ## The band
 
-![ctx-relay band in a live session (bottom line; the top line is repo-ledger)](../docs/assets/bands.png)
+<!-- Screenshot pending: the current band in Ghostty, to replace docs/assets/bands.png (old style). -->
 
-A live Claude Code 2.1.290 session. The bottom line is ctx-relay (the top line
-is repo-ledger): `CTX 51K/142K · 本輪 +51K $0.18 44s 92%` (本輪 = "this
-turn"), followed by the bars.
+One line, left to right:
 
-Styled like an 8-bit arcade scoreboard. During the countdown the whole line
-becomes "CONTINUE? 42s（400K 存檔交接／發訊息延到下輪）" ("handing off at 400K;
-a message postpones it to the next turn"), with a cancel button next to it (press 1).
+1. An icon and a 20-cell capsule progress bar, both colored by how close
+   context is to the handoff line (tokens ÷ handoff line):
 
-- The three little monsters are your HP before the handoff line (tokens ÷
-  handoff line): below 40%, three monsters; below 70%, one turns into a ghost;
-  up to the warning line, one monster and two ghosts; past the warning line,
-  skulls; past the handoff line, all skulls.
-- Colors: sky blue = normal, orange = past the warning line, vermillion = past
-  the handoff line / counting down / failed. The background follows the three
-  states: dark blue / dark orange / dark red.
-- `220K/400K`: current context / handoff line. `90%`: this turn's cache hit
-  rate (summed over every request in the turn), with an icon for how warm it
-  is: ≥80% fire (hot), 40–79% thermometer, <40% snowflake (cold — usually the
-  cache expired while idle, so this turn cost more). The share of the model window
-  and the elapsed time are not on the band; see your status line.
-- The bars appear only when the terminal is at least 110 columns wide; their
-  height is relative to the handoff line, and a full bar = at the handoff line.
+   | Tokens ÷ handoff line | Icon | Color |
+   | --- | --- | --- |
+   | below 70% | space invader | green |
+   | 70% up to the warning line | ghost | yellow |
+   | warning line up to the handoff line | skull | orange |
+   | at or past the handoff line | skull | vermilion |
+
+   The bar moves: every 250 ms a highlight steps right across the filled part,
+   and the icon pulses. Once the prompt cache has expired (you are probably
+   away), the animation stops; it starts again when the next turn ends.
+2. `220K/434K 51%`: current context / handoff line, and the share.
+3. `· +20K $0.50 12s`: how much context this turn added, what it cost, and how
+   long it took. When this turn's cache hit rate (summed over every request in
+   the turn) is below 40%, `󰜗 12%` follows: the turn ran on a cold cache and
+   cost more, usually because the cache expired while you were idle.
+4. `· cache 42m`: the prompt cache countdown; see "Cache countdown". Hidden
+   while a turn runs.
+5. Bars: context at the end of each recent turn, a full bar = at the handoff
+   line. Only when the terminal is at least 110 columns wide.
+6. `· <status>`: handoff deferred (with the reason), writing the handoff file,
+   failed, cancelled, or which file this conversation resumed from.
+
+- Foreground colors only; no backgrounds.
+- Below 80 columns the progress bar is dropped (the icon and numbers stay);
+  whatever still does not fit is cut at the end.
+- During the countdown the whole line becomes
+  `󰚌 Handoff in 42s · at 400K · send a message to postpone`, with a
+  `Cancel [1]` button next to it.
+- If `/clear` succeeded but the resume message could not be sent, the line
+  reads `Cleared, but <reason>. Type: 讀 <path> 並依其接續`. The part after
+  "Type:" stays in Chinese because it is what you paste into the conversation.
 - When another mod also draws a band (for example blast-radius, which draws
   Proceed / Cancel here in a narrow terminal), its content goes on top and the
   ctx-relay line below. When there is not enough height, or the other mod does
   not give way, the ctx-relay line can be hidden; see "Known limits".
-- The icons need a Nerd Font (for example Symbols Nerd Font as a fallback);
-  without one the three monsters render as boxes.
-- Inside tmux, Claude Code uses only 256 colors by default, so the dark
-  backgrounds turn into much brighter colors such as #00005f. If tmux has RGB
-  enabled, set `CLAUDE_CODE_TMUX_TRUECOLOR=1` to get the original colors.
+- The icons, the snowflake, and the capsule (U+EE00–EE05, in Nerd Fonts 3.0
+  and later) need a Nerd Font, for example Symbols Nerd Font as a fallback;
+  without one they render as boxes.
+- Inside tmux, Claude Code uses only 256 colors by default. If tmux has RGB
+  enabled, set `CLAUDE_CODE_TMUX_TRUECOLOR=1` to get the exact colors.
+
+## Cache countdown
+
+The prompt cache lets the next request re-read the conversation cheaply. It
+expires after a stretch with no requests (its time to live, TTL), and every
+request restarts the clock. The countdown tells you how long it has left, so
+you can decide whether to keep going, compact first, or start a new session.
+
+- Time left = TTL − (now − when the last main-conversation turn ended). Shown
+  in minutes, in seconds under one minute, orange in the last 5 minutes, and
+  `󰜗 cold` once expired (the last turn's hit rate is hidden then).
+- Mods do not receive Claude Code's own cache state (`prompt_cache` is only
+  in the status line's input), so ctx-relay works it out itself. It measures
+  from the end of the turn, which is later than the start of the turn's last
+  request, so it can run long by about the length of the last reply. Treat it
+  as a guide.
+- TTL, first match wins, in the order Claude Code uses
+  ([prompt caching](https://code.claude.com/docs/en/prompt-caching)):
+  1. `FORCE_PROMPT_CACHING_5M` set → 5 minutes
+  2. `CLAUDE_CODE_PROMPT_CACHE_TTL` (`5m` or `1h`)
+  3. the `promptCacheTtl` setting (`5m` or `1h`)
+  4. `ENABLE_PROMPT_CACHING_1H` set → 1 hour
+  5. a Claude subscription (the session reports rate limits) → 1 hour;
+     otherwise (API key, cloud provider) → 5 minutes
+- Correction from what it sees: if you come back after more than 5 minutes
+  but before the assumed TTL, and that turn's hit rate is below 40%,
+  ctx-relay switches this session to 5 minutes (for example, a subscription
+  that went over its included usage drops to 5 minutes). `/ctx-relay-status`
+  shows why.
+- After the main conversation is compacted (`/compact`, auto-compact, or idle
+  compaction), the old cache no longer matches the start of the conversation,
+  so the countdown is dropped until the next turn ends.
+- Idle compaction: Claude Code can compact a long conversation by itself while
+  you are idle, before the cache expires, and then shows "Compacted while idle,
+  before the prompt cache expired". This is not in the docs; read from the
+  2.1.294 executable: it runs only when the cache is a one-hour one and still
+  warm, context is at least 200K (`CLAUDE_CODE_IDLE_COMPACT_MIN_TOKENS`, no
+  lower than 100K), you have been idle for about 90% of the TTL (about 54
+  minutes), and Anthropic has turned the feature on for your account. Turn it
+  off with `"idleCompaction": false` in settings. It shrinks the context, so
+  the handoff line is not reached.
+- ctx-relay does not keep the cache warm. A request sent with `$.model.fork`
+  does not read the main conversation's cache (see "Known limits"), so it
+  cannot extend it.
 
 ## Where handoff files go
 
@@ -124,11 +184,11 @@ fork as well.
 
 ## Waiting to be picked up (handoff-pickup)
 
-![ctx-relay pickup line in a live session: an extra line under the band, press 1 to resume](../docs/assets/ctx-relay-pickup.png)
+<!-- Screenshot pending: the current pickup line, to replace docs/assets/ctx-relay-pickup.png (old style). -->
 
-The line reads: 待接手 ("waiting to be picked up"), the file name, (2 小時前，來自
-1f3a9c2e = "2 hours ago, from 1f3a9c2e"), and the button `PUSH 1 接續`
-("resume"). When more handoff files are waiting, a `+N` follows the file name.
+The line reads `󰯉 Pending handoff: <file name> (2h ago, from 1f3a9c2e)`,
+with a `Resume [1]` button. When more handoff files are waiting, a `+N`
+follows.
 
 | When | What happens |
 | --- | --- |
@@ -161,8 +221,8 @@ The line reads: 待接手 ("waiting to be picked up"), the file name, (2 小時�
 
 ## Commands
 
-- `/ctx-relay-status`: shows thresholds, readings, handoff state, and
-  background work.
+- `/ctx-relay-status`: shows thresholds, readings, handoff state, background
+  work, and the cache TTL (with where it came from) and time left.
 - `/ctx-relay-now`: hand off right away; with background work running, type
   `/ctx-relay-now yes`. The fork instructions, the handoff file header, and the
   resume message in the new conversation all say this was a manual
@@ -207,6 +267,12 @@ The line reads: 待接手 ("waiting to be picked up"), the file name, (2 小時�
   - When blast-radius draws first, it does not pass the slot on to the next
     mod, so no height is enough. Which mod draws first depends on load order,
     which the official docs do not specify.
+- Writing the handoff file costs about as much as one turn on a cold cache.
+  The fork does not read the main conversation's cache: measured on 2.1.294,
+  a fork sent 30 seconds after a turn hit 43% (only the shared system prompt
+  and tools), while the main conversation's next turn hit 100%.
+- After a compaction, the band's token count is still the reading from before
+  it until the next turn ends.
 - The handoff content comes from the fork; the machine check only looks for
   empty fields and does not guarantee the content is correct. The new
   conversation is asked to check against git first.
