@@ -80,11 +80,11 @@ is not read, so the handoff line is the automatic value.
 
 ## The band
 
-<!-- Screenshot pending: the current band in Ghostty, to replace docs/assets/bands.png (old style). -->
+![ctx-relay band: icon, capsule progress bar, tokens, cost, cache countdown](../docs/assets/ctx-relay-band.png)
 
 One line, left to right:
 
-1. An icon and a 20-cell capsule progress bar, both colored by how close
+1. An icon and a 10-cell capsule progress bar, both colored by how close
    context is to the handoff line (tokens ÷ handoff line):
 
    | Tokens ÷ handoff line | Icon | Color |
@@ -184,7 +184,7 @@ fork as well.
 
 ## Waiting to be picked up (handoff-pickup)
 
-<!-- Screenshot pending: the current pickup line, to replace docs/assets/ctx-relay-pickup.png (old style). -->
+![ctx-relay pickup line: an unclaimed handoff file, press 1 to resume](../docs/assets/ctx-relay-pickup.png)
 
 The line reads `󰯉 Pending handoff: <file name> (2h ago, from 1f3a9c2e)`,
 with a `Resume [1]` button. When more handoff files are waiting, a `+N`

@@ -40,11 +40,11 @@ echo '{"handoffTokens": "400000"}' | claude plugin configure ctx-relay@mango-mod
 用 `claude --plugin-dir` 載入時讀不到已安裝版本的 `handoffTokens`，交接線會是自動值。
 
 ## band
-<!-- 截圖待補：Ghostty 裡的現行 band，取代 docs/assets/bands.png（舊樣式）。 -->
+![ctx-relay band：圖示、膠囊進度條、token、費用、快取倒數](../docs/assets/ctx-relay-band.png)
 
 一行，由左到右：
 
-1. 圖示＋20 格膠囊進度條，兩者跟著離交接線的比例（token ÷ 交接線）變色：
+1. 圖示＋10 格膠囊進度條，兩者跟著離交接線的比例（token ÷ 交接線）變色：
 
    | token ÷ 交接線 | 圖示 | 顏色 |
    |---|---|---|
@@ -90,7 +90,7 @@ git repo：`<git-common-dir>/harness/handoff/`；非 git：`~/.claude/harness/<�
 有 `<同一根目錄>/progress/<session id>/INDEX.md` 的話，會一起交給 fork 參考。
 
 ## 待接手（handoff-pickup）
-<!-- 截圖待補：現行待接手那行，取代 docs/assets/ctx-relay-pickup.png（舊樣式）。 -->
+![ctx-relay 待接手：有一份還沒人接手的交接檔，按 1 接續](../docs/assets/ctx-relay-pickup.png)
 
 這行是 `󰯉 Pending handoff: <檔名> (2h ago, from 1f3a9c2e)`，旁邊是 `Resume [1]` 按鈕。還有其他沒接手的交接檔時，後面多一個 `+N`。
 

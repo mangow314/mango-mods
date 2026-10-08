@@ -872,16 +872,17 @@ test('圖示與膠囊進度條跟著 token÷交接線變：小怪獸綠 → 幽�
     return { glyph: texts[0]?.text.trim(), color: texts[0]?.props.color, cells: cells(String(raster?.props.cells ?? '')), text }
   }
   await turn($, w, 100_000)
-  // 23%：20 格亮 5 格；frame 0 掃光在第 0 格（調亮），第 2 格起是本色
+  // 23%：10 格亮 2 格（frame 0 掃光在第 0 格，兩格都調亮），其餘暗格深灰
   let h = await head()
   expect(h).toMatchObject({ glyph: '󰯉', color: '#009E73' })
-  expect(h.cells.map(c => c[0])).toEqual([0xee03, 0xee04, 0xee04, 0xee04, 0xee04, ...Array(14).fill(0xee01), 0xee02])
-  expect(h.cells[2]?.[1]).toBe(0x009e73)
-  expect(h.cells[10]?.[1]).toBe(0x464e5a)
+  expect(h.cells.map(c => c[0])).toEqual([0xee03, 0xee04, ...Array(7).fill(0xee01), 0xee02])
+  expect(h.cells[5]?.[1]).toBe(0x464e5a)
   await turn($, w, 330_000)
+  // 76%：亮 8 格，第 2 格起是本色
   h = await head()
   expect(h).toMatchObject({ glyph: '󰊠', color: '#F0E442' })
-  expect(h.cells.filter(c => (c[0] ?? 0) >= 0xee03).length).toBe(15)
+  expect(h.cells.filter(c => (c[0] ?? 0) >= 0xee03).length).toBe(8)
+  expect(h.cells[4]?.[1]).toBe(0xf0e442)
   await turn($, w, 400_000)
   expect(await head()).toMatchObject({ glyph: '󰚌', color: '#E69F00' })
   await turn($, w, 450_000)

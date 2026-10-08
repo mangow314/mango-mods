@@ -52,7 +52,7 @@ const VERMILION = '#D55E00'
 // band 樣式：只用前景色（深色底在 tmux 256 色下會變刺眼的 #00005f）。開頭一個圖示＋進度條，跟著離交接線的比例變色
 const GREEN = '#009E73'
 const YELLOW = '#F0E442'
-const BAR_CELLS = 20
+const BAR_CELLS = 10
 // Nerd Font 的 Fira Code 進度字形：U+EE00／EE01／EE02＝空心左／中／右，＋3＝實心
 const FIRA = 0xee00
 const FIRA_FILLED = 3
