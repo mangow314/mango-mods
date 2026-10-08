@@ -361,7 +361,10 @@ async function drawBand($: EngineInterface, e: RenderInput<'AbovePrompt'>): Prom
   const [glyph, color] = mood(tokens, limits)
   const sep = () => <Text color={DOT}>{' · '}</Text>
   const segments = [<Text color={color} bold>{` ${glyph} `}</Text>]
-  if (columns >= BAR_COLUMNS) segments.push(<Text color={color}>{`${bar(ratio)} `}</Text>)
+  if (columns >= BAR_COLUMNS) {
+    const [lit, dark] = bar(ratio)
+    segments.push(<Text color={color}>{lit}</Text>, <Text color={DOT}>{dark}</Text>, <Text> </Text>)
+  }
   segments.push(
     <Text color={VALUE} bold>{k(tokens)}</Text>,
     <Text color={LABEL}>{`/${k(limits.handoff)} `}</Text>,
@@ -988,10 +991,11 @@ function mood(tokens: number, limits: Limits): [string, string] {
   return [INVADER, GREEN]
 }
 
-// 像素風進度條：BAR_CELLS 格整格方塊，滿格＝到交接線
-function bar(ratio: number): string {
-  const full = Math.max(0, Math.min(BAR_CELLS, Math.round(ratio * BAR_CELLS)))
-  return `▕${'█'.repeat(full)}${'░'.repeat(BAR_CELLS - full)}▏`
+// 分段 LED 進度條：BAR_CELLS 格左半塊（格與格之間留縫，看得出一格一格），亮格用比例色、暗格深灰；滿格＝到交接線
+// 不加左右框線：框線跟著比例色，黃色時看起來像多一條 bar（使用者實機回報）
+function bar(ratio: number): [string, string] {
+  const lit = Math.max(0, Math.min(BAR_CELLS, Math.round(ratio * BAR_CELLS)))
+  return ['▌'.repeat(lit), '▌'.repeat(BAR_CELLS - lit)]
 }
 
 // 長條高度對交接線：滿格＝到交接線

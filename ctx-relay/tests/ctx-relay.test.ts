@@ -843,12 +843,12 @@ test('圖示與進度條跟著 token÷交接線變：小怪獸綠 → 幽靈黃 
     const texts = await ui.findAll({ type: 'Text' })
     const boxes = await ui.findAll({ type: 'Box' })
     expect(boxes.some(b => b.props.backgroundColor !== undefined)).toBe(false)
-    return { glyph: texts[1]?.text.trim(), color: texts[1]?.props.color, barColor: texts[2]?.props.color, bar: texts[2]?.text.trim(), text }
+    return { glyph: texts[1]?.text.trim(), color: texts[1]?.props.color, barColor: texts[2]?.props.color, bar: texts[2]?.text, dark: texts[3]?.text, darkColor: texts[3]?.props.color, text }
   }
   await turn($, w, 100_000)
-  expect(await head()).toMatchObject({ glyph: '󰯉', color: '#009E73', barColor: '#009E73', bar: '▕██░░░░░░░░▏' })
+  expect(await head()).toMatchObject({ glyph: '󰯉', color: '#009E73', barColor: '#009E73', bar: '▌▌', dark: '▌▌▌▌▌▌▌▌', darkColor: '#464e5a' })
   await turn($, w, 330_000)
-  expect(await head()).toMatchObject({ glyph: '󰊠', color: '#F0E442', bar: '▕████████░░▏' })
+  expect(await head()).toMatchObject({ glyph: '󰊠', color: '#F0E442', bar: '▌▌▌▌▌▌▌▌', dark: '▌▌' })
   await turn($, w, 400_000)
   expect(await head()).toMatchObject({ glyph: '󰚌', color: '#E69F00' })
   await turn($, w, 450_000)
@@ -866,9 +866,9 @@ test('窄終端：<110 欄拿掉長條圖，<80 欄再拿掉進度條，圖示�
   await turn($, w, 200_000)
   expect((await band($)).text).toMatch(/[▁▂▃▄▅▆▇█]{2}/)
   expect((await band($, 100)).text).not.toMatch(/ [▁▂▃▄▅▆▇]+/)
-  expect((await band($, 100)).text).toContain('▕')
+  expect((await band($, 100)).text).toContain('▌')
   const narrow = (await band($, 70)).text
-  expect(narrow).not.toContain('▕')
+  expect(narrow).not.toContain('▌')
   expect(narrow).toContain('󰯉')
   expect(narrow).toContain('200K/434K')
 })
