@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderElement, RenderInput, SessionContextUsage, Timer, TurnCompleteInput } from 'claude-code'
 
-import type { Auto, Limits, Pickup, Reading, Receipt } from '../types'
+import type { Auto, Cache, Limits, Pickup, Reading, Receipt } from '../types'
 
 // ctx-relay：提示框上方一行，顯示每輪花費與距交接線的剩餘空間；
 // 主對話停下（classic.Stop）時 context 越過自動交接線 → 引擎回報沒有背景工作就倒數 60 秒 →
@@ -68,6 +68,11 @@ const SKULL = '󰚌' // md-skull U+F068C
 const SNOW = '󰜗' // md-snowflake U+F0717
 // 命中率低於這個才顯示（偏冷＝這輪比較貴，多半是閒置超過快取存活時間）
 const CACHE_COLD = 40
+// 快取存活時間：Claude Code 訂閱額度內主對話 1h，API key／超額 5m（code.claude.com/docs/en/prompt-caching）
+const TTL_5M = 5 * 60_000
+const TTL_1H = 60 * 60_000
+// 剩這麼多以內倒數改橘色
+const CACHE_SOON_MS = 5 * 60_000
 
 // 自動交接線＝壓縮點的 85%（大輪 +45K＋交接輪 +19K 仍在壓縮點前）；橘色提醒線＝交接線的 88%
 const HANDOFF_PCT = 85
@@ -98,9 +103,13 @@ const readingsAtom = atom({ plugin: 'ctx-relay', key: 'readings' } as const, [] 
 const receiptAtom = atom({ plugin: 'ctx-relay', key: 'receipt' } as const, null as Receipt | null)
 const limitsAtom = atom({ plugin: 'ctx-relay', key: 'limits' } as const, null as Limits | null)
 const autoAtom = atom({ plugin: 'ctx-relay', key: 'auto' } as const, { phase: 'idle' } as Auto)
+const cacheAtom = atom({ plugin: 'ctx-relay', key: 'cache' } as const, { lastRequestAt: null, turnStartedAt: null, ttlMs: TTL_1H, ttlSource: 'default', observed: '', keepalives: 0 } as Cache)
 
 // 模組變數：hot reload 會清掉；/clear 不會
 let tick: Timer | null = null
+// 快取倒數的重畫：每秒看一次，顯示的字變了才重畫；快取冷了就停（跟交接倒數的 tick 分開，disarm() 不會停到它）
+let cacheTick: Timer | null = null
+let cacheShown = ''
 let fireTimer: Timer | null = null
 let mainTurns = 0
 // 上一次主對話停下（classic.Stop）時引擎回報、會再叫醒這個 session 的工作；給指令用，換 session 就清掉
@@ -215,6 +224,8 @@ export const register: Register = (on, options) => {
   // 主對話開了新回合（排程、背景通知、別的 session 傳訊；子代理不發 turn.start）：
   // 這次倒數或準備作廢、回到 idle，回合結束時再重新判斷（你親手送出的訊息在上面已先處理）
   on('turn.start', async ($, e, next) => {
+    const startedAt = await $.clock.now()
+    await update($, cacheAtom, c => ({ ...c, turnStartedAt: startedAt }))
     // 主對話開始跑（你送出、按接續、排程）＝不再是新對話開場，待接手那行收掉
     if (pickup !== null) {
       pickup = null
@@ -250,6 +261,7 @@ export const register: Register = (on, options) => {
         `${TAG} context ${readings.at(-1)?.tokens ?? '?'}; handoff line ${limits?.handoff ?? '?'}${limits ? ` (${sourceLabel(limits.source)})` : ''}; compaction point ${limits?.fuse ?? '?'}; warning line ${limits?.nudge ?? '?'}; deferral cap ${limits?.cap ?? '?'}`,
         `auto handoff: ${auto.phase}${auto.detail ? ` (${auto.detail})` : ''}`,
         `background work: ${work.length === 0 ? 'none' : work.join(', ')}`,
+        ...(await cacheStatus($)),
         `last handoff file: ${lastHandoff ? lastHandoff.path + (lastHandoff.error ? ` (${lastHandoff.error})` : '') : 'none'}`,
       ].join('\n'),
     }
@@ -362,6 +374,11 @@ async function drawBand($: EngineInterface, e: RenderInput<'AbovePrompt'>): Prom
       segments.push(<Text color={SKY}>{` ${SNOW} ${receipt.cachePct}%`}</Text>)
     }
   }
+  const cache = await read($, cacheAtom)
+  if (!e.props.isWorking && cache.lastRequestAt !== null) {
+    const [text, c] = cacheLabel(cache, now)
+    segments.push(sep(), <Text color={c}>{text}</Text>)
+  }
   if (columns >= WIDE_COLUMNS && readings.length >= 2) segments.push(<Text color={LABEL}>{` ${spark(readings, limits.handoff)}`}</Text>)
   if (status !== '') segments.push(sep(), <Text color={statusColor}>{status}</Text>)
   segments.push(<Text> </Text>)
@@ -408,6 +425,18 @@ function deriveLimits(context: SessionContextUsage): Limits {
   return { window: context.window, fuse, nudge: Math.floor((handoff * NUDGE_PCT) / 100), handoff, cap, source }
 }
 
+// /ctx-relay-status 的快取行
+async function cacheStatus($: EngineInterface): Promise<string[]> {
+  const cache = await read($, cacheAtom)
+  if (cache.lastRequestAt === null) return ['cache: no request yet']
+  const now = await $.clock.now()
+  const ttl = cache.ttlMs === TTL_1H ? '1h' : '5m'
+  const left = cacheLabel(cache, now)[0].replace(/^cache /, '')
+  const lines = [`cache: ttl ${ttl} (${cache.ttlSource}) · last request ${duration(now - cache.lastRequestAt)} ago · ${left === 'cold' ? 'cold' : `${left} left`}`]
+  if (cache.observed !== '') lines.push(`cache note: switched to 5m, ${cache.observed}`)
+  return lines
+}
+
 function sourceLabel(source: Limits['source']): string {
   if (source === 'config') return 'setting handoffTokens'
   if (source === 'capped') return `setting ${handoffTokens} is above ${HANDOFF_PCT}% of the compaction point; using that instead`
@@ -431,7 +460,69 @@ async function takeReading($: EngineInterface, e: TurnCompleteInput) {
     }))
   }
   await update($, readingsAtom, list => [...list, { tokens, costUsd }].slice(-HISTORY))
+  // 快取倒數只是附加資訊：讀不到 env／settings 也不能拖垮讀數與交接判斷
+  await noteCache($, e).catch(err => $.ui.log(`${TAG} cache countdown skipped: ${String(err)}`))
   await update($, limitsAtom, () => deriveLimits(usage.context))
+}
+
+// 主線回合結束：記下時間、這段閒置的保溫次數歸零、推定 TTL；
+// 觀測修正：閒置超過 5 分鐘但還沒到推定 TTL，這輪卻偏冷 → 本 session 改判 5m（例如訂閱超額改扣用量）
+async function noteCache($: EngineInterface, e: TurnCompleteInput) {
+  const now = await $.clock.now()
+  const cache = await read($, cacheAtom)
+  const u = e.usage
+  const total = u ? u.input_tokens + u.cache_read_input_tokens + u.cache_creation_input_tokens : 0
+  const pct = u && total > 0 ? Math.round((u.cache_read_input_tokens * 100) / total) : null
+  const idle = cache.lastRequestAt !== null && cache.turnStartedAt !== null ? cache.turnStartedAt - cache.lastRequestAt : null
+  let observed = cache.observed
+  if (observed === '' && idle !== null && pct !== null && pct < CACHE_COLD && idle > TTL_5M && idle < cache.ttlMs) {
+    observed = `came back cold (${pct}%) after ${duration(idle)} idle`
+  }
+  const ttl = observed !== '' ? { ttlMs: TTL_5M, ttlSource: 'observed' } : await resolveTtl($)
+  await update($, cacheAtom, () => ({ lastRequestAt: now, turnStartedAt: null, ...ttl, observed, keepalives: 0 }))
+  startCacheTick($)
+}
+
+// TTL 依序：FORCE_PROMPT_CACHING_5M → CLAUDE_CODE_PROMPT_CACHE_TTL → 設定 promptCacheTtl → ENABLE_PROMPT_CACHING_1H →
+// 有 rateLimits（訂閱）1h、沒有 5m。rateLimits 取自上一次 API 回應，所以只在回合結束後判斷
+async function resolveTtl($: EngineInterface): Promise<{ ttlMs: number; ttlSource: string }> {
+  const ttlOf = (v: unknown) => (v === '5m' ? TTL_5M : v === '1h' ? TTL_1H : null)
+  const isOn = (v: string | undefined) => v !== undefined && v !== '' && v !== '0'
+  if (isOn(await $.env.get('FORCE_PROMPT_CACHING_5M'))) return { ttlMs: TTL_5M, ttlSource: 'FORCE_PROMPT_CACHING_5M' }
+  const fromEnv = ttlOf(await $.env.get('CLAUDE_CODE_PROMPT_CACHE_TTL'))
+  if (fromEnv !== null) return { ttlMs: fromEnv, ttlSource: 'CLAUDE_CODE_PROMPT_CACHE_TTL' }
+  const fromSetting = ttlOf((await $.settings.read().catch(() => ({} as Record<string, unknown>))).promptCacheTtl)
+  if (fromSetting !== null) return { ttlMs: fromSetting, ttlSource: 'promptCacheTtl setting' }
+  if (isOn(await $.env.get('ENABLE_PROMPT_CACHING_1H'))) return { ttlMs: TTL_1H, ttlSource: 'ENABLE_PROMPT_CACHING_1H' }
+  const usage = await $.session.usage()
+  return usage.rateLimits.length > 0 ? { ttlMs: TTL_1H, ttlSource: 'subscription' } : { ttlMs: TTL_5M, ttlSource: 'no subscription' }
+}
+
+function startCacheTick($: EngineInterface) {
+  if (cacheTick) return
+  cacheTick = $.clock.every(1000, () => {
+    void (async () => {
+      const cache = await read($, cacheAtom)
+      const now = await $.clock.now()
+      const shown = cache.lastRequestAt === null ? '' : cacheLabel(cache, now)[0]
+      if (cache.lastRequestAt === null || shown === 'cache cold') {
+        cacheTick?.cancel()
+        cacheTick = null
+      }
+      if (shown !== cacheShown) {
+        cacheShown = shown
+        $.ui.invalidate('ui.render')
+      }
+    })()
+  })
+}
+
+// 剩餘時間＝TTL −（現在 − 上一次請求）：≥1 分鐘以分計、<1 分鐘以秒計、到了就是 cold
+function cacheLabel(cache: Cache, now: number): [string, string] {
+  const left = cache.lastRequestAt === null ? 0 : cache.ttlMs - (now - cache.lastRequestAt)
+  if (left <= 0) return ['cache cold', SKY]
+  const text = left < 60_000 ? `cache ${Math.ceil(left / 1000)}s` : `cache ${Math.floor(left / 60_000)}m`
+  return [text, left <= CACHE_SOON_MS ? ORANGE : LABEL]
 }
 
 async function afterStop($: EngineInterface) {

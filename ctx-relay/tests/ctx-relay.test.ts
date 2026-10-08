@@ -49,6 +49,10 @@ type World = {
   failGitStatus: boolean
   // mod 執行的 /clear 次數（你手動 clear 不算）
   cleared: number
+  // 快取 TTL 判定讀的環境變數、設定，與 usage 的 rateLimits（非空＝訂閱）
+  env: Record<string, string>
+  settings: Record<string, unknown>
+  rateLimits: { kind: string; percentUsed: number }[]
   // 照實測模擬一次 /clear：發 session.end、$.state 歸零、換 session id；session.start 不重跑、模組變數保留
   clear: () => Promise<void>
 }
@@ -80,6 +84,9 @@ function world($: Engine, on: On, patch: Partial<World> = {}): World {
     failWrite: false,
     failGitStatus: false,
     cleared: 0,
+    env: {},
+    settings: {},
+    rateLimits: [{ kind: 'five_hour', percentUsed: 5 }],
     clear: async () => {
       await $.session.end({ reason: 'clear', sessionId: w.sessionId, resume: { id: w.sessionId } })
       state.clear()
@@ -108,8 +115,10 @@ function world($: Engine, on: On, patch: Partial<World> = {}): World {
   on('session.usage', (_$, e) => {
     // 只填 mod 會讀的欄位
     const breakdown = e.breakdown ? { breakdown: { autoCompactThreshold: w.fuse } as SessionContextBreakdown } : {}
-    return { value: { startedAt: 0, context: { tokens: w.tokens, window: w.window, ...breakdown }, rateLimits: [], cost: { usd: w.cost } } }
+    return { value: { startedAt: 0, context: { tokens: w.tokens, window: w.window, ...breakdown }, rateLimits: w.rateLimits, cost: { usd: w.cost } } }
   })
+  on('env.get', (_$, e) => ({ value: w.env[e.name] }))
+  on('settings.read', () => ({ value: w.settings }))
   on('session.id', () => ({ value: w.sessionId }))
   on('session.cwd', () => ({ value: '/repo' }))
   on('session.messages', () => ({ value: w.messages.map(m => ({ ...m, toolUses: [] })) }))
@@ -991,4 +1000,75 @@ test('handoff-pickup：接續送出被擋就留著這行，不記已接手', asy
   expect(w.submitted).toEqual([])
   expect(w.files.has(PICKED_HANDOFF)).toBe(false)
   expect((await band($)).text).toContain('Pending handoff')
+})
+
+// 快取倒數（relay-band 020）
+async function status($: Engine) {
+  return (await $.command.run({ command: 'ctx-relay-status', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 160 } })).text ?? ''
+}
+
+async function idleBand($: Engine) {
+  const ui = await $.ui.mount({
+    plugin: 'ctx-relay',
+    surface: 'terminal',
+    component: 'AbovePrompt',
+    props: { hasSurvey: false, isWorking: true, maxRows: 5, bodyColumns: 160, scroll: { offset: 0, bodyRows: 5 }, view: {} },
+  })
+  return (await ui.findAll({ type: 'Text' })).map(t => t.text).join(' ')
+}
+
+test('快取倒數：回合結束後顯示剩幾分，<1 分鐘改秒數，過期顯示 cache cold；回合進行中不顯示', async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world($, on)
+  await start($)
+  await turn($, w, 100_000)
+  // 訂閱（rateLimits 非空）→ 1h
+  expect((await band($)).text).toContain('cache 60m')
+  expect(await idleBand($)).not.toContain('cache')
+  await clock.advance(18 * 60_000)
+  expect((await band($)).text).toContain('cache 42m')
+  await clock.advance(41 * 60_000 + 30_000)
+  expect((await band($)).text).toContain('cache 30s')
+  await clock.advance(31_000)
+  expect((await band($)).text).toContain('cache cold')
+  expect(await status($)).toContain('cache: ttl 1h (subscription)')
+})
+
+test('快取 TTL 判定順序：FORCE_PROMPT_CACHING_5M > CLAUDE_CODE_PROMPT_CACHE_TTL > promptCacheTtl > ENABLE_PROMPT_CACHING_1H > 訂閱與否', async ($, on) => {
+  mock.clock(on)
+  const w = world($, on)
+  await start($)
+  const ttl = async () => {
+    await turn($, w, 100_000)
+    return (await status($)).split('\n').find(l => l.startsWith('cache:')) ?? ''
+  }
+  w.rateLimits = []
+  expect(await ttl()).toContain('ttl 5m (no subscription)')
+  w.env.ENABLE_PROMPT_CACHING_1H = '1'
+  expect(await ttl()).toContain('ttl 1h (ENABLE_PROMPT_CACHING_1H)')
+  w.settings.promptCacheTtl = '5m'
+  expect(await ttl()).toContain('ttl 5m (promptCacheTtl setting)')
+  w.env.CLAUDE_CODE_PROMPT_CACHE_TTL = '1h'
+  expect(await ttl()).toContain('ttl 1h (CLAUDE_CODE_PROMPT_CACHE_TTL)')
+  w.env.FORCE_PROMPT_CACHING_5M = '1'
+  expect(await ttl()).toContain('ttl 5m (FORCE_PROMPT_CACHING_5M)')
+})
+
+test('觀測修正：閒置 10 分鐘（未到推定的 1h）回來卻偏冷 → 本 session 改判 5m，狀態寫原因', async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world($, on)
+  await start($)
+  await turn($, w, 100_000)
+  // 只閒置 3 分鐘就偏冷：可能是換模型之類，不改判
+  await clock.advance(3 * 60_000)
+  await $.turn.start({ text: '', turnId: 't-a' })
+  await turn($, w, 110_000, { cacheRead: 1_000 })
+  expect(await status($)).toContain('ttl 1h')
+  await clock.advance(10 * 60_000)
+  await $.turn.start({ text: '', turnId: 't-b' })
+  await turn($, w, 120_000, { cacheRead: 1_000 })
+  const text = await status($)
+  expect(text).toContain('ttl 5m (observed)')
+  expect(text).toContain('cache note: switched to 5m, came back cold (10%) after 10m00s idle')
+  expect((await band($)).text).toContain('cache 5m')
 })

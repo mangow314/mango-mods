@@ -8,6 +8,10 @@ export type Receipt = { deltaTokens: number; deltaCost: number; durationMs: numb
 // cap＝有背景工作時延後的上限（交接線與壓縮點的中點）
 export type Limits = { window: number; fuse: number; nudge: number; handoff: number; cap: number; source: 'auto' | 'config' | 'capped' }
 
+// 快取倒數：lastRequestAt＝上一次主線回合（或保溫 fork）結束的時間，turnStartedAt＝這一輪開始的時間（算閒置多久）；
+// ttlMs／ttlSource＝推定的快取存活時間與依據；observed＝觀測修正的原因（有值＝本 session 改判 5m）；keepalives＝這段閒置已保溫幾次
+export type Cache = { lastRequestAt: number | null; turnStartedAt: number | null; ttlMs: number; ttlSource: string; observed: string; keepalives: number }
+
 // 自動交接狀態機：idle →（deferred ⇄）countdown → preparing → 切換；failed／cancelled／done 為本對話終態。
 // $.state 在 /clear 後歸零，所以新對話一律從 idle 開始。
 export type AutoPhase = 'idle' | 'deferred' | 'countdown' | 'preparing' | 'done' | 'failed' | 'cancelled'
@@ -23,6 +27,7 @@ declare module 'claude-code' {
       receipt: Receipt | null
       limits: Limits | null
       auto: Auto
+      cache: Cache
     }
   }
 }
