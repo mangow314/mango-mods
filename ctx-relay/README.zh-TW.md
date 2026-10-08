@@ -19,7 +19,7 @@
 | 倒數結束 | mod 收集 git 狀態和 progress INDEX → `$.model.fork` 只填 handoff skill 8 欄位的內文，每欄用一行 `=== 鍵名 ===`（GOAL／FILES／VERIFIED／DIRTY／NEXT／NOTES／CONSTRAINTS／POINTERS）分段（3 分鐘沒回就放棄）→ mod 自己寫死 8 個中文 `## ` 標題組成交接檔，模型沒有機會把標題打錯 → 機器檢查（缺欄位就標 `thin:`；一個分段標記都沒有就記失敗）→ 附上來源交接檔的協調契約原文 → 寫檔並讀回確認 → 確認對話沒變動 → `/clear` → 在新對話送出交接檔路徑和接手規則 |
 | 任何一步在 `/clear` 之前失敗 | 留在原對話，band 顯示原因，不重試 |
 
-協調契約由 mod 原樣附上，不經模型：fork 寫的 `=== CONTRACT ===` 分段和內文裡的「## 協調契約」段一律丟掉。fork 內文裡其他 `## ` 行會降成 `### `，交接檔的二級標題只有 mod 寫的那幾個。鍵名打錯（例如 `=== VERIFED ===`）的分段：該欄記 `thin:`，內文不丟，附在「關鍵細節備忘」末尾並標明。
+協調契約由 mod 原樣附上，不經模型：fork 寫的 `=== CONTRACT ===` 分段和內文裡的「## 協調契約」段一律丟掉。fork 內文裡其他 `## ` 行會降成 `### `，交接檔的二級標題只有 mod 寫的那幾個。鍵名打錯（例如 `=== VERIFED ===`）的分段：該欄記 `thin:`，內文不丟，附在「關鍵細節備忘」末尾並標明。fork 輸出裡的 ` ```ui-summary ` 區塊（sitrep mod 要模型每輪附的摘要）會被拿掉。
 
 ## 門檻
 - 壓縮點：Claude Code 自己回報的 auto-compact 觸發點（`$.session.usage({ breakdown })` 的 `autoCompactThreshold`）。auto-compact 關掉時改用模型窗。

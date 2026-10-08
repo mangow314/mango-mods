@@ -356,6 +356,19 @@ test('fork 分段順序亂、內文帶 ## 標題：mod 照固定順序寫八個�
   expect(content).not.toContain('thin:')
 })
 
+test('fork 輸出末尾附了 sitrep 的 ui-summary 區塊：交接檔不帶這個區塊', async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world($, on, { forkText: `${GOOD}\n\n\`\`\`ui-summary\n{"status":"done","outcome":"交接完成","items":[],"facets":[]}\n\`\`\`\n` })
+  await start($)
+  await turn($, w, 450_000)
+  await clock.advance(60_000)
+  await clock.settle()
+  const [, content] = handoffFiles(w)[0] ?? ['', '']
+  expect(content).toContain('## 指標')
+  expect(content).not.toContain('ui-summary')
+  expect(content).not.toContain('交接完成')
+})
+
 test('子 agent 回合與中斷回合不觸發', async ($, on) => {
   const clock = mock.clock(on)
   const w = world($, on)

@@ -35,7 +35,9 @@ The mod appends the coordination contract verbatim, without the model: a
 `## ` line in the fork's body is demoted to `### `, so the only second-level
 headings in a handoff file are the mod's own. A section whose key is mistyped
 (for example `=== VERIFED ===`): that field is marked `thin:`, and its body is
-kept, appended at the end of 關鍵細節備忘 ("key details") with a note.
+kept, appended at the end of 關鍵細節備忘 ("key details") with a note. A
+` ```ui-summary ` block in the fork's output (the summary the sitrep mod asks
+the model to append to each reply) is removed.
 
 ## Thresholds
 

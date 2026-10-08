@@ -757,8 +757,13 @@ function section(text: string, title: string): string {
   return body.replace(/```\w*/g, '').trim() === '' ? '' : body
 }
 
+// 與 sitrep 的 FENCE_RE 同形
+const UI_SUMMARY_RE = /```ui-summary[^\n]*\n([\s\S]*?)\n?```[^\n]*\n?/g
+
 // fork 輸出的「=== 鍵名 ===」分段 → 鍵名→內文（含不認得的鍵，由 assemble 處置）；同一鍵出現兩次就接起來，不丟內容
-function parseSlots(text: string): Map<string, string> {
+function parseSlots(raw: string): Map<string, string> {
+  // sitrep 叫模型每輪回覆末尾附 ```ui-summary 區塊（給介面讀的一行 JSON）；fork 照習慣也會附，混進交接檔只是雜訊
+  const text = raw.replace(UI_SUMMARY_RE, '')
   const hits = [...text.matchAll(/^===[ \t]*([A-Z_]+)[ \t]*===[ \t]*$/gm)]
   const slots = new Map<string, string>()
   hits.forEach((m, i) => {
