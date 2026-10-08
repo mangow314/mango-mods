@@ -917,11 +917,11 @@ async function loadNotes($: EngineInterface): Promise<Notes> {
   const index = session === '' ? '' : await readOr($, `${root}/progress/${session}/INDEX.md`, '')
   const items = (title: string) => section(text, title).split('\n').map(l => l.trim()).filter(l => l !== '' && !l.startsWith('```'))
   const bullet = (l: string) => l.replace(/^(?:[-*]|\d+[.)])\s+/, '')
-  // 下一步：有清單就取清單項（略過子項的說明行），沒有清單就整段每行一項
-  const nextLines = items(SLOTS[4][1])
-  const listed = nextLines.filter(l => /^(?:[-*]|\d+[.)])\s/.test(l))
-  const next = (listed.length > 0 ? listed : nextLines).map(bullet)
-  const check = items(SLOTS[2][1]).map(bullet)
+  // 下一步：有清單就取最外層清單項（略過說明行），沒有清單就整段每行一項；子項併進上一項
+  const nextTop = outline(section(text, SLOTS[4][1]))
+  const listed = nextTop.filter(t => t.isList)
+  const next = (listed.length > 0 ? listed : nextTop).map(t => t.text)
+  const check = outline(section(text, SLOTS[2][1])).map(t => t.text)
   const after = (re: RegExp) => check.filter(l => re.test(l)).map(l => l.replace(/^[^：:]*[：:]\s*/, '')).join(' · ')
   const stop = /stop_status:\s*(.+)/.exec(section(text, SLOTS[6][1]))?.[1] ?? ''
   return {
@@ -942,7 +942,7 @@ async function loadNotes($: EngineInterface): Promise<Notes> {
     dont: stop.split(/[；;]/).map(x => x.trim()).filter(x => x !== ''),
     task: /^#\s+(.+)$/m.exec(index)?.[1] ?? '',
     phase: /^phase:\s*(.+)$/m.exec(index)?.[1] ?? '',
-    files: (l => l.filter(x => /^[-*]\s/.test(x)).length || l.length)(items(SLOTS[1][1])),
+    files: (l => l.filter(t => t.isList).length || l.length)(outline(section(text, SLOTS[1][1]))),
     dirty: bullet(items(SLOTS[3][1])[0] ?? ''),
   }
 }
@@ -1160,6 +1160,26 @@ function section(text: string, title: string): string {
   const end = rest.search(/^##\s/m)
   const body = (end === -1 ? rest : rest.slice(0, end)).trim()
   return body.replace(/```\w*/g, '').trim() === '' ? '' : body
+}
+
+// 段落內文 → 最外層的項目；縮排更深的行（子清單、續行）併進上一項，以「 · 」串接。
+// fork 會寫「- 缺口：」再把內容放在子項（2026-10-09 實例：notes pane 只讀冒號後面，缺口顯示成沒有）
+function outline(body: string): { text: string; isList: boolean }[] {
+  const LIST = /^(?:[-*]|\d+[.)])\s+/
+  const lines = body.split('\n').filter(l => l.trim() !== '' && !l.trim().startsWith('```'))
+  const indent = (l: string) => l.length - l.trimStart().length
+  const top = Math.min(...lines.map(indent))
+  const out: { text: string; isList: boolean; kids: string[] }[] = []
+  for (const l of lines) {
+    const t = l.trim()
+    const last = out.at(-1)
+    if (indent(l) > top && last) last.kids.push(t.replace(LIST, ''))
+    else out.push({ text: t.replace(LIST, ''), isList: LIST.test(t), kids: [] })
+  }
+  return out.map(({ text, isList, kids }) => ({
+    text: kids.length === 0 ? text : `${text}${/[：:]$/.test(text) ? '' : ' '}${kids.join(' · ')}`,
+    isList,
+  }))
 }
 
 // 與 sitrep 的 FENCE_RE 同形

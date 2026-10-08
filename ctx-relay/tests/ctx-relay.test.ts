@@ -770,6 +770,33 @@ test('/ctx-relay-notes：狀態頁（下一步、禁止、缺口、目標、進�
   expect(panes.has('ctx-relay-notes')).toBe(false)
 })
 
+test('/ctx-relay-notes：巢狀清單的子項併進上一項，不算成另一項、缺口不會讀成空的', async ($, on) => {
+  const clock = mock.clock(on)
+  on('ui.panes', () => ({ value: [] }))
+  on('ui.open', () => ({ value: { isPlaced: true as const } }))
+  const w = world($, on, {
+    forkText: GOOD
+      .replace('=== VERIFIED ===\n單元測試過；e2e 未跑', '=== VERIFIED ===\n- 已驗證：59 pass\n- 缺口（還沒驗證）：\n  - 實機畫面沒看\n  - 捲動沒試')
+      .replace('=== NEXT ===\n跑 e2e', '=== NEXT ===\n1. 等實機回報，看兩件事：\n   - 標題對齊\n   - 捲動\n2. OK 就改 README'),
+  })
+  await start($)
+  await turn($, w, 450_000)
+  await clock.advance(60_000)
+  await clock.settle()
+  const ui = await $.ui.mount({
+    plugin: 'ctx-relay',
+    surface: 'terminal',
+    component: 'Pane',
+    requestId: 'ctx-relay-notes',
+    props: { title: 'ctx-relay notes', isFocused: false, bodyColumns: 80, placement: 'dock' as const, scroll: { offset: 0, bodyRows: 40 }, view: {} },
+  })
+  const text = (await ui.findAll({ type: 'Text' })).map(t => t.text).join('\n')
+  expect(text).toContain('2 NEXT')
+  expect(text).toContain('等實機回報，看兩件事：標題對齊 · 捲動')
+  expect(text).toContain('實機畫面沒看 · 捲動沒試')
+  expect(text).not.toContain('None recorded')
+})
+
 test('倒數中你手動 /clear（session.end）：計時器停掉，不交接', async ($, on) => {
   const clock = mock.clock(on)
   const w = world($, on)
