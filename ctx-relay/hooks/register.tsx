@@ -52,7 +52,15 @@ const VERMILION = '#D55E00'
 // band 樣式：只用前景色（深色底在 tmux 256 色下會變刺眼的 #00005f）。開頭一個圖示＋進度條，跟著離交接線的比例變色
 const GREEN = '#009E73'
 const YELLOW = '#F0E442'
-const BAR_CELLS = 10
+const BAR_CELLS = 20
+// Nerd Font 的 Fira Code 進度字形：U+EE00／EE01／EE02＝空心左／中／右，＋3＝實心
+const FIRA = 0xee00
+const FIRA_FILLED = 3
+// Raster 的顏色是 0xRRGGBB 整數；0x01000000＝終端預設色
+const TRACK = 0x464e5a
+const TERMINAL_DEFAULT = 0x01000000
+// 動畫一幀（掃光往右一格、圖示呼吸）
+const FRAME_MS = 250
 // 比例＝token ÷ 交接線：<70% 小怪獸（綠）、到提醒線前幽靈（黃）、過提醒線骷髏（橘）、過交接線骷髏（朱紅）
 const MOOD_GHOST = 0.7
 // 窄終端：<110 欄拿掉長條圖、<80 欄再拿掉進度條
@@ -107,9 +115,9 @@ const cacheAtom = atom({ plugin: 'ctx-relay', key: 'cache' } as const, { lastReq
 
 // 模組變數：hot reload 會清掉；/clear 不會
 let tick: Timer | null = null
-// 快取倒數的重畫：每秒看一次，顯示的字變了才重畫；快取冷了就停（跟交接倒數的 tick 分開，disarm() 不會停到它）
-let cacheTick: Timer | null = null
-let cacheShown = ''
+// band 動畫計時器（startFrames）；跟交接倒數的 tick 分開，disarm() 不會停到它
+let frameTimer: Timer | null = null
+let frame = 0
 let fireTimer: Timer | null = null
 let mainTurns = 0
 // 上一次主對話停下（classic.Stop）時引擎回報、會再叫醒這個 session 的工作；給指令用，換 session 就清掉
@@ -155,6 +163,7 @@ export const register: Register = (on, options) => {
     await update($, limitsAtom, () => deriveLimits(usage.context))
     await rearm($)
     pickupRoot = await harnessRoot($)
+    startFrames($)
     // 還沒有任何訊息＝新對話；--resume 接回的舊對話與 hot reload 不找
     if (await $.session.messages().then(m => m.length === 0, () => false)) {
       await scanPickup($)
@@ -239,6 +248,16 @@ export const register: Register = (on, options) => {
       $.ui.invalidate('ui.render')
     }
     return next(e)
+  })
+
+  // 主對話真的壓縮了（/compact、自動、閒置壓縮）：舊快取對不上新的對話開頭，倒數作廢，等下一輪結束再算
+  on('session.compact', async ($, e, next) => {
+    const result = await next(e)
+    if (e.agentId === undefined && e.trigger !== 'precompute' && !('skip' in result)) {
+      await update($, cacheAtom, c => ({ ...c, lastRequestAt: null, turnStartedAt: null }))
+      $.ui.invalidate('ui.render')
+    }
+    return result
   })
 
   // 只觀察：本 session 已載入 handoff skill（你手動交接）→ 之後不再自動交接
@@ -360,24 +379,22 @@ async function drawBand($: EngineInterface, e: RenderInput<'AbovePrompt'>): Prom
   const ratio = tokens / Math.max(limits.handoff, 1)
   const [glyph, color] = mood(tokens, limits)
   const sep = () => <Text color={DOT}>{' · '}</Text>
-  const segments = [<Text color={color} bold>{` ${glyph} `}</Text>]
-  if (columns >= BAR_COLUMNS) {
-    const [lit, dark] = bar(ratio)
-    segments.push(<Text color={color}>{lit}</Text>, <Text color={DOT}>{dark}</Text>, <Text> </Text>)
-  }
-  segments.push(
+  const icon = <Text color={breathe(color)} bold>{` ${glyph} `}</Text>
+  const cache = await read($, cacheAtom)
+  const isCold = cache.lastRequestAt !== null && cacheLeft(cache, now) <= 0
+  const segments = [
     <Text color={VALUE} bold>{k(tokens)}</Text>,
     <Text color={LABEL}>{`/${k(limits.handoff)} `}</Text>,
     <Text color={color}>{`${Math.round(ratio * 100)}%`}</Text>,
-  )
+  ]
   if (receipt) {
     segments.push(sep(), <Text color={VALUE} bold>{`${signed(receipt.deltaTokens)} $${receipt.deltaCost.toFixed(2)}`}</Text>)
     segments.push(<Text color={LABEL}>{` ${duration(receipt.durationMs)}`}</Text>)
-    if (receipt.cachePct !== null && receipt.cachePct < CACHE_COLD) {
+    // 快取已過期就不再顯示上一輪的命中率，免得一列兩個雪花
+    if (!isCold && receipt.cachePct !== null && receipt.cachePct < CACHE_COLD) {
       segments.push(<Text color={SKY}>{` ${SNOW} ${receipt.cachePct}%`}</Text>)
     }
   }
-  const cache = await read($, cacheAtom)
   if (!e.props.isWorking && cache.lastRequestAt !== null) {
     const [text, c] = cacheLabel(cache, now)
     segments.push(sep(), <Text color={c}>{text}</Text>)
@@ -386,7 +403,18 @@ async function drawBand($: EngineInterface, e: RenderInput<'AbovePrompt'>): Prom
   if (status !== '') segments.push(sep(), <Text color={statusColor}>{status}</Text>)
   segments.push(<Text> </Text>)
 
-  return <Text wrap="truncate-end">{segments}</Text>
+  const rest = <Text wrap="truncate-end">{segments}</Text>
+  // Raster 只有終端機有（桌面版沒有）
+  const Raster = e.surface === 'terminal' ? $.ui.resolve(e).Raster : null
+  if (Raster === null || columns < BAR_COLUMNS) return <Box flexDirection="row">{icon}{rest}</Box>
+  return (
+    <Box flexDirection="row">
+      {icon}
+      <Raster key="bar" columns={BAR_CELLS} rows={1} cells={bar(ratio, color)} />
+      <Text> </Text>
+      {rest}
+    </Box>
+  )
 }
 
 // 待接手那行；沒有待接手的交接檔時回 null
@@ -434,8 +462,8 @@ async function cacheStatus($: EngineInterface): Promise<string[]> {
   if (cache.lastRequestAt === null) return ['cache: no request yet']
   const now = await $.clock.now()
   const ttl = cache.ttlMs === TTL_1H ? '1h' : '5m'
-  const left = cacheLabel(cache, now)[0].replace(/^cache /, '')
-  const lines = [`cache: ttl ${ttl} (${cache.ttlSource}) · last request ${duration(now - cache.lastRequestAt)} ago · ${left === 'cold' ? 'cold' : `${left} left`}`]
+  const left = cacheLeft(cache, now)
+  const lines = [`cache: ttl ${ttl} (${cache.ttlSource}) · last request ${duration(now - cache.lastRequestAt)} ago · ${left <= 0 ? 'cold' : `${cacheLabel(cache, now)[0].replace(/^cache /, '')} left`}`]
   if (cache.observed !== '') lines.push(`cache note: switched to 5m, ${cache.observed}`)
   return lines
 }
@@ -483,7 +511,23 @@ async function noteCache($: EngineInterface, e: TurnCompleteInput) {
   }
   const ttl = observed !== '' ? { ttlMs: TTL_5M, ttlSource: 'observed' } : await resolveTtl($)
   await update($, cacheAtom, () => ({ lastRequestAt: now, turnStartedAt: null, ...ttl, observed, keepalives: 0 }))
-  startCacheTick($)
+  startFrames($)
+}
+
+// band 動畫，快取倒數也靠它每幀更新。快取冷了＝人多半不在（閒置超過 TTL），停下省得整晚每秒重畫 4 次；
+// 下一輪結束再開
+function startFrames($: EngineInterface) {
+  frameTimer?.cancel()
+  frameTimer = $.clock.every(FRAME_MS, () => {
+    void (async () => {
+      const cache = await read($, cacheAtom)
+      if (cache.lastRequestAt !== null && cacheLeft(cache, await $.clock.now()) <= 0) {
+        frameTimer?.cancel()
+        frameTimer = null
+      } else frame += 1
+      $.ui.invalidate('ui.render')
+    })()
+  })
 }
 
 // TTL 依序：FORCE_PROMPT_CACHING_5M → CLAUDE_CODE_PROMPT_CACHE_TTL → 設定 promptCacheTtl → ENABLE_PROMPT_CACHING_1H →
@@ -501,29 +545,15 @@ async function resolveTtl($: EngineInterface): Promise<{ ttlMs: number; ttlSourc
   return usage.rateLimits.length > 0 ? { ttlMs: TTL_1H, ttlSource: 'subscription' } : { ttlMs: TTL_5M, ttlSource: 'no subscription' }
 }
 
-function startCacheTick($: EngineInterface) {
-  if (cacheTick) return
-  cacheTick = $.clock.every(1000, () => {
-    void (async () => {
-      const cache = await read($, cacheAtom)
-      const now = await $.clock.now()
-      const shown = cache.lastRequestAt === null ? '' : cacheLabel(cache, now)[0]
-      if (cache.lastRequestAt === null || shown === 'cache cold') {
-        cacheTick?.cancel()
-        cacheTick = null
-      }
-      if (shown !== cacheShown) {
-        cacheShown = shown
-        $.ui.invalidate('ui.render')
-      }
-    })()
-  })
+// 剩餘時間＝TTL −（現在 − 上一次請求）
+function cacheLeft(cache: Cache, now: number): number {
+  return cache.lastRequestAt === null ? 0 : cache.ttlMs - (now - cache.lastRequestAt)
 }
 
-// 剩餘時間＝TTL −（現在 − 上一次請求）：≥1 分鐘以分計、<1 分鐘以秒計、到了就是 cold
+// ≥1 分鐘以分計、<1 分鐘以秒計、到了就是雪花 cold
 function cacheLabel(cache: Cache, now: number): [string, string] {
-  const left = cache.lastRequestAt === null ? 0 : cache.ttlMs - (now - cache.lastRequestAt)
-  if (left <= 0) return ['cache cold', SKY]
+  const left = cacheLeft(cache, now)
+  if (left <= 0) return [`${SNOW} cold`, SKY]
   const text = left < 60_000 ? `cache ${Math.ceil(left / 1000)}s` : `cache ${Math.floor(left / 60_000)}m`
   return [text, left <= CACHE_SOON_MS ? ORANGE : LABEL]
 }
@@ -991,11 +1021,36 @@ function mood(tokens: number, limits: Limits): [string, string] {
   return [INVADER, GREEN]
 }
 
-// 分段 LED 進度條：BAR_CELLS 格左半塊（格與格之間留縫，看得出一格一格），亮格用比例色、暗格深灰；滿格＝到交接線
-// 不加左右框線：框線跟著比例色，黃色時看起來像多一條 bar（使用者實機回報）
-function bar(ratio: number): [string, string] {
+// 膠囊進度條（Raster 的 cells）：Nerd Font 的 Fira Code 進度字形，亮格實心比例色、暗格空心深灰；滿格＝到交接線。
+// 掃光：一道亮光每幀往右一格，掃過亮格後從頭再來（使用者 2026-10-08 選 P2＋掃光）
+function bar(ratio: number, color: string): string {
   const lit = Math.max(0, Math.min(BAR_CELLS, Math.round(ratio * BAR_CELLS)))
-  return ['▌'.repeat(lit), '▌'.repeat(BAR_CELLS - lit)]
+  const sweep = frame % (lit + 4)
+  const words: number[] = []
+  for (let x = 0; x < BAR_CELLS; x++) {
+    const shape = FIRA + (x === 0 ? 0 : x === BAR_CELLS - 1 ? 2 : 1)
+    if (x >= lit) {
+      words.push(shape, TRACK, TERMINAL_DEFAULT)
+      continue
+    }
+    const glow = x === sweep ? 0.6 : Math.abs(x - sweep) === 1 ? 0.3 : 0
+    words.push(shape + FIRA_FILLED, mix(rgb(color), 0xffffff, glow), TERMINAL_DEFAULT)
+  }
+  return btoa(String.fromCharCode(...new Uint8Array(Uint32Array.from(words).buffer)))
+}
+
+// 圖示呼吸：每 2 幀在本色與調暗之間切換
+function breathe(color: string): string {
+  return frame % 4 < 2 ? color : `#${mix(rgb(color), 0x000000, 0.45).toString(16).padStart(6, '0')}`
+}
+
+function rgb(hex: string): number {
+  return parseInt(hex.slice(1), 16)
+}
+
+function mix(c: number, toward: number, t: number): number {
+  const ch = (shift: number) => Math.round(((c >> shift) & 255) * (1 - t) + ((toward >> shift) & 255) * t)
+  return (ch(16) << 16) | (ch(8) << 8) | ch(0)
 }
 
 // 長條高度對交接線：滿格＝到交接線

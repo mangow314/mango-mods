@@ -211,13 +211,38 @@ async function turn($: Engine, w: World, tokens: number, extra: { answer?: strin
   })
 }
 
+// Raster 的 cells 解回 [codePoint, fg, bg]
+function cells(b64: string): number[][] {
+  const bytes = Uint8Array.from(atob(b64), ch => ch.charCodeAt(0))
+  const words = [...new Uint32Array(bytes.buffer)]
+  return Array.from({ length: words.length / 3 }, (_, i) => words.slice(i * 3, i * 3 + 3))
+}
+
+function luma(c: number): number {
+  return ((c >> 16) & 255) + ((c >> 8) & 255) + (c & 255)
+}
+
+// band 動畫每 250ms 重畫一次：同時掛著的 band 越多越慢，所以每次只留最新一個
+let mounted: { unmount: () => Promise<void> } | null = null
+
+// 動畫計時器每 250ms 一次，測試時鐘一次 advance 最多處理 10000 次等待：長時間分段推進
+// 推進前先卸下 band，否則每一幀都重畫它
+async function idle(clock: { advance: (ms: number) => Promise<unknown> }, ms: number) {
+  await mounted?.unmount().catch(() => undefined)
+  mounted = null
+  for (let left = ms; left > 0; left -= 20 * 60_000) await clock.advance(Math.min(left, 20 * 60_000))
+}
+
 async function band($: Engine, bodyColumns = 160) {
+  // 上一個測試掛的已隨測試結束，卸載會丟 this test has ended
+  await mounted?.unmount().catch(() => undefined)
   const ui = await $.ui.mount({
     plugin: 'ctx-relay',
     surface: 'terminal',
     component: 'AbovePrompt',
     props: { hasSurvey: false, isWorking: false, maxRows: 5, bodyColumns, scroll: { offset: 0, bodyRows: 5 }, view: {} },
   })
+  mounted = ui
   const text = (await ui.findAll({ type: 'Text' })).map(t => t.text).join(' ')
   return { ui, text }
 }
@@ -642,7 +667,7 @@ test('有背景工作在跑（shell／monitor／workflow）：延後交接；引
   await turn($, w, 450_000)
   expect((await band($)).text).toContain('Handoff deferred: 3 background tasks still running')
   // 不設逾時作廢：13 小時後仍在跑就仍然延後
-  await clock.advance(13 * 60 * 60_000)
+  await idle(clock, 13 * 60 * 60_000)
   await turn($, w, 452_000)
   expect((await band($)).text).toContain('Handoff deferred: 3 background tasks still running')
   expect(w.forkPrompts).toHaveLength(0)
@@ -833,7 +858,7 @@ test('別的 mod 也畫 band（例如 blast-radius 的按鈕）：兩邊都畫�
   expect(await ui.find({ key: 'proceed' })).toBeDefined()
 })
 
-test('圖示與進度條跟著 token÷交接線變：小怪獸綠 → 幽靈黃 → 過提醒線骷髏橘 → 過交接線骷髏朱紅；不用背景色', async ($, on) => {
+test('圖示與膠囊進度條跟著 token÷交接線變：小怪獸綠 → 幽靈黃 → 過提醒線骷髏橘 → 過交接線骷髏朱紅；不用背景色', async ($, on) => {
   mock.clock(on)
   const w = world($, on)
   await start($)
@@ -843,12 +868,20 @@ test('圖示與進度條跟著 token÷交接線變：小怪獸綠 → 幽靈黃 
     const texts = await ui.findAll({ type: 'Text' })
     const boxes = await ui.findAll({ type: 'Box' })
     expect(boxes.some(b => b.props.backgroundColor !== undefined)).toBe(false)
-    return { glyph: texts[1]?.text.trim(), color: texts[1]?.props.color, barColor: texts[2]?.props.color, bar: texts[2]?.text, dark: texts[3]?.text, darkColor: texts[3]?.props.color, text }
+    const [raster] = await ui.findAll({ type: 'Raster' })
+    return { glyph: texts[0]?.text.trim(), color: texts[0]?.props.color, cells: cells(String(raster?.props.cells ?? '')), text }
   }
   await turn($, w, 100_000)
-  expect(await head()).toMatchObject({ glyph: '󰯉', color: '#009E73', barColor: '#009E73', bar: '▌▌', dark: '▌▌▌▌▌▌▌▌', darkColor: '#464e5a' })
+  // 23%：20 格亮 5 格；frame 0 掃光在第 0 格（調亮），第 2 格起是本色
+  let h = await head()
+  expect(h).toMatchObject({ glyph: '󰯉', color: '#009E73' })
+  expect(h.cells.map(c => c[0])).toEqual([0xee03, 0xee04, 0xee04, 0xee04, 0xee04, ...Array(14).fill(0xee01), 0xee02])
+  expect(h.cells[2]?.[1]).toBe(0x009e73)
+  expect(h.cells[10]?.[1]).toBe(0x464e5a)
   await turn($, w, 330_000)
-  expect(await head()).toMatchObject({ glyph: '󰊠', color: '#F0E442', bar: '▌▌▌▌▌▌▌▌', dark: '▌▌' })
+  h = await head()
+  expect(h).toMatchObject({ glyph: '󰊠', color: '#F0E442' })
+  expect(h.cells.filter(c => (c[0] ?? 0) >= 0xee03).length).toBe(15)
   await turn($, w, 400_000)
   expect(await head()).toMatchObject({ glyph: '󰚌', color: '#E69F00' })
   await turn($, w, 450_000)
@@ -856,6 +889,29 @@ test('圖示與進度條跟著 token÷交接線變：小怪獸綠 → 幽靈黃 
   expect((await band($)).text).toContain('Handoff in')
   const countdown = await (await band($)).ui.findAll({ type: 'Text' })
   expect(countdown[0]?.props.color).toBe('#D55E00')
+})
+
+test('動畫：每 250ms 一幀，掃光往右移、圖示每 2 幀明暗切換；快取冷了就停', async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world($, on)
+  await start($)
+  await turn($, w, 200_000)
+  const look = async () => {
+    const { ui } = await band($)
+    const [raster] = await ui.findAll({ type: 'Raster' })
+    const brightest = cells(String(raster?.props.cells ?? '')).reduce((best, c, i, all) => (luma(c[1] ?? 0) > luma(all[best]?.[1] ?? 0) ? i : best), 0)
+    return { icon: (await ui.findAll({ type: 'Text' }))[0]?.props.color, brightest }
+  }
+  expect(await look()).toEqual({ icon: '#009E73', brightest: 0 })
+  await clock.advance(250)
+  expect(await look()).toEqual({ icon: '#009E73', brightest: 1 })
+  await clock.advance(250)
+  expect(await look()).toEqual({ icon: '#00573f', brightest: 2 })
+  // 快取冷了（人多半不在）就停：之後畫面不再變
+  await idle(clock, 61 * 60_000)
+  const still = await look()
+  await clock.advance(500)
+  expect(await look()).toEqual(still)
 })
 
 test('窄終端：<110 欄拿掉長條圖，<80 欄再拿掉進度條，圖示與數字保留', async ($, on) => {
@@ -866,9 +922,9 @@ test('窄終端：<110 欄拿掉長條圖，<80 欄再拿掉進度條，圖示�
   await turn($, w, 200_000)
   expect((await band($)).text).toMatch(/[▁▂▃▄▅▆▇█]{2}/)
   expect((await band($, 100)).text).not.toMatch(/ [▁▂▃▄▅▆▇]+/)
-  expect((await band($, 100)).text).toContain('▌')
+  expect(await (await band($, 100)).ui.findAll({ type: 'Raster' })).toHaveLength(1)
   const narrow = (await band($, 70)).text
-  expect(narrow).not.toContain('▌')
+  expect(await (await band($, 70)).ui.findAll({ type: 'Raster' })).toHaveLength(0)
   expect(narrow).toContain('󰯉')
   expect(narrow).toContain('200K/434K')
 })
@@ -1014,10 +1070,12 @@ async function idleBand($: Engine) {
     component: 'AbovePrompt',
     props: { hasSurvey: false, isWorking: true, maxRows: 5, bodyColumns: 160, scroll: { offset: 0, bodyRows: 5 }, view: {} },
   })
-  return (await ui.findAll({ type: 'Text' })).map(t => t.text).join(' ')
+  const text = (await ui.findAll({ type: 'Text' })).map(t => t.text).join(' ')
+  await ui.unmount()
+  return text
 }
 
-test('快取倒數：回合結束後顯示剩幾分，<1 分鐘改秒數，過期顯示 cache cold；回合進行中不顯示', async ($, on) => {
+test('快取倒數：回合結束後顯示剩幾分，<1 分鐘改秒數，過期顯示雪花 cold；回合進行中不顯示', async ($, on) => {
   const clock = mock.clock(on)
   const w = world($, on)
   await start($)
@@ -1025,13 +1083,42 @@ test('快取倒數：回合結束後顯示剩幾分，<1 分鐘改秒數，過�
   // 訂閱（rateLimits 非空）→ 1h
   expect((await band($)).text).toContain('cache 60m')
   expect(await idleBand($)).not.toContain('cache')
-  await clock.advance(18 * 60_000)
+  await idle(clock, 18 * 60_000)
   expect((await band($)).text).toContain('cache 42m')
-  await clock.advance(41 * 60_000 + 30_000)
+  await idle(clock, 41 * 60_000 + 30_000)
   expect((await band($)).text).toContain('cache 30s')
   await clock.advance(31_000)
-  expect((await band($)).text).toContain('cache cold')
+  expect((await band($)).text).toContain('󰜗 cold')
   expect(await status($)).toContain('cache: ttl 1h (subscription)')
+})
+
+test('快取過期：不再顯示上一輪的命中率，只留雪花 cold', async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world($, on)
+  await start($)
+  await turn($, w, 100_000)
+  await turn($, w, 200_000, { cacheRead: 1_200 })
+  expect((await band($)).text).toContain('󰜗 12%')
+  await idle(clock, 61 * 60_000)
+  const text = (await band($)).text
+  expect(text).not.toContain('12%')
+  expect(text).toContain('󰜗 cold')
+})
+
+test('主對話壓縮後倒數作廢，下一輪結束再從頭算；預先計算（precompute）不算', async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world($, on)
+  const summary = { role: 'user' as const, text: '摘要', toolUses: [] }
+  on('session.compact', () => ({ messages: [summary] }))
+  await start($)
+  await turn($, w, 300_000)
+  await idle(clock, 50 * 60_000)
+  await $.session.compact({ trigger: 'precompute', instructions: '', messages: [summary] })
+  expect((await band($)).text).toContain('cache 10m')
+  await $.session.compact({ trigger: 'auto', instructions: '', messages: [summary] })
+  expect((await band($)).text).not.toContain('cache')
+  await turn($, w, 40_000)
+  expect((await band($)).text).toContain('cache 60m')
 })
 
 test('快取 TTL 判定順序：FORCE_PROMPT_CACHING_5M > CLAUDE_CODE_PROMPT_CACHE_TTL > promptCacheTtl > ENABLE_PROMPT_CACHING_1H > 訂閱與否', async ($, on) => {
