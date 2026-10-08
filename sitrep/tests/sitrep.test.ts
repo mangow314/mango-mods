@@ -137,10 +137,10 @@ test('結論條畫在回覆裡：狀態標籤＋結論；回合結束後補上�
   expect(await texts(ui)).toContain('等你決定')
   expect(await texts(ui)).toContain('照 A 改好，測試全過')
   expect(await texts(ui)).not.toContain('2m 41s')
-  // 框寬固定：終端寬減 4、最寬 88；標題在框內，不用疊在框線上的 absolute 層
+  // 框寬固定：終端寬減 4、最寬 88；標題疊在上框線（框的後一個兄弟，absolute）
   const boxes = await ui.findAll({ type: 'Box' })
-  expect(boxes.filter(b => b.props.borderStyle === 'round').map(b => b.props.width)).toEqual([88])
-  expect(boxes.some(b => b.props.position === 'absolute')).toBe(false)
+  expect(boxes.filter(b => b.props.width !== undefined).map(b => b.props.width)).toEqual([88])
+  expect(boxes.some(b => b.props.position === 'absolute' && b.props.top === 0)).toBe(true)
   await $.turn.complete({ answer: REPLY, durationMs: 161_000, isAborted: false, turnId: 't1', reason: 'answer' })
   await ui.redraw()
   expect(await texts(ui)).toContain('2m 41s')

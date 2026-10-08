@@ -5,7 +5,7 @@ import type { AgentNote, ChangeNote, Evidence, Facet, Item, Summary, SummaryTask
 
 // sitrep：
 // 1. 在系統提示尾端加一段（prompt.compose），請模型在交還給使用者的最後一則回覆末尾附 ```ui-summary 區塊（一行 JSON）。
-// 2. 畫回覆時（AssistantMessage）把區塊藏起來，正文下面畫一個圓角結論框：標題（狀態＋耗時）嵌在上框線，
+// 2. 畫回覆時（AssistantMessage）把區塊藏起來，正文下面畫一個圓角結論框：標題（狀態＋耗時）疊在上框線，
 //    框裡是粗體結論、facets 指到的段落（從正文拿掉，一行摘要；展開時放回正文原位）、待你決定的題目（按選項把「題號. key」填進提示框，不送出）。
 //    存下來的訊息不變；但 AssistantMessage 沒有 isExpanded，分不出 ctrl+o 畫面，那裡一樣畫成結論框。
 // 3. 沒附區塊的回合，回合結束那列（TurnDuration，「Baked for 3s」）換成「– 本輪結束（無摘要）」，不假裝沒事；
@@ -363,20 +363,22 @@ export const register: Register = on => {
       ...items.questions,
       ...items.later,
     ]
-    // 標題畫在框內第一列：疊在框線上的 absolute 標題，框頂捲出畫面時會疊到內容上（實機 opus/s2:1）；Box 也不能單獨關掉上框線
+    // 標題疊在上框線（2026-10-09 使用者要再試）：框自己的子元素會被框線蓋掉（your-turn 2026-10-05 實測），
+    // 所以標題是框的「後一個兄弟」、absolute 疊上去。舊紀錄：框頂捲出畫面時標題曾疊到內容上（實機 opus/s2:1），這次重看
     // 框寬固定（不跟內容跳，實機 36～81 欄）：終端寬減 4，最寬 88
     const width = Math.min((e.viewport?.columns ?? 92) - 4, BOX_MAX)
     return (
       <Box flexDirection="column">
         {body}
-        <Box key="lens" borderStyle="round" borderColor={frame.border} paddingX={1} flexDirection="column" marginTop={1} width={width}>
-          <Box key="title" flexDirection="row">
-            {isOld ? <Button key="box-close" plain label="▾ " onPress={toggleBox} /> : null}
-            <Text color={frame.title} bold>{`${glyph} ${frame.word}`}</Text>
-            <Box flexGrow={1} />
-            {turn ? <Text color={DIM}>{duration(turn.durationMs)}</Text> : null}
+        <Box key="lens-wrap" flexDirection="column" marginTop={1} width={width}>
+          <Box key="lens" borderStyle="round" borderColor={frame.border} paddingX={1} flexDirection="column">
+            {rows}
           </Box>
-          {rows}
+          <Box key="title" position="absolute" top={0} left={2} flexDirection="row">
+            {isOld ? <Button key="box-close" plain label="▾" onPress={toggleBox} /> : null}
+            <Text color={frame.title} bold>{` ${glyph} ${frame.word} `}</Text>
+          </Box>
+          {turn ? <Box key="time" position="absolute" top={0} right={2}><Text color={DIM}>{` ${duration(turn.durationMs)} `}</Text></Box> : null}
         </Box>
       </Box>
     )

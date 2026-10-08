@@ -16,7 +16,7 @@ and is not in the marketplace yet.
   options, and the sections that can be collapsed.
 - Hides that block when the reply is drawn and puts a rounded outcome box
   under the body, styled like your-turn's:
-  - The first row inside is the status (`? 等你決定` decisions waiting,
+  - The title sits on the top border: the status (`? 等你決定` decisions waiting,
     `> 等你動手` something for you to do by hand, `! 卡住` blocked,
     `~ 進行中` in progress, `✓ 完成` done) with the duration at the right.
     The status follows the one the model gave: a done or blocked reply stays
