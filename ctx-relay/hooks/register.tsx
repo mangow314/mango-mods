@@ -49,8 +49,15 @@ const SKY = '#56B4E9'
 const ORANGE = '#E69F00'
 const VERMILION = '#D55E00'
 
-// band 樣式：8-Bit 街機計分板。底色跟著三態，三隻小怪獸是離交接線的 HP
-const BG = { [SKY]: '#161922', [ORANGE]: '#241c12', [VERMILION]: '#321210' } as Record<string, string>
+// band 樣式：只用前景色（深色底在 tmux 256 色下會變刺眼的 #00005f）。開頭一個圖示＋進度條，跟著離交接線的比例變色
+const GREEN = '#009E73'
+const YELLOW = '#F0E442'
+const BAR_CELLS = 10
+// 比例＝token ÷ 交接線：<70% 小怪獸（綠）、到提醒線前幽靈（黃）、過提醒線骷髏（橘）、過交接線骷髏（朱紅）
+const MOOD_GHOST = 0.7
+// 窄終端：<110 欄拿掉長條圖、<80 欄再拿掉進度條
+const WIDE_COLUMNS = 110
+const BAR_COLUMNS = 80
 const LABEL = '#7d8794'
 const VALUE = '#f5f7fa'
 const DOT = '#464e5a'
@@ -58,14 +65,9 @@ const INVADER = '󰯉' // Nerd Font md-space_invaders U+F0BC9
 const GHOST = '󰊠' // md-ghost U+F02A0
 const SKULL = '󰚌' // md-skull U+F068C
 // cache 冷暖：熱＝大多命中（便宜），冷＝大多重算（貴，例如閒置超過 cache 存活時間）
-const FIRE = '󰈸' // md-fire U+F0238
-const THERMO = '󰔏' // md-thermometer U+F050F
 const SNOW = '󰜗' // md-snowflake U+F0717
-const CACHE_HOT = 80
-const CACHE_WARM = 40
-// HP 分段取自設計稿（token ÷ 交接線），不是引擎數字：<40% 三隻、<70% 一隻變鬼、提醒線前剩一隻
-const HP_FULL = 0.4
-const HP_HALF = 0.7
+// 命中率低於這個才顯示（偏冷＝這輪比較貴，多半是閒置超過快取存活時間）
+const CACHE_COLD = 40
 
 // 自動交接線＝壓縮點的 85%（大輪 +45K＋交接輪 +19K 仍在壓縮點前）；橘色提醒線＝交接線的 88%
 const HANDOFF_PCT = 85
@@ -151,13 +153,13 @@ export const register: Register = (on, options) => {
     $.ui.invalidate('ui.render')
     // 名稱衝突會丟例外並中斷本 hook，所以放最後並各自包住
     for (const [name, description] of [
-      ['ctx-relay-status', 'ctx-relay：門檻、讀數、自動交接狀態與背景工作'],
-      ['ctx-relay-now', 'ctx-relay：立刻產生交接檔並 /clear 接續（有背景工作時要加 yes；後面可接最新指令）'],
+      ['ctx-relay-status', 'ctx-relay: thresholds, readings, auto handoff state and background work'],
+      ['ctx-relay-now', 'ctx-relay: write a handoff file now and /clear to resume (add yes when background work runs; text after it is passed on)'],
     ] as const) {
       try {
         await $.command.register({ name, description })
       } catch (err) {
-        $.ui.log(`${TAG} 註冊 /${name} 失敗：${String(err)}`)
+        $.ui.log(`${TAG} failed to register /${name}: ${String(err)}`)
       }
     }
     return result
@@ -184,7 +186,7 @@ export const register: Register = (on, options) => {
     stopWork = [
       ...(e.background_tasks ?? []).map(t => `${t.type} ${t.description}`.slice(0, 80)),
       // 一次性排程會再叫醒這個 session；循環排程每次都會醒，不擋交接
-      ...(e.session_crons ?? []).filter(c => !c.recurring).map(c => `一次性排程 ${c.prompt}`.slice(0, 80)),
+      ...(e.session_crons ?? []).filter(c => !c.recurring).map(c => `one-shot schedule ${c.prompt}`.slice(0, 80)),
     ]
     await afterStop($)
     $.ui.invalidate('ui.render')
@@ -232,7 +234,7 @@ export const register: Register = (on, options) => {
   on('skill.prompt', { skill: 'handoff' }, async ($, e, next) => {
     const auto = await read($, autoAtom)
     if (auto.phase === 'idle' || auto.phase === 'deferred') {
-      await setAuto($, { phase: 'done', detail: '本 session 已手動交接，自動交接停用' })
+      await setAuto($, { phase: 'done', detail: 'Handed off manually; auto handoff off for this session' })
       $.ui.invalidate('ui.render')
     }
     return next(e)
@@ -245,10 +247,10 @@ export const register: Register = (on, options) => {
     const work = await runningWork($)
     return {
       text: [
-        `${TAG} context ${readings.at(-1)?.tokens ?? '?'}；交接線 ${limits?.handoff ?? '?'}${limits ? `（${sourceLabel(limits.source)}）` : ''}；壓縮點 ${limits?.fuse ?? '?'}；提醒線 ${limits?.nudge ?? '?'}；有背景工作時延後上限 ${limits?.cap ?? '?'}`,
-        `自動交接：${auto.phase}${auto.detail ? `（${auto.detail}）` : ''}`,
-        `背景工作：${work.length === 0 ? '無' : work.join('、')}`,
-        `上一次交接檔：${lastHandoff ? lastHandoff.path + (lastHandoff.error ? `（${lastHandoff.error}）` : '') : '無'}`,
+        `${TAG} context ${readings.at(-1)?.tokens ?? '?'}; handoff line ${limits?.handoff ?? '?'}${limits ? ` (${sourceLabel(limits.source)})` : ''}; compaction point ${limits?.fuse ?? '?'}; warning line ${limits?.nudge ?? '?'}; deferral cap ${limits?.cap ?? '?'}`,
+        `auto handoff: ${auto.phase}${auto.detail ? ` (${auto.detail})` : ''}`,
+        `background work: ${work.length === 0 ? 'none' : work.join(', ')}`,
+        `last handoff file: ${lastHandoff ? lastHandoff.path + (lastHandoff.error ? ` (${lastHandoff.error})` : '') : 'none'}`,
       ].join('\n'),
     }
   })
@@ -256,19 +258,19 @@ export const register: Register = (on, options) => {
   on('command.run', { command: 'ctx-relay-now' }, async ($, e) => {
     const auto = await read($, autoAtom)
     if (auto.phase === 'preparing') {
-      return { text: `${TAG} 正在產生交接檔` }
+      return { text: `${TAG} already writing a handoff file` }
     }
     const work = await runningWork($)
     const { isYes, note } = parseNowArgs(e.args)
     if (work.length > 0 && !isYes) {
-      return { text: `${TAG} 還有背景工作在跑：${work.join('、')}。交接會 /clear，完成通知可能收不到；確定請打 /ctx-relay-now yes（後面可接最新指令）` }
+      return { text: `${TAG} background work still running: ${work.join(', ')}. The handoff runs /clear, so their completion notices may never arrive; to go ahead type /ctx-relay-now yes (text after it is passed on)` }
     }
     disarm()
     await setAuto($, { phase: 'preparing' })
     $.ui.invalidate('ui.render')
     const gen = ++prepGen
     $.clock.after(0, () => void prepare($, gen, true, note))
-    return { text: `${TAG} 開始產生交接檔，完成後 /clear 並在新對話接續` }
+    return { text: `${TAG} writing a handoff file; then /clear and resume in the new conversation` }
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
@@ -302,11 +304,9 @@ async function drawBand($: EngineInterface, e: RenderInput<'AbovePrompt'>): Prom
     // /clear 後還沒有讀數：送出失敗時新對話不會自己跑回合，這裡仍要畫出手動接續的指示
     if (lastHandoff?.error) {
       return (
-        <Box flexDirection="row" backgroundColor={BG[VERMILION]}>
-          <Text color={VERMILION} bold wrap="truncate-end">
-            {` ${SKULL} ${TAG} 已 /clear 但${lastHandoff.error}：請手動輸入「讀 ${lastHandoff.path} 並依其接續」 `}
-          </Text>
-        </Box>
+        <Text color={VERMILION} bold wrap="truncate-end">
+          {` ${SKULL} ${TAG} ${clearedButFailed(lastHandoff)} `}
+        </Text>
       )
     }
     return null
@@ -315,68 +315,58 @@ async function drawBand($: EngineInterface, e: RenderInput<'AbovePrompt'>): Prom
   const auto = await read($, autoAtom)
   const now = await $.clock.now()
   const tokens = readings.at(-1)?.tokens ?? 0
-  const isWide = e.props.bodyColumns >= 110
-
-  const color = auto.phase === 'countdown' || auto.phase === 'preparing' || auto.phase === 'failed' || tokens >= limits.handoff
-    ? VERMILION
-    : tokens >= limits.nudge ? ORANGE : SKY
+  const columns = e.props.bodyColumns
 
   if (auto.phase === 'countdown') {
     const left = Math.max(0, Math.ceil(((auto.deadline ?? now) - now) / 1000))
     return (
       <Box flexDirection="row">
-        <Box flexDirection="row" backgroundColor={BG[color]}>
-          <Text color={color} bold wrap="truncate-end">
-            {` ${INVADER} CONTINUE? `}
-            <Text color={VALUE}>{`${left}s`}</Text>
-            <Text color={LABEL}>{`（${k(limits.handoff)} 存檔交接／發訊息延到下輪） `}</Text>
-          </Text>
-        </Box>
-        <Text> </Text>
-        <Button key="cancel" label="PUSH 1 TO CANCEL" hotkey="1" onPress={() => cancel($, '你按了取消')} />
+        <Text color={VERMILION} bold wrap="truncate-end">
+          {` ${SKULL} Handoff in `}
+          <Text color={VALUE}>{`${left}s`}</Text>
+          <Text color={LABEL}>{` · at ${k(limits.handoff)} · send a message to postpone `}</Text>
+        </Text>
+        <Button key="cancel" label="Cancel [1]" hotkey="1" onPress={() => cancel($, 'you pressed Cancel')} />
       </Box>
     )
   }
 
   let status = ''
-  if (auto.phase === 'deferred') status = `交接延後：${auto.detail ?? ''}`
-  if (auto.phase === 'preparing') status = '正在產生交接檔…'
+  let statusColor = LABEL
+  if (auto.phase === 'deferred') [status, statusColor] = [`Handoff deferred: ${auto.detail ?? ''}`, ORANGE]
+  if (auto.phase === 'preparing') [status, statusColor] = ['Writing handoff file…', VERMILION]
   if (auto.phase === 'done') status = auto.detail ?? ''
-  if (auto.phase === 'failed') status = `自動交接失敗：${auto.detail ?? ''}，請手動出場`
-  if (auto.phase === 'cancelled') status = `自動交接已取消（${auto.detail ?? ''}；本對話只提醒）`
+  if (auto.phase === 'failed') [status, statusColor] = [`Auto handoff failed: ${auto.detail ?? ''}. Hand off manually`, VERMILION]
+  if (auto.phase === 'cancelled') [status, statusColor] = [`Auto handoff cancelled (${auto.detail ?? ''}; reminders only)`, ORANGE]
   if (auto.phase === 'idle' && lastHandoff) {
-    status = lastHandoff.error
-      ? `已 /clear 但${lastHandoff.error}：請手動輸入「讀 ${lastHandoff.path} 並依其接續」`
-      : `接續自 ${basename(lastHandoff.path)}`
+    ;[status, statusColor] = lastHandoff.error
+      ? [clearedButFailed(lastHandoff), VERMILION]
+      : [`Resumed from ${basename(lastHandoff.path)}`, LABEL]
   }
 
-  // 標籤灰、數值白粗體、狀態相關的數字用狀態色；外層 Text 的 color 是三態色
+  // 圖示與進度條用比例色、標籤灰、數值白
+  const ratio = tokens / Math.max(limits.handoff, 1)
+  const [glyph, color] = mood(tokens, limits)
   const sep = () => <Text color={DOT}>{' · '}</Text>
-  const segments = [
-    <Text bold>{' '}{hp(tokens, limits).map(([glyph, c], i) => <Text color={c}>{i === 0 ? glyph : ` ${glyph}`}</Text>)}</Text>,
-    <Text color={LABEL}>{'  CTX '}</Text>,
-    <Text bold>{k(tokens)}</Text>,
-    <Text color={LABEL}>{`/${k(limits.handoff)}`}</Text>,
-  ]
+  const segments = [<Text color={color} bold>{` ${glyph} `}</Text>]
+  if (columns >= BAR_COLUMNS) segments.push(<Text color={color}>{`${bar(ratio)} `}</Text>)
+  segments.push(
+    <Text color={VALUE} bold>{k(tokens)}</Text>,
+    <Text color={LABEL}>{`/${k(limits.handoff)} `}</Text>,
+    <Text color={color}>{`${Math.round(ratio * 100)}%`}</Text>,
+  )
   if (receipt) {
-    segments.push(sep(), <Text color={LABEL}>本輪 </Text>, <Text color={VALUE} bold>{`${signed(receipt.deltaTokens)} $${receipt.deltaCost.toFixed(2)}`}</Text>)
+    segments.push(sep(), <Text color={VALUE} bold>{`${signed(receipt.deltaTokens)} $${receipt.deltaCost.toFixed(2)}`}</Text>)
     segments.push(<Text color={LABEL}>{` ${duration(receipt.durationMs)}`}</Text>)
-    if (receipt.cachePct !== null) {
-      const [glyph, c] = receipt.cachePct >= CACHE_HOT ? [FIRE, ORANGE] : receipt.cachePct >= CACHE_WARM ? [THERMO, LABEL] : [SNOW, SKY]
-      segments.push(<Text> </Text>, <Text color={c}>{glyph}</Text>, <Text>{`${receipt.cachePct}%`}</Text>)
+    if (receipt.cachePct !== null && receipt.cachePct < CACHE_COLD) {
+      segments.push(<Text color={SKY}>{` ${SNOW} ${receipt.cachePct}%`}</Text>)
     }
   }
-  if (isWide && readings.length >= 2) segments.push(<Text>{` ${spark(readings, limits.handoff)}`}</Text>)
-  if (status !== '') segments.push(sep(), <Text>{status}</Text>)
+  if (columns >= WIDE_COLUMNS && readings.length >= 2) segments.push(<Text color={LABEL}>{` ${spark(readings, limits.handoff)}`}</Text>)
+  if (status !== '') segments.push(sep(), <Text color={statusColor}>{status}</Text>)
   segments.push(<Text> </Text>)
 
-  return (
-    <Box flexDirection="row" backgroundColor={BG[color]}>
-      <Text color={color} wrap="truncate-end">
-        {segments}
-      </Text>
-    </Box>
-  )
+  return <Text wrap="truncate-end">{segments}</Text>
 }
 
 // 待接手那行；沒有待接手的交接檔時回 null
@@ -386,23 +376,24 @@ async function drawPickup($: EngineInterface, e: RenderInput<'AbovePrompt'>): Pr
   const { Box, Button, Text } = $.ui.resolve(e)
   const now = await $.clock.now()
   const segments = [
-    <Text>{` ${INVADER} 待接手：`}</Text>,
+    <Text color={GREEN} bold>{` ${INVADER} `}</Text>,
+    <Text color={LABEL}>{'Pending handoff: '}</Text>,
     <Text color={VALUE} bold>{p.name}</Text>,
-    <Text color={LABEL}>{`（${ago(now - p.mtimeMs)}${p.from === '' ? '' : `，來自 ${p.from}`}）`}</Text>,
+    <Text color={LABEL}>{` (${ago(now - p.mtimeMs)}${p.from === '' ? '' : `, from ${p.from}`})`}</Text>,
   ]
   if (p.more > 0) segments.push(<Text color={ORANGE} bold>{` +${p.more}`}</Text>)
   segments.push(<Text> </Text>)
   return (
     <Box flexDirection="row">
-      <Box flexDirection="row" backgroundColor={BG[SKY]}>
-        <Text color={SKY} wrap="truncate-end">
-          {segments}
-        </Text>
-      </Box>
-      <Text> </Text>
-      <Button key="pickup" label="PUSH 1 接續" hotkey="1" onPress={() => pickUp($, p)} />
+      <Text wrap="truncate-end">{segments}</Text>
+      <Button key="pickup" label="Resume [1]" hotkey="1" onPress={() => pickUp($, p)} />
     </Box>
   )
+}
+
+// 已 /clear 但接續訊息沒送出去：引號裡是要你貼進對話的接續指令，維持中文
+function clearedButFailed(h: { path: string; error?: string }): string {
+  return `Cleared, but ${h.error ?? ''}. Type: 讀 ${h.path} 並依其接續`
 }
 
 // 壓縮點取引擎回報值；auto-compact 關掉時沒有壓縮點，改以模型窗為基準
@@ -418,9 +409,9 @@ function deriveLimits(context: SessionContextUsage): Limits {
 }
 
 function sourceLabel(source: Limits['source']): string {
-  if (source === 'config') return '設定值 handoffTokens'
-  if (source === 'capped') return `設定值 ${handoffTokens} 超過壓縮點的 ${HANDOFF_PCT}%，改用後者`
-  return `壓縮點的 ${HANDOFF_PCT}%`
+  if (source === 'config') return 'setting handoffTokens'
+  if (source === 'capped') return `setting ${handoffTokens} is above ${HANDOFF_PCT}% of the compaction point; using that instead`
+  return `${HANDOFF_PCT}% of the compaction point`
 }
 
 async function takeReading($: EngineInterface, e: TurnCompleteInput) {
@@ -458,7 +449,7 @@ async function afterStop($: EngineInterface) {
   // 到上限還沒結束就照樣倒數（交接檔會寫明還在跑的工作），免得滑到壓縮點被原生摘要取代
   const work = await runningWork($)
   if (work.length > 0 && tokens < limits.cap) {
-    await setAuto($, { phase: 'deferred', detail: `${work.length} 個背景工作還在跑（到 ${k(limits.cap)} 會強制交接；/ctx-relay-now yes 可立刻交接）` })
+    await setAuto($, { phase: 'deferred', detail: `${work.length} background task${work.length === 1 ? '' : 's'} still running (forced at ${k(limits.cap)}; /ctx-relay-now yes hands off now)` })
     return
   }
   const now = await $.clock.now()
@@ -471,10 +462,10 @@ async function afterStop($: EngineInterface) {
 async function runningWork($: EngineInterface): Promise<string[]> {
   let agents: string[] = []
   try {
-    agents = (await $.agent.list()).filter(a => a.status === 'running').map(a => `子代理 ${a.description || a.id}`)
+    agents = (await $.agent.list()).filter(a => a.status === 'running').map(a => `subagent ${a.description || a.id}`)
   } catch (err) {
     // 查不到就當作可能有工作在跑（寧可延後，/ctx-relay-now yes 可強制）
-    agents = [`無法查詢子代理（${String(err).slice(0, 80)}）`]
+    agents = [`cannot list subagents (${String(err).slice(0, 80)})`]
   }
   return [...agents, ...stopWork]
 }
@@ -498,7 +489,7 @@ function disarm() {
 async function rearm($: EngineInterface) {
   const auto = await read($, autoAtom)
   if (auto.phase === 'preparing') {
-    await setAuto($, { phase: 'failed', detail: '重新載入中斷了交接' })
+    await setAuto($, { phase: 'failed', detail: 'a reload interrupted the handoff' })
     return
   }
   if (auto.phase !== 'countdown') {
@@ -545,10 +536,10 @@ async function prepare($: EngineInterface, gen: number, isManual: boolean, note:
     const source = { id: await $.session.id(), turns: mainTurns }
     const cwd = await $.session.cwd()
     const root = await harnessRoot($)
-    if (root === '') return await fail('無法定位 harness root')
+    if (root === '') return await fail('cannot locate the harness root')
 
     const git = await gitTruth($, cwd)
-    if (git === null) return await fail('讀不到 git 狀態（git 指令失敗，且不是「非 git 目錄」）')
+    if (git === null) return await fail('cannot read git state (git failed, and this is not a non-git directory)')
     const index = await readOr($, `${root}/progress/${source.id}/INDEX.md`, '')
     const sourceHandoff = await findSourceHandoff($, root)
     const contract = sourceHandoff ? section(await readOr($, sourceHandoff, ''), CONTRACT) : ''
@@ -562,14 +553,14 @@ async function prepare($: EngineInterface, gen: number, isManual: boolean, note:
       $.model.fork({ prompt: forkPrompt({ tokens, limits, git, index, contract, isManual, note }) }),
       $.clock.sleep(FORK_TIMEOUT_MS).then(() => null),
     ])
-    if (r === null) return await fail(`產生交接內容逾時（${FORK_TIMEOUT_MS / 60_000} 分鐘）`)
-    if (!r.isAnswered) return await fail(`產生交接內容失敗：${r.reason}`)
+    if (r === null) return await fail(`handoff fork timed out (${FORK_TIMEOUT_MS / 60_000} min)`)
+    if (!r.isAnswered) return await fail(`handoff fork failed: ${r.reason}`)
     if (!(await isMine())) return
 
     const split = splitSlug(r.text)
     const slug = split.slug
     const slots = parseSlots(split.body)
-    if (!SLOTS.some(([key]) => slots.has(key))) return await fail('產生的交接內容沒有任何認得的「=== 鍵名 ===」分段標記')
+    if (!SLOTS.some(([key]) => slots.has(key))) return await fail('the fork output has no recognised "=== KEY ===" section markers')
     // 協調契約由 mod 原樣附上，不經模型：fork 寫的 CONTRACT 分段與內文裡的「## 協調契約」段都丟掉
     const body = assemble(slots, contract)
     const thin = checkThin(body)
@@ -591,16 +582,16 @@ async function prepare($: EngineInterface, gen: number, isManual: boolean, note:
     const content = `${header}\n\n${body.trim()}\n`
 
     const mk = await $.process.run(['mkdir', '-p', dir])
-    if (mk.exitCode !== 0) return await fail(`建立 ${dir} 失敗`)
+    if (mk.exitCode !== 0) return await fail(`failed to create ${dir}`)
     await $.fs.write(path, content)
     const back = await readOr($, path, '')
-    if (!back.startsWith(`讀 ${path}`) || FIELDS.some(f => !hasHeading(back, f))) return await fail(`交接檔讀回不完整：${path}`)
+    if (!back.startsWith(`讀 ${path}`) || FIELDS.some(f => !hasHeading(back, f))) return await fail(`handoff file read-back incomplete: ${path}`)
 
     // 準備期間你送了訊息、手動 clear 或又跑了一輪 → 交接檔已過時，作廢切換（檔案留著）
     const currentId = await $.session.id()
     if (!(await isMine())) return
     if (currentId !== source.id || mainTurns !== source.turns) {
-      return await fail(`準備期間對話有變動，已作廢切換（交接檔留在 ${path}）`)
+      return await fail(`the conversation changed while preparing; switch dropped (handoff file kept at ${path})`)
     }
 
     disarm()
@@ -613,7 +604,7 @@ async function prepare($: EngineInterface, gen: number, isManual: boolean, note:
     } catch (err) {
       // clear 途中 session.end 可能已改了批次編號，這裡不經 isMine，直接記失敗
       lastHandoff = null
-      await setAuto($, { phase: 'failed', detail: `/clear 失敗：${String(err)}（交接檔在 ${path}）` })
+      await setAuto($, { phase: 'failed', detail: `/clear failed: ${String(err)} (handoff file at ${path})` })
       $.ui.invalidate('ui.render')
       return
     } finally {
@@ -623,13 +614,13 @@ async function prepare($: EngineInterface, gen: number, isManual: boolean, note:
     await setAuto($, { phase: 'idle' })
     try {
       const sent = await $.prompt.submit({ text: resumeText(path, slug, isManual, note, thin.includes('硬約束')) })
-      if (sent.drop !== undefined) lastHandoff = { path, error: `送出被擋：${sent.drop}` }
+      if (sent.drop !== undefined) lastHandoff = { path, error: `the resume message was blocked: ${sent.drop}` }
     } catch (err) {
-      lastHandoff = { path, error: `送出失敗：${String(err)}` }
+      lastHandoff = { path, error: `the resume message failed: ${String(err)}` }
     }
     $.ui.invalidate('ui.render')
   } catch (err) {
-    await fail(`未預期的錯誤：${String(err)}`)
+    await fail(`unexpected error: ${String(err)}`)
   }
 }
 
@@ -867,7 +858,7 @@ async function scanPickup($: EngineInterface) {
     const from = /session `([0-9a-f]{8})/.exec(await readOr($, path, ''))?.[1] ?? ''
     pickup = { path, name: newest.name, mtimeMs: newest.mtimeMs, from, more: waiting.length - 1 }
   } catch (err) {
-    $.ui.log(`${TAG} 找待接手的交接檔失敗：${String(err)}`)
+    $.ui.log(`${TAG} failed to scan for pending handoff files: ${String(err)}`)
   }
 }
 
@@ -875,7 +866,7 @@ async function markPicked($: EngineInterface, path: string) {
   try {
     await $.fs.write(`${path.slice(0, path.lastIndexOf('/'))}/${PICKED}/${basename(path)}`, '')
   } catch (err) {
-    $.ui.log(`${TAG} 記錄已接手失敗：${String(err)}`)
+    $.ui.log(`${TAG} failed to mark a handoff file as picked up: ${String(err)}`)
   }
 }
 
@@ -886,9 +877,9 @@ async function pickUp($: EngineInterface, p: Pickup) {
   try {
     const sent = await $.prompt.submit({ text: pickupText(p.path), asUser: true })
     if (sent.drop === undefined) return await markPicked($, p.path)
-    $.ui.log(`${TAG} 接續被擋：${sent.drop}`)
+    $.ui.log(`${TAG} resume was blocked: ${sent.drop}`)
   } catch (err) {
-    $.ui.log(`${TAG} 接續送出失敗：${String(err)}`)
+    $.ui.log(`${TAG} resume failed: ${String(err)}`)
   }
   pickup = p
   $.ui.invalidate('ui.render')
@@ -898,15 +889,18 @@ async function setAuto($: EngineInterface, auto: Auto) {
   await update($, autoAtom, () => auto)
 }
 
-// 三隻小怪獸：鬼魂灰色，其餘用狀態色（undefined＝沿用外層）；過提醒線換骷髏，越過交接線全骷髏
-function hp(tokens: number, limits: Limits): [string, string | undefined][] {
-  const ratio = tokens / limits.handoff
-  const lives = tokens >= limits.handoff ? [SKULL, SKULL, SKULL]
-    : tokens >= limits.nudge ? [INVADER, SKULL, SKULL]
-      : ratio >= HP_HALF ? [INVADER, GHOST, GHOST]
-        : ratio >= HP_FULL ? [INVADER, INVADER, GHOST]
-          : [INVADER, INVADER, INVADER]
-  return lives.map(glyph => [glyph, glyph === GHOST ? LABEL : undefined])
+// 比例圖示：小怪獸 → 幽靈 → 骷髏，顏色綠 → 黃 → 橘 → 朱紅
+function mood(tokens: number, limits: Limits): [string, string] {
+  if (tokens >= limits.handoff) return [SKULL, VERMILION]
+  if (tokens >= limits.nudge) return [SKULL, ORANGE]
+  if (tokens / Math.max(limits.handoff, 1) >= MOOD_GHOST) return [GHOST, YELLOW]
+  return [INVADER, GREEN]
+}
+
+// 像素風進度條：BAR_CELLS 格整格方塊，滿格＝到交接線
+function bar(ratio: number): string {
+  const full = Math.max(0, Math.min(BAR_CELLS, Math.round(ratio * BAR_CELLS)))
+  return `▕${'█'.repeat(full)}${'░'.repeat(BAR_CELLS - full)}▏`
 }
 
 // 長條高度對交接線：滿格＝到交接線
@@ -938,9 +932,9 @@ function signed(n: number): string {
 
 function ago(ms: number): string {
   const m = Math.max(0, Math.floor(ms / 60_000))
-  if (m < 60) return `${m} 分鐘前`
+  if (m < 60) return `${m}m ago`
   const h = Math.floor(m / 60)
-  return h < 48 ? `${h} 小時前` : `${Math.floor(h / 24)} 天前`
+  return h < 48 ? `${h}h ago` : `${Math.floor(h / 24)}d ago`
 }
 
 function duration(ms: number): string {

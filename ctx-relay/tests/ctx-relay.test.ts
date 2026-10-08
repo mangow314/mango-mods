@@ -181,7 +181,7 @@ async function start($: Engine) {
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
 }
 
-async function turn($: Engine, w: World, tokens: number, extra: { answer?: string; agentId?: string; aborted?: boolean } = {}) {
+async function turn($: Engine, w: World, tokens: number, extra: { answer?: string; agentId?: string; aborted?: boolean; cacheRead?: number } = {}) {
   w.tokens = tokens
   w.cost += 0.5
   await $.turn.complete({
@@ -190,7 +190,7 @@ async function turn($: Engine, w: World, tokens: number, extra: { answer?: strin
     isAborted: extra.aborted === true,
     turnId: `t-${tokens}`,
     reason: extra.aborted ? 'aborted' : 'answer',
-    usage: { input_tokens: 10, output_tokens: 100, cache_read_input_tokens: 9_000, cache_creation_input_tokens: 990, model: 'claude-opus-5-5' },
+    usage: { input_tokens: 10, output_tokens: 100, cache_read_input_tokens: extra.cacheRead ?? 9_000, cache_creation_input_tokens: 9_990 - (extra.cacheRead ?? 9_000), model: 'claude-opus-5-5' },
     ...(extra.agentId ? { agentId: extra.agentId } : {}),
   })
   // 主對話正常結束才有 Stop（子代理是 SubagentStop；中斷不跑 Stop）
@@ -202,12 +202,12 @@ async function turn($: Engine, w: World, tokens: number, extra: { answer?: strin
   })
 }
 
-async function band($: Engine) {
+async function band($: Engine, bodyColumns = 160) {
   const ui = await $.ui.mount({
     plugin: 'ctx-relay',
     surface: 'terminal',
     component: 'AbovePrompt',
-    props: { hasSurvey: false, isWorking: false, maxRows: 5, bodyColumns: 160, scroll: { offset: 0, bodyRows: 5 }, view: {} },
+    props: { hasSurvey: false, isWorking: false, maxRows: 5, bodyColumns, scroll: { offset: 0, bodyRows: 5 }, view: {} },
   })
   const text = (await ui.findAll({ type: 'Text' })).map(t => t.text).join(' ')
   return { ui, text }
@@ -218,22 +218,29 @@ function handoffFiles(w: World): [string, string][] {
   return [...w.files.entries()].filter(([p]) => p.startsWith(`${ROOT}/handoff/`) && !p.includes('/.picked/'))
 }
 
-test('1M：ctx 顯示 token／交接線（百分比和經過時間交給 statusline）與收據，不顯示剩餘輪數', async ($, on) => {
+test('1M：顯示 token／交接線與佔交接線的百分比、收據；快取熱時不顯示命中率', async ($, on) => {
   mock.clock(on, { now: 1_000_000 })
   const w = world($, on)
   await start($)
   await turn($, w, 200_000)
   await turn($, w, 220_000)
   const { text } = await band($)
-  // 引擎壓縮點 510400；交接線 ×85%＝433840
-  expect(text).toContain('CTX 220K/434K')
+  // 引擎壓縮點 510400；交接線 ×85%＝433840；220000÷433840＝51%（不是佔模型窗的 22%）
+  expect(text).toContain('220K/434K 51%')
   expect(text).not.toContain('22%')
-  expect(text).toContain('本輪 +20K $0.50')
+  expect(text).toContain('+20K $0.50')
   expect(text).toContain('12s')
-  // cache 90%＝熱（火焰）
-  expect(text).toContain('󰈸')
-  expect(text).toContain('90%')
-  expect(text).not.toContain('STAGE')
+  // cache 90%＝熱：不顯示
+  expect(text).not.toContain('90%')
+  expect(text).not.toContain('󰜗')
+})
+
+test('快取偏冷（命中 <40%）才顯示雪花＋命中率', async ($, on) => {
+  mock.clock(on)
+  const w = world($, on)
+  await start($)
+  await turn($, w, 200_000, { cacheRead: 1_200 })
+  expect((await band($)).text).toContain('󰜗 12%')
 })
 
 test('非 1M：引擎回報的壓縮點低，交接線跟著變低', async ($, on) => {
@@ -241,10 +248,10 @@ test('非 1M：引擎回報的壓縮點低，交接線跟著變低', async ($, o
   const w = world($, on, { window: 200_000, fuse: 158_400 })
   await start($)
   await turn($, w, 100_000)
-  expect((await band($)).text).toContain('CTX 100K/135K')
+  expect((await band($)).text).toContain('100K/135K')
   // 158400×85%＝134640 → 140000 已越線
   await turn($, w, 140_000)
-  expect((await band($)).text).toContain('135K 存檔交接')
+  expect((await band($)).text).toContain('at 135K')
 })
 
 test('handoffTokens：固定交接線，越過就自動交接', { options: { handoffTokens: 400_000 } }, async ($, on) => {
@@ -254,9 +261,9 @@ test('handoffTokens：固定交接線，越過就自動交接', { options: { han
   await turn($, w, 390_000)
   const before = (await band($)).text
   expect(before).toContain('390K/400K')
-  expect(before).not.toContain('CONTINUE?')
+  expect(before).not.toContain('Handoff in')
   await turn($, w, 410_000)
-  expect((await band($)).text).toContain('400K 存檔交接')
+  expect((await band($)).text).toContain('at 400K')
   await clock.advance(60_000)
   await clock.settle()
   expect(w.cleared).toBe(1)
@@ -267,9 +274,9 @@ test('handoffTokens 超過壓縮點的 85%：改用 85%，狀態說明原因', {
   const w = world($, on)
   await start($)
   await turn($, w, 450_000)
-  expect((await band($)).text).toContain('434K 存檔交接')
+  expect((await band($)).text).toContain('at 434K')
   const status = await $.command.run({ command: 'ctx-relay-status', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 160 } })
-  expect(status.text).toContain('交接線 433840（設定值 900000 超過壓縮點的 85%，改用後者）')
+  expect(status.text).toContain('handoff line 433840 (setting 900000 is above 85% of the compaction point; using that instead)')
 })
 
 test('越過交接線：倒數 60 秒後 fork 一次、寫交接檔（檔名帶來源 session 與批次號）、clear 一次、在新對話送出路徑', async ($, on) => {
@@ -277,9 +284,9 @@ test('越過交接線：倒數 60 秒後 fork 一次、寫交接檔（檔名帶�
   const w = world($, on)
   await start($)
   await turn($, w, 420_000)
-  expect((await band($)).text).not.toContain('CONTINUE?')
+  expect((await band($)).text).not.toContain('Handoff in')
   await turn($, w, 450_000)
-  expect((await band($)).text).toContain('CONTINUE?')
+  expect((await band($)).text).toContain('Handoff in')
   await clock.advance(59_000)
   expect(w.forkPrompts).toHaveLength(0)
   await clock.advance(1_000)
@@ -334,7 +341,7 @@ test('fork 輸出沒有任何分段標記（例如照舊寫 ## 標題）：記�
   await clock.settle()
   expect(handoffFiles(w)).toHaveLength(0)
   expect(w.cleared).toBe(0)
-  expect((await band($)).text).toContain('自動交接失敗：產生的交接內容沒有任何認得的「=== 鍵名 ===」分段標記')
+  expect((await band($)).text).toContain('Auto handoff failed: the fork output has no recognised "=== KEY ===" section markers')
 })
 
 test('fork 分段順序亂、內文帶 ## 標題：mod 照固定順序寫八個標題，內文的 ## 降成 ###', async ($, on) => {
@@ -391,7 +398,7 @@ test('按鈕取消後本對話不再自動交接', async ($, on) => {
   await turn($, w, 470_000)
   await clock.advance(120_000)
   expect(w.cleared).toBe(0)
-  expect((await band($)).text).toContain('自動交接已取消')
+  expect((await band($)).text).toContain('Auto handoff cancelled')
 })
 
 test('倒數中你親手送出訊息只延後：這輪結束還在線上就重新倒數', async ($, on) => {
@@ -403,7 +410,7 @@ test('倒數中你親手送出訊息只延後：這輪結束還在線上就重�
   await clock.advance(120_000)
   expect(w.submitted).toEqual(['我還在'])
   expect(w.cleared).toBe(0)
-  expect((await band($)).text).not.toContain('自動交接已取消')
+  expect((await band($)).text).not.toContain('Auto handoff cancelled')
   await turn($, w, 470_000)
   await clock.advance(60_000)
   await clock.settle()
@@ -419,7 +426,7 @@ test('fork 失敗：不寫檔、不 clear，band 顯示原因', async ($, on) =>
   await clock.settle()
   expect(handoffFiles(w)).toHaveLength(0)
   expect(w.cleared).toBe(0)
-  expect((await band($)).text).toContain('自動交接失敗：產生交接內容失敗：nothing-to-fork')
+  expect((await band($)).text).toContain('Auto handoff failed: handoff fork failed: nothing-to-fork')
 })
 
 test('fork 3 分鐘沒回：記失敗、不寫檔、不 clear', async ($, on) => {
@@ -429,12 +436,12 @@ test('fork 3 分鐘沒回：記失敗、不寫檔、不 clear', async ($, on) =>
   await turn($, w, 450_000)
   await clock.advance(60_000)
   await clock.advance(179_000)
-  expect((await band($)).text).toContain('正在產生交接檔')
+  expect((await band($)).text).toContain('Writing handoff file')
   await clock.advance(1_000)
   await clock.settle()
   expect(handoffFiles(w)).toHaveLength(0)
   expect(w.cleared).toBe(0)
-  expect((await band($)).text).toContain('自動交接失敗：產生交接內容逾時')
+  expect((await band($)).text).toContain('Auto handoff failed: handoff fork timed out')
 })
 
 test('交接檔讀回不完整：不 clear', async ($, on) => {
@@ -445,7 +452,7 @@ test('交接檔讀回不完整：不 clear', async ($, on) => {
   await clock.advance(60_000)
   await clock.settle()
   expect(w.cleared).toBe(0)
-  expect((await band($)).text).toContain('交接檔讀回不完整')
+  expect((await band($)).text).toContain('handoff file read-back incomplete')
 })
 
 test('準備期間你送出訊息：不 clear', async ($, on) => {
@@ -472,7 +479,7 @@ test('倒數中排程或通知開了新回合：這次倒數作廢，回合結�
   await clock.advance(60_000)
   expect(w.forkPrompts).toHaveLength(0)
   await turn($, w, 460_000)
-  expect((await band($)).text).toContain('CONTINUE?')
+  expect((await band($)).text).toContain('Handoff in')
 })
 
 test('準備中排程或通知開了新回合：不 clear', async ($, on) => {
@@ -500,7 +507,7 @@ test('準備期間又跑了一輪：作廢切換，交接檔留著', async ($, o
   await clock.settle()
   expect(w.cleared).toBe(0)
   expect(handoffFiles(w)).toHaveLength(1)
-  expect((await band($)).text).toContain('準備期間對話有變動')
+  expect((await band($)).text).toContain('the conversation changed while preparing')
 })
 
 test('clear 成功但送出失敗：band 顯示交接檔路徑請你手動接續', async ($, on) => {
@@ -513,7 +520,7 @@ test('clear 成功但送出失敗：band 顯示交接檔路徑請你手動接續
   expect(w.cleared).toBe(1)
   // 不再跑任何回合：送出被擋時新對話不會自己開始，band 必須直接顯示
   const { text } = await band($)
-  expect(text).toContain('已 /clear 但送出被擋')
+  expect(text).toContain('Cleared, but the resume message was blocked')
   expect(text).toContain(`${ROOT}/handoff/`)
 })
 
@@ -525,7 +532,7 @@ test('寫檔失敗：不 clear', async ($, on) => {
   await clock.advance(60_000)
   await clock.settle()
   expect(w.cleared).toBe(0)
-  expect((await band($)).text).toContain('自動交接失敗')
+  expect((await band($)).text).toContain('Auto handoff failed')
 })
 
 test('是 git repo 但 git status 失敗：不 fork、不 clear', async ($, on) => {
@@ -537,7 +544,7 @@ test('是 git repo 但 git status 失敗：不 fork、不 clear', async ($, on) 
   await clock.settle()
   expect(w.forkPrompts).toHaveLength(0)
   expect(w.cleared).toBe(0)
-  expect((await band($)).text).toContain('讀不到 git 狀態')
+  expect((await band($)).text).toContain('cannot read git state')
 })
 
 test('取消 A 後立刻 /ctx-relay-now 開 B：A 的 fork 回來不會再 clear，總共只 clear 一次', async ($, on) => {
@@ -567,7 +574,7 @@ test('自動交接後的新對話：第一輪結束就有讀數，越線會再�
   await turn($, w, 30_000)
   expect((await band($)).text).toContain('30K/434K')
   await turn($, w, 450_000)
-  expect((await band($)).text).toContain('CONTINUE?')
+  expect((await band($)).text).toContain('Handoff in')
 })
 
 test('強制交接時有背景工作：新對話照引擎回報判斷，不被舊紀錄卡住', async ($, on) => {
@@ -582,10 +589,10 @@ test('強制交接時有背景工作：新對話照引擎回報判斷，不被�
   expect(w.cleared).toBe(1)
   // 新對話：引擎不再回報那個工作
   w.background = []
-  expect((await $.command.run({ command: 'ctx-relay-status', args: '', ...asYou })).text).toContain('背景工作：無')
+  expect((await $.command.run({ command: 'ctx-relay-status', args: '', ...asYou })).text).toContain('background work: none')
   await turn($, w, 30_000)
   await turn($, w, 450_000)
-  expect((await band($)).text).toContain('CONTINUE?')
+  expect((await band($)).text).toContain('Handoff in')
 })
 
 test('交接後你又手動 /clear：band 不再說「接續自」舊交接檔', async ($, on) => {
@@ -596,10 +603,10 @@ test('交接後你又手動 /clear：band 不再說「接續自」舊交接檔',
   await clock.advance(60_000)
   await clock.settle()
   await turn($, w, 30_000)
-  expect((await band($)).text).toContain('接續自')
+  expect((await band($)).text).toContain('Resumed from')
   await w.clear()
   await turn($, w, 20_000)
-  expect((await band($)).text).not.toContain('接續自')
+  expect((await band($)).text).not.toContain('Resumed from')
 })
 
 test('倒數中你手動 /clear（session.end）：計時器停掉，不交接', async ($, on) => {
@@ -624,15 +631,15 @@ test('有背景工作在跑（shell／monitor／workflow）：延後交接；引
   })
   await start($)
   await turn($, w, 450_000)
-  expect((await band($)).text).toContain('交接延後：3 個背景工作還在跑')
+  expect((await band($)).text).toContain('Handoff deferred: 3 background tasks still running')
   // 不設逾時作廢：13 小時後仍在跑就仍然延後
   await clock.advance(13 * 60 * 60_000)
   await turn($, w, 452_000)
-  expect((await band($)).text).toContain('交接延後：3 個背景工作還在跑')
+  expect((await band($)).text).toContain('Handoff deferred: 3 background tasks still running')
   expect(w.forkPrompts).toHaveLength(0)
   w.background = []
   await turn($, w, 455_000)
-  expect((await band($)).text).toContain('CONTINUE?')
+  expect((await band($)).text).toContain('Handoff in')
 })
 
 test('背景工作一直不結束：到交接線與壓縮點的中點就強制倒數，交接檔寫明還在跑的工作', async ($, on) => {
@@ -641,9 +648,9 @@ test('背景工作一直不結束：到交接線與壓縮點的中點就強制�
   await start($)
   // 交接線 433840、壓縮點 510400 → 上限 472120
   await turn($, w, 450_000)
-  expect((await band($)).text).toContain('到 472K 會強制交接')
+  expect((await band($)).text).toContain('forced at 472K')
   await turn($, w, 475_000)
-  expect((await band($)).text).toContain('CONTINUE?')
+  expect((await band($)).text).toContain('Handoff in')
   await clock.advance(60_000)
   await clock.settle()
   expect(w.cleared).toBe(1)
@@ -656,10 +663,10 @@ test('一次性排程會再叫醒這個 session：延後；循環排程不算', 
   const w = world($, on, { crons: [{ id: 'c1', recurring: false, prompt: '回來看 CI' }] })
   await start($)
   await turn($, w, 450_000)
-  expect((await band($)).text).toContain('交接延後：1 個背景工作還在跑')
+  expect((await band($)).text).toContain('Handoff deferred: 1 background task still running')
   w.crons = [{ id: 'c2', recurring: true, prompt: '/loop 巡檢' }]
   await turn($, w, 455_000)
-  expect((await band($)).text).toContain('CONTINUE?')
+  expect((await band($)).text).toContain('Handoff in')
 })
 
 test('別的 Stop hook 擋下（回合其實沒結束）：不倒數，真正停下才判斷', async ($, on) => {
@@ -667,10 +674,10 @@ test('別的 Stop hook 擋下（回合其實沒結束）：不倒數，真正停
   const w = world($, on, { stopBlock: '還有驗證沒跑' })
   await start($)
   await turn($, w, 450_000)
-  expect((await band($)).text).not.toContain('CONTINUE?')
+  expect((await band($)).text).not.toContain('Handoff in')
   w.stopBlock = null
   await turn($, w, 455_000)
-  expect((await band($)).text).toContain('CONTINUE?')
+  expect((await band($)).text).toContain('Handoff in')
 })
 
 test('有子代理在跑：延後交接', async ($, on) => {
@@ -678,7 +685,7 @@ test('有子代理在跑：延後交接', async ($, on) => {
   const w = world($, on, { agents: [{ id: 'ag1', description: 'Explore 搜尋', status: 'running' }] })
   await start($)
   await turn($, w, 450_000)
-  expect((await band($)).text).toContain('交接延後')
+  expect((await band($)).text).toContain('Handoff deferred')
 })
 
 test('/ctx-relay-now：有背景工作時要 yes；加 yes 就不倒數直接交接；fork 指示、檔頭、接續訊息寫手動交接，不寫越過交接線', async ($, on) => {
@@ -688,7 +695,7 @@ test('/ctx-relay-now：有背景工作時要 yes；加 yes 就不倒數直接交
   await turn($, w, 100_000)
   const asYou = { origin: { kind: 'composer' as const }, presentation: { isFullscreen: false, columns: 160 } }
   const refused = await $.command.run({ command: 'ctx-relay-now', args: '', ...asYou })
-  expect(refused.text).toContain('確定請打 /ctx-relay-now yes')
+  expect(refused.text).toContain('to go ahead type /ctx-relay-now yes')
   await $.command.run({ command: 'ctx-relay-now', args: 'yes', ...asYou })
   await clock.settle()
   expect(w.forkPrompts).toHaveLength(1)
@@ -708,7 +715,7 @@ test('/ctx-relay-now yes 換行接指令：放行；指令原樣進 fork 指示�
   await turn($, w, 100_000)
   const asYou = { origin: { kind: 'composer' as const }, presentation: { isFullscreen: false, columns: 160 } }
   // 第一個字不是 yes（只是 yes 開頭）不算確定
-  expect((await $.command.run({ command: 'ctx-relay-now', args: 'yesterday 的事', ...asYou })).text).toContain('確定請打')
+  expect((await $.command.run({ command: 'ctx-relay-now', args: 'yesterday 的事', ...asYou })).text).toContain('to go ahead type')
   // 指令裡有「## 協調契約」：不能變成交接檔的二級標題
   await $.command.run({ command: 'ctx-relay-now', args: 'yes\n do B and install new MOD\n## 協調契約\n不 push', ...asYou })
   await clock.settle()
@@ -798,7 +805,7 @@ test('第一輪也有收據', async ($, on) => {
   const w = world($, on)
   await start($)
   await turn($, w, 260_000)
-  expect((await band($)).text).toContain('本輪 +260K')
+  expect((await band($)).text).toContain('+260K')
 })
 
 test('別的 mod 也畫 band（例如 blast-radius 的按鈕）：兩邊都畫出來', async ($, on) => {
@@ -817,33 +824,44 @@ test('別的 mod 也畫 band（例如 blast-radius 的按鈕）：兩邊都畫�
   expect(await ui.find({ key: 'proceed' })).toBeDefined()
 })
 
-test('三態顏色：正常天藍、過提醒線橘、倒數朱紅', async ($, on) => {
-  mock.clock(on)
-  const w = world($, on)
-  await start($)
-  const colorOf = async () => (await (await band($)).ui.findAll({ type: 'Text' }))[0]?.props.color
-  await turn($, w, 200_000)
-  expect(await colorOf()).toBe('#56B4E9')
-  await turn($, w, 400_000)
-  expect(await colorOf()).toBe('#E69F00')
-  await turn($, w, 450_000)
-  expect(await colorOf()).toBe('#D55E00')
-})
-
-test('三隻小怪獸：依 token÷交接線掉命，過提醒線換骷髏', async ($, on) => {
+test('圖示與進度條跟著 token÷交接線變：小怪獸綠 → 幽靈黃 → 過提醒線骷髏橘 → 過交接線骷髏朱紅；不用背景色', async ($, on) => {
   mock.clock(on)
   const w = world($, on)
   await start($)
   // 交接線 433840、提醒線 381779
-  const lives = async () => (await band($)).text.trim().split('  ')[0]
+  const head = async () => {
+    const { ui, text } = await band($)
+    const texts = await ui.findAll({ type: 'Text' })
+    const boxes = await ui.findAll({ type: 'Box' })
+    expect(boxes.some(b => b.props.backgroundColor !== undefined)).toBe(false)
+    return { glyph: texts[1]?.text.trim(), color: texts[1]?.props.color, barColor: texts[2]?.props.color, bar: texts[2]?.text.trim(), text }
+  }
   await turn($, w, 100_000)
-  expect(await lives()).toBe('󰯉 󰯉 󰯉')
-  await turn($, w, 250_000)
-  expect(await lives()).toBe('󰯉 󰯉 󰊠')
+  expect(await head()).toMatchObject({ glyph: '󰯉', color: '#009E73', barColor: '#009E73', bar: '▕██░░░░░░░░▏' })
   await turn($, w, 330_000)
-  expect(await lives()).toBe('󰯉 󰊠 󰊠')
+  expect(await head()).toMatchObject({ glyph: '󰊠', color: '#F0E442', bar: '▕████████░░▏' })
   await turn($, w, 400_000)
-  expect(await lives()).toBe('󰯉 󰚌 󰚌')
+  expect(await head()).toMatchObject({ glyph: '󰚌', color: '#E69F00' })
+  await turn($, w, 450_000)
+  // 越線後倒數：整列換成倒數列（骷髏朱紅）
+  expect((await band($)).text).toContain('Handoff in')
+  const countdown = await (await band($)).ui.findAll({ type: 'Text' })
+  expect(countdown[0]?.props.color).toBe('#D55E00')
+})
+
+test('窄終端：<110 欄拿掉長條圖，<80 欄再拿掉進度條，圖示與數字保留', async ($, on) => {
+  mock.clock(on)
+  const w = world($, on)
+  await start($)
+  await turn($, w, 100_000)
+  await turn($, w, 200_000)
+  expect((await band($)).text).toMatch(/[▁▂▃▄▅▆▇█]{2}/)
+  expect((await band($, 100)).text).not.toMatch(/ [▁▂▃▄▅▆▇]+/)
+  expect((await band($, 100)).text).toContain('▕')
+  const narrow = (await band($, 70)).text
+  expect(narrow).not.toContain('▕')
+  expect(narrow).toContain('󰯉')
+  expect(narrow).toContain('200K/434K')
 })
 
 test('倒數中重新載入（session.start 再跑）：照原截止時間交接一次', async ($, on) => {
@@ -869,11 +887,11 @@ test('準備中重新載入：記失敗，不自動重來', async ($, on) => {
   await turn($, w, 450_000)
   await clock.advance(60_000)
   await start($)
-  expect((await band($)).text).toContain('重新載入中斷了交接')
+  expect((await band($)).text).toContain('a reload interrupted the handoff')
   // 舊的準備等到 fork 逾時也不會再動狀態
   await clock.advance(180_000)
   await clock.settle()
-  expect((await band($)).text).toContain('重新載入中斷了交接')
+  expect((await band($)).text).toContain('a reload interrupted the handoff')
   expect(w.cleared).toBe(0)
 })
 
@@ -886,7 +904,7 @@ test('本 session 已手動交接（載入過 handoff skill）：不倒數', asy
   await turn($, w, 450_000)
   await clock.advance(120_000)
   expect(w.forkPrompts).toHaveLength(0)
-  expect((await band($)).text).toContain('本 session 已手動交接')
+  expect((await band($)).text).toContain('Handed off manually')
 })
 
 const HOUR = 3_600_000
@@ -907,11 +925,11 @@ test('handoff-pickup：新對話開場列最新一份待接手（多久前、來
   manualHandoff(w, HANDOFF, 7 * HOUR)
   await start($)
   const { ui, text } = await band($)
-  expect(text).toContain('待接手：20261005-133853-mod-backlog-sdlc.md（3 小時前，來自 aafa9505） +1')
+  expect(text).toContain('Pending handoff: 20261005-133853-mod-backlog-sdlc.md (3h ago, from aafa9505) +1')
   await ui.press({ key: 'pickup' })
   expect(w.submitted).toEqual([RESUME])
   expect(w.files.has(PICKED_HANDOFF)).toBe(true)
-  expect((await band($)).text).not.toContain('待接手')
+  expect((await band($)).text).not.toContain('Pending handoff')
 })
 
 test('handoff-pickup：第一次啟用前就有的、已接手的交接檔都不列', async ($, on) => {
@@ -920,11 +938,11 @@ test('handoff-pickup：第一次啟用前就有的、已接手的交接檔都不
   manualHandoff(w, `${ROOT}/handoff/20261005-090000-before.md`, 9 * HOUR)
   await start($)
   expect(w.store.get('pickupSince')).toBe(10 * HOUR)
-  expect((await band($)).text).not.toContain('待接手')
+  expect((await band($)).text).not.toContain('Pending handoff')
   manualHandoff(w, HANDOFF, 11 * HOUR)
   w.files.set(PICKED_HANDOFF, '')
   await w.clear()
-  expect((await band($)).text).not.toContain('待接手')
+  expect((await band($)).text).not.toContain('Pending handoff')
 })
 
 test('handoff-pickup：/clear 後出現（還沒有讀數也畫）；你貼上路徑送出就記已接手，新回合開始這行收掉', async ($, on) => {
@@ -934,13 +952,13 @@ test('handoff-pickup：/clear 後出現（還沒有讀數也畫）；你貼上�
   await turn($, w, 100_000)
   manualHandoff(w, HANDOFF, 10 * HOUR - 60_000)
   await w.clear()
-  expect((await band($)).text).toContain('待接手：20261005-133853-mod-backlog-sdlc.md（1 分鐘前，來自 aafa9505）')
+  expect((await band($)).text).toContain('Pending handoff: 20261005-133853-mod-backlog-sdlc.md (1m ago, from aafa9505)')
   await $.prompt.submit({ text: RESUME, wait: false, origin: { kind: 'composer' } })
   await $.turn.start({ text: RESUME, turnId: 't-pickup' })
-  expect((await band($)).text).not.toContain('待接手')
+  expect((await band($)).text).not.toContain('Pending handoff')
   expect(w.files.has(PICKED_HANDOFF)).toBe(true)
   await w.clear()
-  expect((await band($)).text).not.toContain('待接手')
+  expect((await band($)).text).not.toContain('Pending handoff')
 })
 
 test('handoff-pickup：接回舊對話（已有訊息）不列', async ($, on) => {
@@ -948,7 +966,7 @@ test('handoff-pickup：接回舊對話（已有訊息）不列', async ($, on) =
   const w = world($, on, { store: new Map([['pickupSince', 0]]), messages: [{ role: 'user', text: '之前的訊息' }] })
   manualHandoff(w, HANDOFF, 9 * HOUR)
   await start($)
-  expect((await band($)).text).not.toContain('待接手')
+  expect((await band($)).text).not.toContain('Pending handoff')
 })
 
 test('handoff-pickup：自動交接在 /clear 前就記已接手，之後手動 clear 也不列它', async ($, on) => {
@@ -961,7 +979,7 @@ test('handoff-pickup：自動交接在 /clear 前就記已接手，之後手動 
   const [path = ''] = handoffFiles(w)[0] ?? []
   expect(w.files.has(`${ROOT}/handoff/.picked/${path.slice(path.lastIndexOf('/') + 1)}`)).toBe(true)
   await w.clear()
-  expect((await band($)).text).not.toContain('待接手')
+  expect((await band($)).text).not.toContain('Pending handoff')
 })
 
 test('handoff-pickup：接續送出被擋就留著這行，不記已接手', async ($, on) => {
@@ -972,5 +990,5 @@ test('handoff-pickup：接續送出被擋就留著這行，不記已接手', asy
   await (await band($)).ui.press({ key: 'pickup' })
   expect(w.submitted).toEqual([])
   expect(w.files.has(PICKED_HANDOFF)).toBe(false)
-  expect((await band($)).text).toContain('待接手')
+  expect((await band($)).text).toContain('Pending handoff')
 })
