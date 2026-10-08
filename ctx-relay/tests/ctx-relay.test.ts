@@ -463,6 +463,23 @@ test('fork 失敗：不寫檔、不 clear，band 顯示原因', async ($, on) =>
   expect((await band($)).text).toContain('Auto handoff failed: handoff fork failed: nothing-to-fork')
 })
 
+test('交接失敗記進 failures.jsonl（時間、自動／手動、token、離開多久、原因），/ctx-relay-status 列最近幾筆', async ($, on) => {
+  const clock = mock.clock(on, { now: Date.parse('2026-10-08T12:00:00Z') })
+  const w = world($, on, { forkText: null })
+  await start($)
+  expect(await status($)).toContain('handoff failures: none recorded')
+  await $.prompt.submit({ text: '繼續', wait: false, origin: { kind: 'composer' } })
+  await turn($, w, 450_000)
+  await clock.advance(60_000)
+  await clock.settle()
+  const lines = (w.files.get(`${ROOT}/ctx-relay/failures.jsonl`) ?? '').trim().split('\n')
+  expect(lines).toHaveLength(1)
+  expect(JSON.parse(lines[0] ?? '{}')).toMatchObject({ manual: false, tokens: 450_000, idleMin: 1, detail: 'handoff fork failed: nothing-to-fork' })
+  const text = await status($)
+  expect(text).toContain('handoff failures: 1 recorded')
+  expect(text).toMatch(/2026-10-08T12:01:\d\d\.\d+Z auto ctx 450K, idle 1m: handoff fork failed: nothing-to-fork/)
+})
+
 test('fork 3 分鐘沒回：記失敗、不寫檔、不 clear', async ($, on) => {
   const clock = mock.clock(on)
   const w = world($, on, { hold: new Promise<void>(() => {}) })

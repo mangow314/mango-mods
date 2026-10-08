@@ -222,7 +222,10 @@ follows.
 ## Commands
 
 - `/ctx-relay-status`: shows thresholds, readings, handoff state, background
-  work, and the cache TTL (with where it came from) and time left.
+  work, the cache TTL (with where it came from) and time left, and the last
+  three handoff failures. Every failed handoff (before `/clear`) is appended
+  to `<harness root>/ctx-relay/failures.jsonl` (time, auto or manual, tokens,
+  minutes since you last typed, reason; last 100 kept).
 - `/ctx-relay-now`: hand off right away; with background work running, type
   `/ctx-relay-now yes`. The fork instructions, the handoff file header, and the
   resume message in the new conversation all say this was a manual

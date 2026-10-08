@@ -134,6 +134,8 @@ let handoffTokens = 0
 // 待接手的交接檔（撐過 /clear）與 session.start 時算好的 harness root（prompt.submit 比對路徑用，免得每則訊息都跑 bash）
 let pickup: Pickup | null = null
 let pickupRoot = ''
+// 你上一次親手送出訊息的時間（交接失敗紀錄用：失敗時你離開多久）
+let lastTypedAt: number | null = null
 
 export const register: Register = (on, options) => {
   handoffTokens = typeof options.handoffTokens === 'number' ? options.handoffTokens : 0
@@ -215,6 +217,7 @@ export const register: Register = (on, options) => {
     // 你親手送出（或遠端轉來你的訊息）＝人在場 → 這次倒數或準備作廢、回到 idle，
     // 這輪結束時還在線上就重新倒數（只延後不停用，使用者 2026-10-08 選 A；要停用按取消鈕）
     if (e.origin.kind === 'composer' || e.origin.kind === 'bridge') {
+      lastTypedAt = await $.clock.now()
       const auto = await read($, autoAtom)
       if (auto.phase === 'countdown' || auto.phase === 'preparing') {
         disarm()
@@ -282,6 +285,7 @@ export const register: Register = (on, options) => {
         `background work: ${work.length === 0 ? 'none' : work.join(', ')}`,
         ...(await cacheStatus($)),
         `last handoff file: ${lastHandoff ? lastHandoff.path + (lastHandoff.error ? ` (${lastHandoff.error})` : '') : 'none'}`,
+        ...(await failureStatus($)),
       ].join('\n'),
     }
   })
@@ -652,7 +656,10 @@ async function prepare($: EngineInterface, gen: number, isManual: boolean, note:
     return gen === prepGen && phase === 'preparing'
   }
   const fail = async (detail: string) => {
-    if (await isMine()) await setAuto($, { phase: 'failed', detail })
+    if (await isMine()) {
+      await setAuto($, { phase: 'failed', detail })
+      await recordFailure($, detail, isManual)
+    }
     $.ui.invalidate('ui.render')
   }
   try {
@@ -770,6 +777,52 @@ async function gitTruth($: EngineInterface, cwd: string): Promise<Git | null> {
   const log = await run(['log', '--oneline', '-6'])
   if (!status.ok || !stat.ok || !log.ok) return null
   return { branch: branch.out, status: status.out, stat: stat.out, log: log.out }
+}
+
+// 交接失敗紀錄：<harness root>/ctx-relay/failures.jsonl，一次一行，只留最近 FAILURES_KEPT 筆。
+// 目前沒有失敗的持久紀錄，不知道多久失敗一次；先記下來，再決定要不要做 fork 失敗時的降級交接（使用者 2026-10-08 選 B）
+const FAILURES_KEPT = 100
+type Failure = { at: string; session: string; manual: boolean; tokens: number; idleMin: number | null; detail: string }
+
+async function recordFailure($: EngineInterface, detail: string, isManual: boolean) {
+  try {
+    const root = await harnessRoot($)
+    if (root === '') return $.ui.log(`${TAG} handoff failed but the harness root is unknown; failure not recorded: ${detail}`)
+    const now = await $.clock.now()
+    const entry: Failure = {
+      at: new Date(now).toISOString(),
+      session: await $.session.id(),
+      manual: isManual,
+      tokens: (await read($, readingsAtom)).at(-1)?.tokens ?? 0,
+      idleMin: lastTypedAt === null ? null : Math.round((now - lastTypedAt) / 60_000),
+      detail,
+    }
+    const dir = `${root}/ctx-relay`
+    const path = `${dir}/failures.jsonl`
+    const mk = await $.process.run(['mkdir', '-p', dir])
+    if (mk.exitCode !== 0) return $.ui.log(`${TAG} failed to create ${dir}; failure not recorded: ${detail}`)
+    const lines = (await readOr($, path, '')).split('\n').filter(l => l.trim() !== '')
+    await $.fs.write(path, [...lines, JSON.stringify(entry)].slice(-FAILURES_KEPT).join('\n') + '\n')
+  } catch (err) {
+    $.ui.log(`${TAG} failed to record a handoff failure: ${String(err)}`)
+  }
+}
+
+// /ctx-relay-status 的失敗段：筆數＋最近 3 筆（新的在前）
+async function failureStatus($: EngineInterface): Promise<string[]> {
+  const root = await harnessRoot($)
+  if (root === '') return []
+  const lines = (await readOr($, `${root}/ctx-relay/failures.jsonl`, '')).split('\n').filter(l => l.trim() !== '')
+  if (lines.length === 0) return ['handoff failures: none recorded']
+  const recent = lines.slice(-3).reverse().map(l => {
+    try {
+      const f = JSON.parse(l) as Failure
+      return `  ${f.at} ${f.manual ? 'manual' : 'auto'} ctx ${k(f.tokens)}${f.idleMin === null ? '' : `, idle ${f.idleMin}m`}: ${f.detail}`
+    } catch {
+      return `  (unreadable line) ${l.slice(0, 80)}`
+    }
+  })
+  return [`handoff failures: ${lines.length} recorded (${root}/ctx-relay/failures.jsonl)`, ...recent]
 }
 
 async function readOr($: EngineInterface, path: string, fallback: string): Promise<string> {

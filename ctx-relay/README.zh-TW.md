@@ -109,7 +109,7 @@ git repo：`<git-common-dir>/harness/handoff/`；非 git：`~/.claude/harness/<�
 - 接續送出被擋（例如 settings 的 hook 拒絕）時，這行留著，也不記已接手。
 
 ## 指令
-- `/ctx-relay-status`：顯示門檻、讀數、交接狀態、背景工作，以及快取 TTL（附判定來源）和剩餘時間
+- `/ctx-relay-status`：顯示門檻、讀數、交接狀態、背景工作、快取 TTL（附判定來源）和剩餘時間，以及最近 3 次交接失敗。每次交接失敗（/clear 之前）都會追加到 `<harness root>/ctx-relay/failures.jsonl`（時間、自動或手動、token、你離開幾分鐘、原因；留最近 100 筆）
 - `/ctx-relay-now`：立刻交接；有背景工作在跑時要打 `/ctx-relay-now yes`。fork 指示、交接檔檔頭和新對話的接續訊息都寫明是 `/ctx-relay-now` 手動交接，不寫「越過自動交接線」
   - 後面可以接最新指令，例如 `/ctx-relay-now yes` 換行再打「做 B 並安裝新 mod」。第一個字是 `yes` 才算確定；其餘文字是指令。沒有背景工作時不用 `yes`，整段參數都算指令。
   - 指令原話會交給 fork 寫「目標 + 最新指令」和「下一步」，也原樣寫進交接檔檔頭和接續訊息（每行加 `> `，指令裡的 `## ` 不會變成交接檔的標題）。
