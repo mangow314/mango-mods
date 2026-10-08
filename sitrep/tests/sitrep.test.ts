@@ -95,6 +95,14 @@ test('收合的段落按 ▸ 放回正文原位（不畫在框裡），再按收
   expect(w.bodies.at(-1)).toContain('## 待你決定\n兩題。')
 })
 
+test('收合列的標籤補到同寬，摘要排成一直欄（中文字算 2 欄）', async ($, on) => {
+  world(on)
+  const facets = [{ label: '變更', summary: '改 README' }, { label: '殘留風險', summary: '巢狀清單' }]
+  const ui = await message($, '好\n\n```ui-summary\n' + JSON.stringify({ status: 'done', outcome: '好', items: [], facets }) + '\n```')
+  const labels = (await ui.findAll({ type: 'Text' })).map(t => t.text).filter(t => /變更|殘留風險/.test(t))
+  expect(labels).toEqual([' 變更      ', ' 殘留風險  '])
+})
+
 test('正文行內提到 ```ui-summary 不當成區塊：照樣讀到尾端那個、行內文字保留', async ($, on) => {
   const w = world(on)
   const reply = '## 結果\nrecap 露出 ` ```ui-summary ` 原文，已修好。\n\n## 驗證\n- 32 pass\n\n```ui-summary\n' +

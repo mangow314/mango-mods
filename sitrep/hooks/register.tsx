@@ -826,6 +826,8 @@ type RenderEvent = Parameters<EngineInterface['ui']['resolve']>[0]
 
 function facetRows($: EngineInterface, e: RenderEvent, id: string, facets: Facet[], sections: (string | null)[], open: Record<string, boolean>) {
   const { Box, Button, Text } = $.ui.resolve(e)
+  // 標籤補到同寬，摘要排成一直欄（「變更」與「殘留風險」長度不同，摘要起點原本對不齊）
+  const width = Math.max(0, ...facets.map(f => cols(f.label)))
   return facets.map((f, i) => {
     const key = `${id}:${i}`
     const isOpen = open[key] === true
@@ -836,7 +838,7 @@ function facetRows($: EngineInterface, e: RenderEvent, id: string, facets: Facet
           ? <Button key={`toggle-${i}`} plain label={isOpen ? '▾' : '▸'} onPress={() => update($, openAtom, o => ({ ...o, [key]: !isOpen }))} />
           : <Text color={DIM}>{'·'}</Text>}
         {/* 灰階分層（不加新顏色）：標籤亮一階加粗、內文用亮字，「之後我」維持最暗，兩者分得開（使用者實機：收合列太灰不顯眼） */}
-        <Text color={SOFT} bold>{` ${f.label}  `}</Text>
+        <Text color={SOFT} bold>{` ${f.label}${' '.repeat(width - cols(f.label))}  `}</Text>
         <Text color={BRIGHT}>{isOpen ? `${f.summary}（已放回正文）` : f.summary}</Text>
       </Box>
     )
