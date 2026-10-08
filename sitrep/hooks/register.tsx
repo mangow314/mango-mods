@@ -686,7 +686,8 @@ function cutOpenFence(text: string): string | null {
 // ASCII 圖：沒標語言（或 text）的程式碼區塊，內含框線字元或箭頭
 // ```dot（或 graphviz）區塊也當成圖，標籤另附節點與邊數
 const FIG_FENCE_RE = /^```([A-Za-z]*)[ \t]*\n([\s\S]*?)\n```[ \t]*$/gm
-const FIG_MARK_RE = /[─│┌┐└┘├┤┬┴┼╭╮╯╰═║]|[→←↑↓]|-->|<--/
+// 純 ASCII 圖（output style 規定回覆裡的圖用 +--+、|--、`--）也要認得
+const FIG_MARK_RE = /[─│┌┐└┘├┤┬┴┼╭╮╯╰═║]|[→←↑↓]|-->|<--|\+--|--\+|\|--|`--/
 
 type Part = { kind: 'text' | 'figure' | 'dot'; text: string }
 

@@ -219,6 +219,14 @@ test('ASCII 圖：切出來畫在灰底區塊、上方標「圖」，前後段�
   expect(w.bodies.at(-1)).toBe('```py\nprint("a -> b")\nx = 1\n```')
 })
 
+test('純 ASCII 圖（+--+ 方框、|-- 樹，沒有箭頭）也畫成灰底圖', async ($, on) => {
+  world(on)
+  const box = await message($, '```\n+-----+    +-----+\n| A   |    | B   |\n+-----+    +-----+\n```')
+  expect(await texts(box)).toContain('圖')
+  const tree = await message($, '```\nroot\n|-- a\n`-- b\n```')
+  expect(await texts(tree)).toContain('圖')
+})
+
 const DOT = 'digraph { a -> b; b -> c [label="x"]; a -> c }'
 
 test('dot 區塊：跟 ASCII 圖一樣畫灰底原文，標籤附粗算的節點與邊數；不跑任何指令', async ($, on) => {

@@ -70,8 +70,8 @@ and is not in the marketplace yet.
   the engine's "Waiting for N background agents" line is not drawn (the box
   already lists them).
 - An ASCII figure in a reply (a code block with no language, or `text`,
-  holding box-drawing characters or arrows) is drawn on a gray background
-  under a dim `圖` ("figure") label, so it stands out from the text around it.
+  holding box-drawing characters, arrows, or plain-ASCII `+--` / `|--`)
+  is drawn on a gray background under a dim `圖` ("figure") label, so it stands out from the text around it.
 - A ```dot block is drawn like an ASCII figure, its label adding rough node
   and edge counts. It is not rendered as a picture: Claude Code turns
   pictures off inside tmux, where this mod is used.
