@@ -17,7 +17,8 @@ import type { AgentNote, ChangeNote, Evidence, Facet, Item, Summary, SummaryTask
 // 8. 回覆裡的 ```dot 區塊照 7 畫原文，標籤附粗算的節點與邊數。
 
 const TAG = 'sitrep'
-const FENCE_RE = /```ui-summary[^\n]*\n([\s\S]*?)\n?```[^\n]*\n?/g
+// 圍欄要在行首：正文裡行內提到 ` ```ui-summary ` 不算（實機：行內那個被當成開頭，把真的區塊吃掉，結論框讀不懂）
+const FENCE_RE = /^```ui-summary[^\n]*\n([\s\S]*?)\n?^```[^\n]*\n?/gm
 const KEEP_TURNS = 50
 const KEEP_AGENTS = 50
 const PANE = 'sitrep'
@@ -57,6 +58,7 @@ const SECTION = [
   '- facets 每項 {"label":"變更","summary":"30 字內","heading":"回覆裡那一段標題的原文"}，只列回覆裡確實有、適合預設收合的段落（例如變更、驗證、殘留風險）。',
   '- tasks 只在多步驟的工作才給（否則省略）：整件事的步驟依序列出，每項 {"text":"20 字內","done":true|false}，最多 7 項，已做完的標 done。',
   '- 這個區塊只給介面讀，使用者看不到。正文照常寫完整，不要在正文提到它。工具呼叫之間的訊息不附。',
+  '- 被要求寫 recap、session 摘要或其他不是回覆使用者的文字時，也不附。',
 ].join('\n')
 
 const answersAtom = atom({ plugin: 'sitrep', key: 'answers' } as const, {} as Record<string, Record<number, string>>)
@@ -186,6 +188,15 @@ export const register: Register = on => {
     const stat = top?.exitCode === 0 ? await $.process.run(['git', 'diff', 'HEAD', '--numstat'], { timeoutMs: 5000 }).catch(() => null) : null
     const root = top?.stdout.trim() ?? ''
     await update($, changesAtom, () => (stat?.exitCode === 0 ? parseNumstat(stat.stdout, root) : []))
+    return result
+  })
+
+  // 你自己送出訊息＝已回應上一輪的題目或待辦：那列馬上消失，不等這一輪結束（使用者實機：核准後「等你動手」一直掛著）
+  on('prompt.submit', async ($, e, next) => {
+    const result = await next(e)
+    // 你打字（composer）、手機遙控（bridge），或其他 mod 代你送出（asUser，例如 ctx-relay 的接續鈕）才算；背景通知、別的 session 傳來的不算
+    const o = e.origin
+    if (o.kind === 'composer' || o.kind === 'bridge' || (o.kind === 'plugin' && o.asUser)) await update($, pendingAtom, () => null)
     return result
   })
 
@@ -654,7 +665,7 @@ function findSummary(text: string): { id: string; summary: Summary | null; rest:
 
 // 最後一個 ```ui-summary 後面還沒有收尾的 ```：回傳開頭之前的正文；沒有這種區塊回 null
 function cutOpenFence(text: string): string | null {
-  const at = text.lastIndexOf('```ui-summary')
+  const at = [...text.matchAll(/^```ui-summary/gm)].at(-1)?.index ?? -1
   if (at >= 0 && text.indexOf('```', at + 3) < 0) return text.slice(0, at).replace(/\s+$/, '')
   // 開頭那行還沒傳完（```、```ui-sum）也藏：只在它是開新區塊時（前面的 ``` 行成對），收尾的 ``` 不動
   const nl = text.lastIndexOf('\n')

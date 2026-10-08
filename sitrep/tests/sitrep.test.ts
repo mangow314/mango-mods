@@ -95,6 +95,17 @@ test('收合的段落按 ▸ 放回正文原位（不畫在框裡），再按收
   expect(w.bodies.at(-1)).toContain('## 待你決定\n兩題。')
 })
 
+test('正文行內提到 ```ui-summary 不當成區塊：照樣讀到尾端那個、行內文字保留', async ($, on) => {
+  const w = world(on)
+  const reply = '## 結果\nrecap 露出 ` ```ui-summary ` 原文，已修好。\n\n## 驗證\n- 32 pass\n\n```ui-summary\n' +
+    JSON.stringify({ status: 'done', outcome: '修好了', items: [], facets: [] }) + '\n```'
+  const text = await texts(await message($, reply))
+  expect(text).toContain('✓ 完成')
+  expect(text).not.toContain('讀不懂')
+  expect(w.bodies.at(-1)).toContain('recap 露出 ` ```ui-summary ` 原文')
+  expect(w.bodies.at(-1)).not.toContain('"status"')
+})
+
 test('沒有區塊的回覆照原樣交給引擎', async ($, on) => {
   const w = world(on)
   await message($, '## 結果\n普通回覆')
@@ -452,6 +463,18 @@ test('prompt 上方：沒題目但有你要做的事時畫「等你動手：…�
   await finish($, '```ui-summary\n' + JSON.stringify({ status: 'partial', outcome: '後端好了', items: [{ kind: 'user-next', text: '瀏覽器實機登入' }], facets: [] }) + '\n```')
   expect(await texts(await above($))).toContain('等你動手：')
   expect(await texts(await above($))).toContain('瀏覽器實機登入')
+})
+
+test('prompt 上方：你送出訊息後那列馬上消失，不等這一輪結束', async ($, on) => {
+  world(on)
+  on('prompt.submit', (_$, e) => ({ text: e.text }))
+  await finish($, '```ui-summary\n' + JSON.stringify({ status: 'blocked', outcome: '等核准', items: [{ kind: 'user-next', text: '看 spec 說核准' }], facets: [] }) + '\n```')
+  expect(await texts(await above($))).toContain('等你動手：')
+  // 背景通知送進來的不算你回應
+  await $.prompt.submit({ text: '子代理回報', wait: false, origin: { kind: 'task-notification' } as never })
+  expect(await texts(await above($))).toContain('等你動手：')
+  await $.prompt.submit({ text: '核准', wait: false, origin: { kind: 'composer' } })
+  expect(await texts(await above($))).not.toContain('等你動手')
 })
 
 test('prompt 上方：有 survey 時讓位', async ($, on) => {
