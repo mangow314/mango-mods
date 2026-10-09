@@ -1,6 +1,8 @@
 # ctx-relay
 
-> English: [README.md](README.md)。這份是它的繁體中文對譯。band 與指令的畫面文字是英文；交接檔和接續訊息是中文。
+> English: [README.md](README.md)。這份是它的繁體中文對譯。band 與指令的畫面文字是英文。交接檔用英文標題、內文照對話語言寫；可選的 `full` 格式是中文（見「交接檔格式」）。
+
+不需要其他 skill 或 hook：交接檔由 mod 自己寫。
 
 一個 Claude Code mod，在提示框上方顯示一行 band：目前 context／交接線、每輪花費、prompt 快取還熱多久。
 主對話越過自動交接線時，它會自動交接：產生交接檔，`/clear`，在新對話接續。
@@ -16,10 +18,10 @@
 | 別的 Stop hook 擋下（回合其實沒結束） | 不判斷，等真正停下的那次 |
 | 倒數中 | 按 Cancel（hotkey 1）就取消，這段對話之後只提醒；送出任何訊息只延後，這輪結束還在線上就重新倒數 |
 | 倒數或準備中有新回合開始（排程、背景通知、別的 session 傳訊） | 這次切換作廢，回合結束再重新判斷 |
-| 倒數結束 | mod 收集 git 狀態和 progress INDEX → `$.model.fork` 只填 handoff skill 8 欄位的內文，每欄用一行 `=== 鍵名 ===`（GOAL／FILES／VERIFIED／DIRTY／NEXT／NOTES／CONSTRAINTS／POINTERS）分段（3 分鐘沒回就放棄）→ mod 自己寫死 8 個中文 `## ` 標題組成交接檔，模型沒有機會把標題打錯 → 機器檢查（缺欄位就標 `thin:`；一個分段標記都沒有就記失敗）→ 附上來源交接檔的協調契約原文 → 寫檔並讀回確認 → 確認對話沒變動 → `/clear` → 在新對話送出交接檔路徑和接手規則 |
+| 倒數結束 | mod 收集 git 狀態 → `$.model.fork` 只填各欄內文，每欄用一行 `=== 鍵名 ===` 分段（3 分鐘沒回就放棄）→ mod 用自己寫死的 `## ` 標題組成交接檔，模型沒有機會把標題打錯 → 機器檢查（缺欄位就標 `thin:`；一個分段標記都沒有就記失敗）→ 寫檔並讀回確認 → 確認對話沒變動 → `/clear` → 在新對話送出交接檔路徑和接手規則 |
 | 任何一步在 `/clear` 之前失敗 | 留在原對話，band 顯示原因，不重試 |
 
-協調契約由 mod 原樣附上，不經模型：fork 寫的 `=== CONTRACT ===` 分段和內文裡的「## 協調契約」段一律丟掉。fork 內文裡其他 `## ` 行會降成 `### `，交接檔的二級標題只有 mod 寫的那幾個。鍵名打錯（例如 `=== VERIFED ===`）的分段：該欄記 `thin:`，內文不丟，附在「關鍵細節備忘」末尾並標明。fork 輸出裡的 ` ```ui-summary ` 區塊（sitrep mod 要模型每輪附的摘要）會被拿掉。
+`full` 格式下，協調契約由 mod 原樣附上，不經模型：fork 寫的 `=== CONTRACT ===` 分段和內文裡的「## 協調契約」段一律丟掉。fork 內文裡其他 `## ` 行會降成 `### `，交接檔的二級標題只有 mod 寫的那幾個。鍵名打錯（例如 `=== VERIFED ===`）的分段：該欄記 `thin:`，內文不丟，附在 Next（`full` 是「關鍵細節備忘」）末尾並標明。fork 輸出裡的 ` ```ui-summary ` 區塊（sitrep mod 要模型每輪附的摘要）會被拿掉。
 
 ## 門檻
 - 壓縮點：Claude Code 自己回報的 auto-compact 觸發點（`$.session.usage({ breakdown })` 的 `autoCompactThreshold`）。auto-compact 關掉時改用模型窗。
@@ -64,7 +66,7 @@ echo '{"handoffTokens": "400000"}' | claude plugin configure ctx-relay@mango-mod
 - 不到 80 欄就拿掉進度條（圖示和數字保留）；還是放不下的部分從尾端截掉。
 - 倒數時整行換成 `󰚌 Handoff in 42s · at 400K · send a message to postpone`，旁邊是 `Cancel [1]` 按鈕。
 - 交接後（自動交接，或按待接手那行的 `Resume [1]`），狀態寫 `Resumed from <檔名> · next: <下一步欄的第一行> · /ctx-relay-notes`，自動交接還會跳一個 toast。你一打字，next 那段就收掉。
-- `/clear` 成功但接續訊息送不出去時，這行顯示 `Cleared, but <原因>. Type: 讀 <路徑> 並依其接續`。「Type:」後面維持中文，因為那是要你貼進對話的接續指令。
+- `/clear` 成功但接續訊息送不出去時，這行顯示 `Cleared, but <原因>. Type: Read <路徑> and continue from it`。「Type:」後面是要你貼進對話的接續指令；`full` 格式時是中文（`讀 <路徑> 並依其接續`）。
 - 別的 mod 也畫 band 時（例如 blast-radius 在窄終端機把 Proceed／Cancel 畫在這裡），它的內容在上、ctx-relay 這行在下。高度不夠或對方不讓位時，ctx-relay 這行會看不到，見「已知限制」。
 - 圖示、雪花、膠囊（U+EE00–EE05，Nerd Fonts 3.0 起才有）都要 Nerd Font（例如 Symbols Nerd Font 補字），沒有的話會變成方框。
 - 在 tmux 裡，Claude Code 預設只用 256 色。tmux 有開 RGB 的話，設 `CLAUDE_CODE_TMUX_TRUECOLOR=1` 才會照原色畫。
@@ -85,10 +87,25 @@ prompt 快取讓下一次請求便宜地重讀對話。一段時間沒有請求�
 - 閒置壓縮：Claude Code 會在你閒置時、快取過期前自己把長對話壓縮，並顯示「Compacted while idle, before the prompt cache expired」。文件沒寫，以下讀自 2.1.294 執行檔：只在快取是 1 小時、還沒過期，context 至少 200K（`CLAUDE_CODE_IDLE_COMPACT_MIN_TOKENS`，下限 100K），閒置到 TTL 的大約 90%（約 54 分鐘），而且 Anthropic 為你的帳號開了這功能時才跑。在 settings 設 `"idleCompaction": false` 可關掉。它會讓 context 變小，所以這時不會碰到交接線。
 - ctx-relay 不幫快取保溫：用 `$.model.fork` 送的請求讀不到主對話的快取（見「已知限制」），所以延長不了它。
 
+## 交接檔格式
+
+設定 `handoffFormat` 二選一：
+
+| 格式 | 欄位 | 語言 |
+| --- | --- | --- |
+| `lite`（預設） | Goal、Files、Verified、Next | 標題與 fork 指示是英文；內文照對話語言寫 |
+| `full` | 作者自己 handoff skill 的 8 欄（目標 + 最新指令、已改／將改檔、已驗證 vs 驗證缺口、dirty 無關項、下一步、關鍵細節備忘、硬約束 yaml、指標），加上來源交接檔的協調契約與 session 的 progress `INDEX.md` | 繁體中文 |
+
+`full` 照作者自己環境的慣例，多數人用 `lite` 就好。notes pane 與待接手那行兩種格式都讀得懂，不看設定。
+
+```bash
+echo '{"handoffFormat": "full"}' | claude plugin configure ctx-relay@mango-mods --values-stdin
+```
+
 ## 交接檔放哪裡
 git repo：`<git-common-dir>/harness/handoff/`；非 git：`~/.claude/harness/<目錄名>-<sha256 前 8 碼>/handoff/`。
 檔名：`<時間戳>-<slug>-<來源 session id 前 8 碼>-<批次號>.md`，同一秒的兩批或共用同一個 git-common-dir 的兩個 session 不會互相覆寫。
-有 `<同一根目錄>/progress/<session id>/INDEX.md` 的話，會一起交給 fork 參考。
+`full` 格式下，有 `<同一根目錄>/progress/<session id>/INDEX.md` 的話，會一起交給 fork 參考。
 
 ## 待接手（handoff-pickup）
 ![ctx-relay 待接手：有一份還沒人接手的交接檔，按 1 接續](../docs/assets/ctx-relay-pickup.png)
@@ -98,7 +115,7 @@ git repo：`<git-common-dir>/harness/handoff/`；非 git：`~/.claude/harness/<�
 | 什麼時候 | 會發生什麼 |
 |---|---|
 | 新對話開場（啟動時對話還沒有任何訊息；`--resume` 接回的舊對話不算），或你手動 `/clear` 之後 | 找交接檔資料夾裡還沒人接手的交接檔，列最新一份；其他還沒接手的份數標在 `+N` |
-| 提示框是空的時候按 1（或點按鈕） | 送出「讀 <完整路徑> 並依其接續執行；先確認 git 狀態與下一步再動手。」，這份記為已接手 |
+| 提示框是空的時候按 1（或點按鈕） | 送出「Read <完整路徑> and continue from it; check the git state and the next step before acting.」（`full` 格式的檔案送中文版「讀 <完整路徑> 並依其接續執行；先確認 git 狀態與下一步再動手。」），這份記為已接手 |
 | 主對話開始新回合（你送出訊息、按接續、排程） | 這行收掉 |
 
 - 「已接手」記在 `<交接檔資料夾>/.picked/<交接檔檔名>`（空檔），交接檔本身不動。點開頭的資料夾，handoff skill 用 `ls -t` 找最新交接檔時看不到它。
@@ -116,7 +133,7 @@ git repo：`<git-common-dir>/harness/handoff/`；非 git：`~/.claude/harness/<�
   - 後面可以接最新指令，例如 `/ctx-relay-now yes` 換行再打「做 B 並安裝新 mod」。第一個字是 `yes` 才算確定；其餘文字是指令。沒有背景工作時不用 `yes`，整段參數都算指令。
   - 指令原話會交給 fork 寫「目標 + 最新指令」和「下一步」，也原樣寫進交接檔檔頭和接續訊息（每行加 `> `，指令裡的 `## ` 不會變成交接檔的標題）。
   - 附了指令時，接續訊息請新對話核對完 git 狀態就照指令做，不再等你說一次。沒附指令時照舊：回報現況後等你指示。
-  - 例外：交接檔缺「硬約束」（檔頭 `thin` 有「硬約束」）時，這個任務的限制可能沒寫進去，接續訊息改成先回報打算怎麼照指令做，等你確認再動手。
+  - 例外（只有 `full`）：交接檔缺「硬約束」（檔頭 `thin` 有「硬約束」）時，這個任務的限制可能沒寫進去，接續訊息改成先回報打算怎麼照指令做，等你確認再動手。
 
 ## 已知限制
 - 背景工作不會逾時作廢：常駐 server 會讓交接延後到上限才強制倒數；要早點交接就用 `/ctx-relay-now yes`。

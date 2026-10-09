@@ -313,7 +313,7 @@ test('handoffTokens 超過壓縮點的 85%：改用 85%，狀態說明原因', {
   expect(status.text).toContain('handoff line 433840 (setting 900000 is above 85% of the compaction point; using that instead)')
 })
 
-test('越過交接線：倒數 60 秒後 fork 一次、寫交接檔（檔名帶來源 session 與批次號）、clear 一次、在新對話送出路徑', async ($, on) => {
+test('越過交接線：倒數 60 秒後 fork 一次、寫交接檔（檔名帶來源 session 與批次號）、clear 一次、在新對話送出路徑', { options: { handoffFormat: 'full' } }, async ($, on) => {
   const clock = mock.clock(on, { now: 1_000_000 })
   const w = world($, on)
   await start($)
@@ -349,7 +349,45 @@ test('越過交接線：倒數 60 秒後 fork 一次、寫交接檔（檔名帶�
   expect(w.forkPrompts).toHaveLength(1)
 })
 
-test('fork 指示：git 只能修正檔案與 commit 狀態，「已驗證」只寫看過結果的項目', async ($, on) => {
+test('預設 lite：fork 指示英文、照對話語言寫；交接檔四欄英文標題、不讀 INDEX、不記硬約束；接續訊息與 notes 都讀得懂', async ($, on) => {
+  const clock = mock.clock(on)
+  on('ui.open', () => ({ value: { isPlaced: true as const } }))
+  const w = world($, on, {
+    forkText: ['SLUG: demo-task', '=== GOAL ===', 'ship the demo', '=== FILES ===', 'a.ts', '=== VERIFIED ===', '- verified: unit tests pass', '- gap: e2e not run', '=== NEXT ===', '- run e2e'].join('\n'),
+  })
+  w.files.set(`${ROOT}/progress/sid-1/INDEX.md`, '# 私人進度\nphase: 2')
+  await start($)
+  await turn($, w, 450_000)
+  await clock.advance(60_000)
+  await clock.settle()
+  expect(w.forkPrompts[0]).toContain('in the language of this conversation')
+  expect(w.forkPrompts[0]).not.toContain('CONSTRAINTS')
+  expect(w.forkPrompts[0]).not.toContain('私人進度')
+  const [path, content] = handoffFiles(w)[0] ?? ['', '']
+  expect(content.startsWith(`Read ${path} and continue from it;`)).toBe(true)
+  expect(content).toContain('- how: auto')
+  expect(content).toContain('## Goal\nship the demo\n\n## Files\na.ts\n\n## Verified\n')
+  expect(content).toContain('## Next\n- run e2e')
+  expect(content).not.toContain('thin:')
+  expect(content).not.toContain('目標')
+  expect(w.cleared).toBe(1)
+  expect(w.submitted[0]).toContain(`Read ${path} and continue the task \`demo-task\``)
+  expect(w.submitted[0]).toContain('wait for the user')
+  const ui = await $.ui.mount({
+    plugin: 'ctx-relay',
+    surface: 'terminal',
+    component: 'Pane',
+    requestId: 'ctx-relay-notes',
+    props: { title: 'ctx-relay notes', isFocused: false, bodyColumns: 80, placement: 'dock' as const, scroll: { offset: 0, bodyRows: 40 }, view: {} },
+  })
+  const text = (await ui.findAll({ type: 'Text' })).map(t => t.text).join('\n')
+  expect(text).toContain('auto handoff')
+  expect(text).toContain('run e2e')
+  expect(text).toContain('e2e not run')
+  expect(text).toContain('ship the demo')
+})
+
+test('fork 指示：git 只能修正檔案與 commit 狀態，「已驗證」只寫看過結果的項目', { options: { handoffFormat: 'full' } }, async ($, on) => {
   const clock = mock.clock(on)
   const w = world($, on)
   await start($)
@@ -378,7 +416,7 @@ test('fork 輸出沒有任何分段標記（例如照舊寫 ## 標題）：記�
   expect((await band($)).text).toContain('Auto handoff failed: the fork output has no recognised "=== KEY ===" section markers')
 })
 
-test('fork 分段順序亂、內文帶 ## 標題：mod 照固定順序寫八個標題，內文的 ## 降成 ###', async ($, on) => {
+test('fork 分段順序亂、內文帶 ## 標題：mod 照固定順序寫八個標題，內文的 ## 降成 ###', { options: { handoffFormat: 'full' } }, async ($, on) => {
   const clock = mock.clock(on)
   const lines = GOOD.split('\n')
   // POINTERS 搬到最前面；VERIFIED 內文照舊習慣多寫一行中文 ## 標題
@@ -397,7 +435,7 @@ test('fork 分段順序亂、內文帶 ## 標題：mod 照固定順序寫八個�
   expect(content).not.toContain('thin:')
 })
 
-test('fork 輸出末尾附了 sitrep 的 ui-summary 區塊：交接檔不帶這個區塊', async ($, on) => {
+test('fork 輸出末尾附了 sitrep 的 ui-summary 區塊：交接檔不帶這個區塊', { options: { handoffFormat: 'full' } }, async ($, on) => {
   const clock = mock.clock(on)
   const w = world($, on, { forkText: `${GOOD}\n\n\`\`\`ui-summary\n{"status":"done","outcome":"交接完成","items":[],"facets":[]}\n\`\`\`\n` })
   await start($)
@@ -703,7 +741,7 @@ test('交接成功且放得下：自動開一次 notes pane（不搶焦點），
   expect(toasts.some(t => t.includes('notes pane shows the handoff (q closes)'))).toBe(true)
 })
 
-test('/ctx-relay-notes：狀態頁（下一步、禁止、缺口、目標、進度）與證據頁，q 或再打一次關掉', async ($, on) => {
+test('/ctx-relay-notes：狀態頁（下一步、禁止、缺口、目標、進度）與證據頁，q 或再打一次關掉', { options: { handoffFormat: 'full' } }, async ($, on) => {
   const clock = mock.clock(on)
   const panes = new Set<string>()
   on('ui.panes', () => ({ value: [...panes].map(id => ({ id, title: id, isShown: true, isFocused: false, isPlaced: true })) }))
@@ -830,7 +868,7 @@ test('有背景工作在跑（shell／monitor／workflow）：延後交接；引
   expect((await band($)).text).toContain('Handoff in')
 })
 
-test('背景工作一直不結束：到交接線與壓縮點的中點就強制倒數，交接檔寫明還在跑的工作', async ($, on) => {
+test('背景工作一直不結束：到交接線與壓縮點的中點就強制倒數，交接檔寫明還在跑的工作', { options: { handoffFormat: 'full' } }, async ($, on) => {
   const clock = mock.clock(on)
   const w = world($, on, { background: [{ id: 'bg42', type: 'shell', description: 'npm run dev' }] })
   await start($)
@@ -876,7 +914,7 @@ test('有子代理在跑：延後交接', async ($, on) => {
   expect((await band($)).text).toContain('Handoff deferred')
 })
 
-test('/ctx-relay-now：有背景工作時要 yes；加 yes 就不倒數直接交接；fork 指示、檔頭、接續訊息寫手動交接，不寫越過交接線', async ($, on) => {
+test('/ctx-relay-now：有背景工作時要 yes；加 yes 就不倒數直接交接；fork 指示、檔頭、接續訊息寫手動交接，不寫越過交接線', { options: { handoffFormat: 'full' } }, async ($, on) => {
   const clock = mock.clock(on)
   const w = world($, on, { agents: [{ id: 'ag1', description: 'Explore 搜尋', status: 'running' }] })
   await start($)
@@ -916,7 +954,7 @@ test('/ctx-relay-now yes 換行接指令：放行；指令原樣進 fork 指示�
   expect(w.submitted[0]).not.toContain('等使用者指示')
 })
 
-test('fork 缺欄位：照寫檔並在檔頭標 thin', async ($, on) => {
+test('fork 缺欄位：照寫檔並在檔頭標 thin', { options: { handoffFormat: 'full' } }, async ($, on) => {
   const clock = mock.clock(on)
   const w = world($, on, { forkText: GOOD.replace('跑 e2e', '').replace('stop_status: 不 commit', 'stop_status:') })
   await start($)
@@ -928,7 +966,7 @@ test('fork 缺欄位：照寫檔並在檔頭標 thin', async ($, on) => {
   expect(w.cleared).toBe(1)
 })
 
-test('附了指令但交接檔缺硬約束：接續訊息照附原話，但改成先回報、等使用者確認再動手', async ($, on) => {
+test('附了指令但交接檔缺硬約束：接續訊息照附原話，但改成先回報、等使用者確認再動手', { options: { handoffFormat: 'full' } }, async ($, on) => {
   const clock = mock.clock(on)
   const w = world($, on, { forkText: GOOD.replace('stop_status: 不 commit', 'stop_status:') })
   await start($)
@@ -941,7 +979,7 @@ test('附了指令但交接檔缺硬約束：接續訊息照附原話，但改�
   expect(w.submitted[0]).not.toContain('不用等使用者再說一次')
 })
 
-test('來源交接檔帶協調契約：fork 沒寫，mod 照原文附上', async ($, on) => {
+test('來源交接檔帶協調契約：fork 沒寫，mod 照原文附上', { options: { handoffFormat: 'full' } }, async ($, on) => {
   const clock = mock.clock(on)
   const source = `${ROOT}/handoff/20261003-120000-prev.md`
   const w = world($, on, { messages: [{ role: 'user', text: `讀 ${source} 並依其接續執行。` }] })
@@ -956,7 +994,7 @@ test('來源交接檔帶協調契約：fork 沒寫，mod 照原文附上', async
   expect(content).not.toContain('thin:')
 })
 
-test('fork 改寫了協調契約（CONTRACT 分段＋內文裡的 ## 協調契約）：分段丟掉、內文降級，只有 mod 附的原文是二級標題', async ($, on) => {
+test('fork 改寫了協調契約（CONTRACT 分段＋內文裡的 ## 協調契約）：分段丟掉、內文降級，只有 mod 附的原文是二級標題', { options: { handoffFormat: 'full' } }, async ($, on) => {
   const clock = mock.clock(on)
   const source = `${ROOT}/handoff/20261003-120000-prev.md`
   const w = world($, on, {
@@ -975,7 +1013,7 @@ test('fork 改寫了協調契約（CONTRACT 分段＋內文裡的 ## 協調契�
   expect(content).toContain('## 指標\n~/.claude/plans/x.md\n\n## 協調契約\n你＝coordinator；不 push')
 })
 
-test('fork 鍵名打錯（=== VERIFED ===）：欄位記 thin，內文不丟，附在關鍵細節備忘末尾並標明', async ($, on) => {
+test('fork 鍵名打錯（=== VERIFED ===）：欄位記 thin，內文不丟，附在關鍵細節備忘末尾並標明', { options: { handoffFormat: 'full' } }, async ($, on) => {
   const clock = mock.clock(on)
   const w = world($, on, { forkText: GOOD.replace('=== VERIFIED ===', '=== VERIFED ===') })
   await start($)

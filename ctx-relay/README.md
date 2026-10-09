@@ -1,8 +1,11 @@
 # ctx-relay
 
 > 繁體中文版：[README.zh-TW.md](README.zh-TW.md). The band and commands are in
-> English; the handoff files it writes and the resume prompts it sends are in
-> Traditional Chinese.
+> English. Handoff files use English headings with the body in the
+> conversation's language; the optional `full` format is in Traditional
+> Chinese (see "Handoff file format").
+
+It needs no other skill or hook: the mod writes the handoff file itself.
 
 A Claude Code mod that draws a band above the prompt: current context / the
 handoff line, this turn's cost, and how long the prompt cache stays warm.
@@ -28,16 +31,16 @@ Code release may require changes.
 | Another Stop hook blocks the stop (the turn has not really ended) | No decision; wait for the stop that really ends the turn |
 | During the countdown | Press Cancel (hotkey 1) to cancel; for the rest of this conversation it only reminds you. Sending any message only postpones it: if you are still past the line when that turn ends, the countdown starts again |
 | A new turn starts during the countdown or preparation (a schedule, a background notification, a message from another session) | This switch is dropped; it decides again when the turn ends |
-| The countdown ends | The mod collects git state and the progress INDEX → `$.model.fork` fills in only the body of the handoff skill's 8 fields, one `=== KEY ===` line per field (GOAL / FILES / VERIFIED / DIRTY / NEXT / NOTES / CONSTRAINTS / POINTERS) (gives up after 3 minutes without an answer) → the mod assembles the handoff file under 8 hard-coded Chinese `## ` headings, so the model has no chance to mistype a heading → machine check (a missing field is marked `thin:`; no section marker at all counts as a failure) → the source handoff file's coordination contract is appended verbatim → write the file and read it back → confirm the conversation has not changed → `/clear` → send the handoff file path and the pickup rules in the new conversation |
+| The countdown ends | The mod collects git state → `$.model.fork` fills in only the body of each field, one `=== KEY ===` line per field (gives up after 3 minutes without an answer) → the mod assembles the handoff file under its own hard-coded `## ` headings, so the model has no chance to mistype a heading → machine check (a missing field is marked `thin:`; no section marker at all counts as a failure) → write the file and read it back → confirm the conversation has not changed → `/clear` → send the handoff file path and the pickup rules in the new conversation |
 | Any step fails before `/clear` | Stays in the original conversation, the band shows why, no retry |
 
-The mod appends the coordination contract verbatim, without the model: a
+In the `full` format, the mod appends the coordination contract verbatim, without the model: a
 `=== CONTRACT ===` section written by the fork, and any `## 協調契約`
 ("coordination contract") section in its body, are always dropped. Any other
 `## ` line in the fork's body is demoted to `### `, so the only second-level
 headings in a handoff file are the mod's own. A section whose key is mistyped
 (for example `=== VERIFED ===`): that field is marked `thin:`, and its body is
-kept, appended at the end of 關鍵細節備忘 ("key details") with a note. A
+kept, appended at the end of Next (`full`: 關鍵細節備忘, "key details") with a note. A
 ` ```ui-summary ` block in the fork's output (the summary the sitrep mod asks
 the model to append to each reply) is removed.
 
@@ -120,8 +123,9 @@ One line, left to right:
   /ctx-relay-notes`, and an automatic handoff also shows a toast. The "next"
   part goes away as soon as you type.
 - If `/clear` succeeded but the resume message could not be sent, the line
-  reads `Cleared, but <reason>. Type: 讀 <path> 並依其接續`. The part after
-  "Type:" stays in Chinese because it is what you paste into the conversation.
+  reads `Cleared, but <reason>. Type: Read <path> and continue from it`. The
+  part after "Type:" is what you paste into the conversation; with the `full`
+  format it is in Chinese (`讀 <path> 並依其接續`).
 - When another mod also draws a band (for example blast-radius, which draws
   Proceed / Cancel here in a narrow terminal), its content goes on top and the
   ctx-relay line below. When there is not enough height, or the other mod does
@@ -176,6 +180,23 @@ you can decide whether to keep going, compact first, or start a new session.
   does not read the main conversation's cache (see "Known limits"), so it
   cannot extend it.
 
+## Handoff file format
+
+The `handoffFormat` setting picks one of two formats:
+
+| Format | Fields | Language |
+| --- | --- | --- |
+| `lite` (default) | Goal, Files, Verified, Next | English headings and instructions; the fork writes the body in the conversation's language |
+| `full` | The 8 fields of the author's own handoff skill (goal + latest instruction, files, verified vs gaps, unrelated dirty files, next step, key details, hard constraints as YAML, pointers), plus the source handoff file's coordination contract and the session's progress `INDEX.md` | Traditional Chinese |
+
+`full` follows conventions from the author's own setup; most people want
+`lite`. The notes pane and the pickup line read either format, whatever the
+setting says.
+
+```bash
+echo '{"handoffFormat": "full"}' | claude plugin configure ctx-relay@mango-mods --values-stdin
+```
+
 ## Where handoff files go
 
 In a git repo: `<git-common-dir>/harness/handoff/`; outside git:
@@ -183,8 +204,8 @@ In a git repo: `<git-common-dir>/harness/handoff/`; outside git:
 File name: `<timestamp>-<slug>-<first 8 chars of the source session id>-<batch number>.md`,
 so two batches in the same second, or two sessions sharing one
 git-common-dir, never overwrite each other.
-If `<same root>/progress/<session id>/INDEX.md` exists, it is passed to the
-fork as well.
+In the `full` format, if `<same root>/progress/<session id>/INDEX.md` exists,
+it is passed to the fork as well.
 
 ## Waiting to be picked up (handoff-pickup)
 
@@ -197,7 +218,7 @@ follows.
 | When | What happens |
 | --- | --- |
 | A new conversation starts (no messages yet at startup; an old conversation reopened with `--resume` does not count), or after you run `/clear` yourself | Look for handoff files in the handoff folder that nobody has picked up, and show the newest; the count of the others goes in `+N` |
-| Press 1 while the prompt is empty (or click the button) | Sends "讀 <full path> 並依其接續執行；先確認 git 狀態與下一步再動手。" ("Read <full path> and continue from it; check git state and the next step before acting."), and marks this file as picked up |
+| Press 1 while the prompt is empty (or click the button) | Sends "Read <full path> and continue from it; check the git state and the next step before acting." (the Chinese version of that sentence for a `full` file), and marks this file as picked up |
 | The main conversation starts a new turn (you send a message, press resume, a schedule fires) | The line goes away |
 
 - "Picked up" is recorded as `<handoff folder>/.picked/<handoff file name>`
@@ -257,7 +278,7 @@ follows.
     conversation to check git state and then follow the instruction, without
     waiting for you to repeat it. Without one, as before: report the current
     state and wait for you.
-  - Exception: when the handoff file is missing 硬約束 ("hard constraints";
+  - Exception (`full` only): when the handoff file is missing 硬約束 ("hard constraints";
     the header's `thin` lists 硬約束), the task's constraints may not have been
     written down, so the resume message instead asks the new conversation to
     first report how it plans to follow the instruction and wait for your

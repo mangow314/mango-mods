@@ -12,6 +12,13 @@
       "description": "context 到這個 token 數就自動交接。0＝自動：Claude Code 壓縮點的 85%。設定值超過自動值時用自動值。",
       "default": 0,
       "min": 0
+    },
+    "handoffFormat": {
+      "type": "string",
+      "title": "交接檔格式",
+      "description": "lite：四欄（Goal／Files／Verified／Next），英文標題，內文照對話語言。full：八欄中文格式，含硬約束、協調契約與 progress INDEX。",
+      "options": ["lite", "full"],
+      "default": "lite"
     }
   }
 }
