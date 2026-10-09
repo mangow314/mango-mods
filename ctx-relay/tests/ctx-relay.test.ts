@@ -176,7 +176,7 @@ function world($: Engine, on: On, patch: Partial<World> = {}): World {
     if (cmd === 'mkdir') return ok('')
     if (cmd === 'git') {
       const sub = e.argv[3]
-      if (sub === 'rev-parse') return ok('master\n')
+      if (sub === 'rev-parse') return ok(e.argv.includes('--short') ? 'abc1234\n' : 'master\n')
       if (sub === 'status') return w.failGitStatus ? ok('', 128) : ok(' M a.ts\n')
       if (sub === 'log') return ok('abc123 init\n')
       return ok('')
@@ -344,8 +344,9 @@ test('越過交接線：倒數 60 秒後 fork 一次、寫交接檔（檔名帶�
   expect(w.submitted[0]).toContain('不算完成')
   expect(w.submitted[0]).toContain('已越過自動交接線')
   expect(w.submitted[0]).toContain('先回報「交接檔可能過時」')
-  // %ci 帶提交者時區（可能是 UTC），和檔頭的本地時間戳比會漏判
-  expect(w.submitted[0]).toContain('--date=format-local:%Y%m%d-%H%M%S')
+  // 用檔頭的 HEAD sha 比，不比時間（%ci 帶提交者時區，2026-10-09 實例會漏判）
+  expect(w.submitted[0]).toContain('git log --oneline abc1234..HEAD')
+  expect(content).toContain('- HEAD：`abc1234`')
   expect(content).toContain('由 ctx-relay mod 自動交接')
   await clock.advance(120_000)
   expect(w.cleared).toBe(1)
@@ -380,8 +381,9 @@ test('預設 lite：fork 指示英文、照對話語言寫；交接檔四欄英�
   expect(w.submitted[0]).toContain(`Read ${path} and continue the task \`demo-task\``)
   expect(w.submitted[0]).toContain('wait for the user')
   expect(w.submitted[0]).toContain('the handoff file may be stale')
-  // %ci 帶提交者時區（可能是 UTC），和檔頭的本地時間戳比會漏判
-  expect(w.submitted[0]).toContain('--date=format-local:%Y%m%d-%H%M%S')
+  // 用檔頭的 HEAD sha 比，不比時間（%ci 帶提交者時區，2026-10-09 實例會漏判）
+  expect(w.submitted[0]).toContain('git log --oneline abc1234..HEAD')
+  expect(content).toContain('- head: `abc1234`')
   const ui = await $.ui.mount({
     plugin: 'ctx-relay',
     surface: 'terminal',
@@ -1198,7 +1200,7 @@ test('本 session 已手動交接（載入過 handoff skill）：不倒數', asy
 const HOUR = 3_600_000
 const HANDOFF = `${ROOT}/handoff/20261005-133853-mod-backlog-sdlc.md`
 const PICKED_HANDOFF = `${ROOT}/handoff/.picked/20261005-133853-mod-backlog-sdlc.md`
-const RESUME = `讀 ${HANDOFF} 並依其接續執行；先確認 git 狀態與下一步再動手。`
+const RESUME = `讀 ${HANDOFF} 並依其接續執行；先確認 git 狀態與下一步再動手。檔頭有 HEAD 行時，git log --oneline <HEAD>..HEAD 有輸出代表交接檔可能過時，先回報。`
 
 // 手動 /handoff 寫的交接檔：檔頭帶來源 session
 function manualHandoff(w: World, path: string, mtimeMs: number) {

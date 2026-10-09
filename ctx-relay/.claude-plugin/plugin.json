@@ -1,6 +1,6 @@
 {
   "name": "ctx-relay",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "description": "提示框上方顯示每輪花費與距交接線的剩餘空間；越過自動交接線時倒數 60 秒，用 fork 產生交接檔後 /clear 並在新對話接續；新對話開場列出還沒人接手的交接檔，按 1 接續",
   "author": { "name": "Mango" },
   "license": "MIT",

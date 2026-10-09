@@ -106,6 +106,8 @@ echo '{"handoffFormat": "full"}' | claude plugin configure ctx-relay@mango-mods 
 ## 交接檔放哪裡
 git repo：`<git-common-dir>/harness/handoff/`；非 git：`~/.claude/harness/<目錄名>-<sha256 前 8 碼>/handoff/`。
 檔名：`<時間戳>-<slug>-<來源 session id 前 8 碼>-<批次號>.md`，同一秒的兩批或共用同一個 git-common-dir 的兩個 session 不會互相覆寫。
+
+檔頭記下交接當下的 HEAD（`git rev-parse --short HEAD`）。新對話的接續訊息會叫它跑 `git log --oneline <HEAD>..HEAD`，有輸出代表交接後又有新 commit，先回報交接檔可能過時。用 commit 比對，不比時間：別的 session 的 commit 可能記成 UTC，拿來和檔頭的本地時間比會漏判。
 `full` 格式下，有 `<同一根目錄>/progress/<session id>/INDEX.md` 的話，會一起交給 fork 參考。
 
 ## 待接手（handoff-pickup）
@@ -116,7 +118,7 @@ git repo：`<git-common-dir>/harness/handoff/`；非 git：`~/.claude/harness/<�
 | 什麼時候 | 會發生什麼 |
 |---|---|
 | 新對話開場（啟動時對話還沒有任何訊息；`--resume` 接回的舊對話不算），或你手動 `/clear` 之後 | 找交接檔資料夾裡還沒人接手的交接檔，列最新一份；其他還沒接手的份數標在 `+N` |
-| 提示框是空的時候按 1（或點按鈕） | 送出「Read <完整路徑> and continue from it; check the git state and the next step before acting.」（`full` 格式的檔案送中文版「讀 <完整路徑> 並依其接續執行；先確認 git 狀態與下一步再動手。」），這份記為已接手 |
+| 提示框是空的時候按 1（或點按鈕） | 送出「Read <完整路徑> and continue from it; check the git state and the next step before acting.」，後面再接一句：檔頭有 head 行時，`git log --oneline <head>..HEAD` 有輸出就先回報交接檔可能過時（`full` 格式的檔案送中文版），這份記為已接手 |
 | 主對話開始新回合（你送出訊息、按接續、排程） | 這行收掉 |
 
 - 「已接手」記在 `<交接檔資料夾>/.picked/<交接檔檔名>`（空檔），交接檔本身不動。點開頭的資料夾，handoff skill 用 `ls -t` 找最新交接檔時看不到它。

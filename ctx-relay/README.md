@@ -208,6 +208,11 @@ In a git repo: `<git-common-dir>/harness/handoff/`; outside git:
 File name: `<timestamp>-<slug>-<first 8 chars of the source session id>-<batch number>.md`,
 so two batches in the same second, or two sessions sharing one
 git-common-dir, never overwrite each other.
+The header records HEAD at handoff time (`git rev-parse --short HEAD`). The
+resume message tells the new session to run `git log --oneline <HEAD>..HEAD`;
+any output means commits landed after the handoff, so it reports the file may
+be stale first. It compares commits, not times: another session's commits can
+be recorded in UTC and would be missed against the header's local timestamp.
 In the `full` format, if `<same root>/progress/<session id>/INDEX.md` exists,
 it is passed to the fork as well.
 
@@ -222,7 +227,7 @@ follows.
 | When | What happens |
 | --- | --- |
 | A new conversation starts (no messages yet at startup; an old conversation reopened with `--resume` does not count), or after you run `/clear` yourself | Look for handoff files in the handoff folder that nobody has picked up, and show the newest; the count of the others goes in `+N` |
-| Press 1 while the prompt is empty (or click the button) | Sends "Read <full path> and continue from it; check the git state and the next step before acting." (the Chinese version of that sentence for a `full` file), and marks this file as picked up |
+| Press 1 while the prompt is empty (or click the button) | Sends "Read <full path> and continue from it; check the git state and the next step before acting.", followed by: if the header has a head line, `git log --oneline <head>..HEAD` printing any commit means the file may be stale, so say so first (the Chinese version for a `full` file), and marks this file as picked up |
 | The main conversation starts a new turn (you send a message, press resume, a schedule fires) | The line goes away |
 
 - "Picked up" is recorded as `<handoff folder>/.picked/<handoff file name>`
