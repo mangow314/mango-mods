@@ -23,7 +23,11 @@ one directory per plugin.
 
 ## sitrep
 
-<!-- Recording pending: docs/assets/sitrep.gif (reply ends → outcome box → press a to answer) -->
+![sitrep: a reply ends, the outcome box folds the changes and checks into one line each, and the question is answered from the row above the prompt](docs/assets/sitrep.gif)
+
+*Claude edits a file, runs it, and asks a question. The box folds 變更 (changes)
+and 驗證 (checks) into one line each; `Ctrl+X Tab` focuses the row above the
+prompt and `a` puts the answer in the prompt box (nothing is sent).*
 
 Each reply ends with a small ` ```ui-summary ` block the mod asks for in the
 system prompt; the mod hides it and draws the box from it. Details:
@@ -31,11 +35,12 @@ system prompt; the mod hides it and draws the box from it. Details:
 
 ## ctx-relay
 
-![ctx-relay band: icon, capsule progress bar, tokens, cost, cache countdown](docs/assets/ctx-relay-band.png)
+![ctx-relay band with the sitrep row under it: a yellow ghost, the capsule bar at 79% with a highlight sweeping across it, tokens, cost and cache countdown](docs/assets/bands.gif)
 
-The bar fills toward the handoff line and changes color as it gets close; the
-right side shows this turn's growth, cost and how long the prompt cache stays
-warm.
+The bar fills toward the handoff line and changes color as it gets close (here
+79%, yellow); a highlight sweeps across it while the prompt cache is warm. The
+right side shows this turn's growth, cost and how long the cache stays warm.
+Under it, sitrep's row with the open question.
 
 ![ctx-relay pickup line: an unclaimed handoff file, press 1 to resume](docs/assets/ctx-relay-pickup.png)
 

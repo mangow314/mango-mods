@@ -16,15 +16,17 @@
 
 ## sitrep
 
-<!-- 錄影待補：docs/assets/sitrep.gif（回覆結束 → 結論框 → 按 a 選答） -->
+![sitrep：回覆結束，結論框把變更、驗證各收成一行，提示框上方那列選答](docs/assets/sitrep.gif)
+
+*Claude 改檔、跑一次，然後問一題。結論框把「變更」「驗證」各收成一行；`Ctrl+X Tab` 聚焦提示框上方那列，按 `a` 把答案填進提示框（不會送出）。*
 
 mod 在系統提示裡請模型在回覆末尾附一個小小的 ` ```ui-summary ` 區塊，畫面上把它藏起來，改畫成結論框。細節見 [sitrep/README.zh-TW.md](sitrep/README.zh-TW.md)。
 
 ## ctx-relay
 
-![ctx-relay band：圖示、膠囊進度條、token、費用、快取倒數](docs/assets/ctx-relay-band.png)
+![ctx-relay band 和下面的 sitrep 待決列：黃色小幽靈、79% 的膠囊進度條上有掃光、token、費用、快取倒數](docs/assets/bands.gif)
 
-進度條往交接線填滿，越接近越變色；右邊是本輪增量、花費，和 prompt cache 還熱多久。
+進度條往交接線填滿，越接近越變色（這裡 79%，黃色）；prompt cache 還熱時，掃光會在進度條上跑。右邊是本輪增量、花費，和 cache 還熱多久。下面一行是 sitrep 的待決列。
 
 ![ctx-relay 待接手：有一份還沒人接手的交接檔，按 1 接續](docs/assets/ctx-relay-pickup.png)
 

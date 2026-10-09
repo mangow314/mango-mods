@@ -46,7 +46,7 @@ install it from the marketplace with `claude plugin install sitrep@mango-mods`.
     (`▸ ✓ outcome  8s`); `▸` draws the full box again.
 - One row above the prompt: while questions are unanswered it reads
   `? N 題待決` with the first open question's number and options; focus the
-  row and press an option's letter (`a`, `b`…), which fills the prompt box
+  row (`Ctrl+X`, then `Tab`) and press an option's letter (`a`, `b`…), which fills the prompt box
   the same way. With no questions but something for you to do, it reads
   `等你動手：…` (suggestions in a done reply do not count). The row steps aside for a survey, stacks under other mods'
   rows (ctx-relay), and goes away once a newer reply has neither.
