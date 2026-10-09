@@ -344,6 +344,8 @@ test('越過交接線：倒數 60 秒後 fork 一次、寫交接檔（檔名帶�
   expect(w.submitted[0]).toContain('不算完成')
   expect(w.submitted[0]).toContain('已越過自動交接線')
   expect(w.submitted[0]).toContain('先回報「交接檔可能過時」')
+  // %ci 帶提交者時區（可能是 UTC），和檔頭的本地時間戳比會漏判
+  expect(w.submitted[0]).toContain('--date=format-local:%Y%m%d-%H%M%S')
   expect(content).toContain('由 ctx-relay mod 自動交接')
   await clock.advance(120_000)
   expect(w.cleared).toBe(1)
@@ -378,6 +380,8 @@ test('預設 lite：fork 指示英文、照對話語言寫；交接檔四欄英�
   expect(w.submitted[0]).toContain(`Read ${path} and continue the task \`demo-task\``)
   expect(w.submitted[0]).toContain('wait for the user')
   expect(w.submitted[0]).toContain('the handoff file may be stale')
+  // %ci 帶提交者時區（可能是 UTC），和檔頭的本地時間戳比會漏判
+  expect(w.submitted[0]).toContain('--date=format-local:%Y%m%d-%H%M%S')
   const ui = await $.ui.mount({
     plugin: 'ctx-relay',
     surface: 'terminal',
