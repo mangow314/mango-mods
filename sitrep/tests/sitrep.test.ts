@@ -529,3 +529,70 @@ test('prompt 上方：全部答完、或新的結論框沒有題目時，那列�
   await finish($, '沒附區塊的回合')
   expect(await texts(await above($))).not.toContain('等你決定')
 })
+
+// 子代理 pane：假引擎啟動子代理 a1，每次請求回固定用量
+function agentWorld(on: On) {
+  on('agent.spawn', () => ({ model: 'claude-sonnet-5-5', agentId: 'a1' }))
+  on('turn.step', async function* () {
+    return { turnId: 's', index: 0, answer: '', toolUses: [], stopReason: 'end_turn' as const, usage: { model: 'claude-sonnet-5-5', input_tokens: 2_000, cache_read_input_tokens: 30_000, cache_creation_input_tokens: 0, output_tokens: 1_500 } }
+  })
+}
+
+const SPAWN = { tool_use_id: 'tu1', prompt: '讀 README', description: '讀 README', subagentType: 'Explore', provider: { plugin: 'engine', tier: 'core' as const }, parentModel: 'claude-opus-5-5', background: true, fork: false }
+
+async function agentsPane($: Engine) {
+  return $.ui.mount({
+    plugin: 'sitrep',
+    surface: 'terminal',
+    component: 'Pane',
+    requestId: 'sitrep-agents',
+    props: { title: '子代理', isFocused: false, bodyColumns: 60, placement: 'dock' as const, scroll: { offset: 0, bodyRows: 40 }, view: {} },
+  })
+}
+
+async function step($: Engine, agentId: string) {
+  for await (const _ of $.turn.step({ turnId: 's', index: 0, model: 'claude-sonnet-5-5', effort: 'medium', messageCount: 1, agentId })) void _
+}
+
+test('/agents-info：啟動就列進行中＋model，每次請求更新 ctx 與輸出，跑完移到已結束', async ($, on) => {
+  const clock = mock.clock(on)
+  world(on)
+  const p = paneWorld(on)
+  agentWorld(on)
+  await $.command.run({ command: 'agents-info', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 160 } })
+  expect(p.opens).toEqual(['sitrep-agents'])
+  await $.agent.spawn(SPAWN)
+  const ui = await agentsPane($)
+  expect(await texts(ui)).toContain('進行中')
+  expect(await texts(ui)).toContain('sonnet-5-5')
+  await step($, 'a1')
+  await step($, 'a1')
+  await clock.advance(3_000)
+  await ui.redraw()
+  const live = await texts(ui)
+  expect(live).toContain('ctx 34k')
+  expect(live).toContain('2 次請求')
+  expect(live).toContain('輸出 3.0k')
+  expect(live).toContain('medium')
+  expect(live).toContain('3s')
+  await $.turn.complete({ answer: '摘要', durationMs: 9_000, isAborted: false, turnId: 't2', reason: 'answer', agentId: 'a1' })
+  await ui.redraw()
+  const done = await texts(ui)
+  expect(done).toContain('已結束')
+  expect(done).toContain('✓')
+  expect(done).toContain('9s')
+  expect(done).toContain('進行中 0')
+  await $.command.run({ command: 'agents-info', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 160 } })
+  expect(p.closes).toEqual(['sitrep-agents'])
+})
+
+test('agent.spawn 先記下的子代理，這一輪結束時一樣掛到結論框', async ($, on) => {
+  mock.clock(on)
+  world(on)
+  agentWorld(on)
+  on('agent.list', () => ({ value: [{ id: 'a1', description: '讀 README', type: 'Explore', status: 'running' as const }] }))
+  await $.agent.spawn(SPAWN)
+  await $.turn.complete({ answer: REPLY, durationMs: 6_000, isAborted: false, turnId: 't1', reason: 'answer' })
+  const ui = await message($, REPLY)
+  expect(await texts(ui)).toMatch(/Explore   讀 README   執行中/)
+})

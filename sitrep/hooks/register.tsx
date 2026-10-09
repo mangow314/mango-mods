@@ -15,6 +15,7 @@ import type { AgentNote, ChangeNote, Evidence, Facet, Item, Summary, SummaryTask
 // 6. 背景工作結束的通知列開頭換成狀態符號（✓ 完成、! 失敗、– 中止）；那一輪派出的背景子代理也列在結論框裡，跑完自動更新。
 // 7. 回覆裡的 ASCII 圖（含框線字元或箭頭的程式碼區塊）畫在灰底區塊、上方一行灰字「圖」，不被大量文字蓋過。
 // 8. 回覆裡的 ```dot 區塊照 7 畫原文，標籤附粗算的節點與邊數。
+// 9. /agents-info 開關子代理 pane：每個子代理一啟動就記下（agent.spawn），每次模型請求更新 model、effort、context、輸出 token（turn.step）。
 
 const TAG = 'sitrep'
 // 圍欄要在行首：正文裡行內提到 ` ```ui-summary ` 不算（實機：行內那個被當成開頭，把真的區塊吃掉，結論框讀不懂）
@@ -22,6 +23,7 @@ const FENCE_RE = /^```ui-summary[^\n]*\n([\s\S]*?)\n?^```[^\n]*\n?/gm
 const KEEP_TURNS = 50
 const KEEP_AGENTS = 50
 const PANE = 'sitrep'
+const AGENTS_PANE = 'sitrep-agents'
 // 子代理在跑時的重畫計時器（模組層，同一時間只開一個）：每 250ms 一幀，轉圈字形與已跑時間跟著走
 let tick: Timer | null = null
 let frame = 0
@@ -93,6 +95,61 @@ export const register: Register = on => {
     } catch (err) {
       $.ui.log(`${TAG} 註冊 /sitrep-pane 失敗：${String(err)}`)
     }
+    try {
+      await $.command.register({ name: 'agents-info', description: 'sitrep：開關子代理 pane（進行中、已結束，含 model、context、輸出 token、耗時）' })
+    } catch (err) {
+      $.ui.log(`${TAG} 註冊 /agents-info 失敗：${String(err)}`)
+    }
+    return result
+  })
+
+  // 子代理 pane 也只手動開關
+  on('command.run', { command: 'agents-info' }, async $ => {
+    if ((await $.ui.panes()).some(p => p.id === AGENTS_PANE)) {
+      await $.ui.close({ id: AGENTS_PANE })
+      return { text: `${TAG}：已關閉子代理 pane（/agents-info 可再打開）` }
+    }
+    await $.ui.open({ id: AGENTS_PANE, title: '子代理', columns: 60 })
+    return { text: `${TAG}：已打開子代理 pane（再打一次 /agents-info 關閉）` }
+  })
+
+  // 子代理一啟動就記下：開始時間與 model 是真的。主對話派的等這一輪結束由 trackAgents 補上結論框；
+  // 子代理再派的、workflow 的不屬於任何結論框（card ''），只在 pane 列出。寫 state 失敗不能擋住子代理啟動
+  on('agent.spawn', async ($, e, next) => {
+    const started = await next(e)
+    if (started.deny !== undefined || !started.agentId) return started
+    const id = started.agentId
+    try {
+      const at = await $.clock.now()
+      const nested = e.parentAgentId !== undefined || e.workflow !== undefined
+      const note: AgentNote = { id, type: e.subagentType, description: e.description, status: 'running', startedAt: at, model: started.model, ...(nested ? { card: '' } : {}) }
+      await update($, agentsAtom, list => [...list.filter(a => a.id !== id), note].slice(-KEEP_AGENTS))
+      startTick($)
+    } catch (err) {
+      $.ui.log(`${TAG} 記錄子代理啟動失敗：${String(err)}`)
+    }
+    return started
+  }).catch(($, e, next) => next(e)) // 這個 hook 本身出錯也照常啟動子代理（next 已呼叫過就回放那次結果，不會啟動兩次）
+
+  // 子代理每次模型請求：model、effort、這次請求的 context（輸入＋快取＋輸出）、累計輸出 token、請求次數
+  on('turn.step', async function* ($, e, next) {
+    const result = yield* next(e)
+    const id = e.agentId
+    const usage = result.usage
+    if (!id || !usage) return result
+    try {
+      const context = usage.input_tokens + usage.cache_read_input_tokens + usage.cache_creation_input_tokens + usage.output_tokens
+      await update($, agentsAtom, list => list.map(a => (a.id !== id ? a : {
+        ...a,
+        model: usage.model || a.model,
+        effort: e.effort ?? a.effort,
+        context,
+        output: (a.output ?? 0) + usage.output_tokens,
+        steps: (a.steps ?? 0) + 1,
+      })))
+    } catch (err) {
+      $.ui.log(`${TAG} 記錄子代理用量失敗：${String(err)}`)
+    }
     return result
   })
 
@@ -155,18 +212,7 @@ export const register: Register = on => {
     const found = findSummary(e.answer)
     await trackAgents($, found?.id)
     // 有子代理在跑時每 250ms 重畫一次：轉圈字形和已跑時間證明它還活著（使用者 2026-10-08 選轉圈）；都跑完就停
-    if (!tick && (await read($, agentsAtom)).some(a => !(a.status in TASK_MARKS))) {
-      tick = $.clock.every(250, () => {
-        void read($, agentsAtom).then(list => {
-          if (list.some(a => !(a.status in TASK_MARKS))) {
-            frame++
-            return $.ui.invalidate('ui.render')
-          }
-          tick?.cancel()
-          tick = null
-        })
-      })
-    }
+    if ((await read($, agentsAtom)).some(a => !(a.status in TASK_MARKS))) startTick($)
     const note: TurnNote = found?.summary
       ? { id: found.id, durationMs: e.durationMs, glyph: glyphOf(found.summary), outcome: found.summary.outcome }
       : { durationMs: e.durationMs, glyph: '–', outcome: '本輪結束（無摘要）' }
@@ -260,6 +306,7 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
+    if (e.requestId === AGENTS_PANE) return drawAgents($, e, e.props.bodyColumns)
     if (e.requestId !== PANE) return next(e)
     return drawPane($, e, e.props.bodyColumns)
   })
@@ -618,7 +665,8 @@ async function trackAgents($: EngineInterface, card: string | undefined) {
       const at = out.findIndex(n => n.id === a.id)
       const known = out[at]
       if (known) {
-        if (!(known.status in TASK_MARKS)) out[at] = { ...known, status: a.status }
+        // agent.spawn 先記下的還沒有結論框：補上這一輪的
+        out[at] = { ...known, ...(known.status in TASK_MARKS ? {} : { status: a.status }), ...(known.card === undefined ? { card: card ?? '' } : {}) }
       } else {
         // 第一次看到＝這一輪派的（之前每輪都記過）；子代理可能在這輪結束前就跑完（實機），所以不限還在跑的。
         // 沒有結論框的回合記成 card ''，只為了之後不再被算到別張框
@@ -627,6 +675,89 @@ async function trackAgents($: EngineInterface, card: string | undefined) {
     }
     return out.slice(-KEEP_AGENTS)
   })
+}
+
+// 有子代理在跑時每 250ms 重畫一次：轉圈字形和已跑時間證明它還活著（使用者 2026-10-08 選轉圈）；都跑完就停
+function startTick($: EngineInterface) {
+  if (tick) return
+  tick = $.clock.every(250, () => {
+    void read($, agentsAtom).then(list => {
+      if (list.some(a => !(a.status in TASK_MARKS))) {
+        frame++
+        return $.ui.invalidate('ui.render')
+      }
+      tick?.cancel()
+      tick = null
+    })
+  })
+}
+
+// /agents-info 的 pane：最上一行總數，下面分進行中、已結束（最近 10 個）；每個子代理兩行：
+// 狀態符號（跑的時候轉圈）、類型、描述、耗時；灰字 model · effort · ctx · 請求次數 · 輸出 token。
+// 2026-10-09 試過像素螃蟹（Raster），9×2 格太大、5×1 格看不出形狀，使用者選回轉圈
+async function drawAgents($: EngineInterface, e: RenderEvent, width: number) {
+  const { Box, Text } = $.ui.resolve(e)
+  const list = await read($, agentsAtom)
+  if (list.length === 0) return <Text color={DIM}>{'這個 session 還沒派過子代理'}</Text>
+  const now = await $.clock.now().catch(() => null)
+  const running = list.filter(a => !(a.status in TASK_MARKS)).reverse()
+  const ended = list.filter(a => a.status in TASK_MARKS).reverse()
+  const output = list.reduce((n, a) => n + (a.output ?? 0), 0)
+  const row = (a: AgentNote) => {
+    const mark = TASK_MARKS[a.status] ?? { glyph: spin(), color: BLUE }
+    const time = a.status in TASK_MARKS
+      ? (a.durationMs !== undefined ? duration(a.durationMs) : '')
+      : now !== null && a.startedAt !== undefined ? duration(now - a.startedAt) : ''
+    const detail = [
+      a.model ? shortModel(a.model) : '',
+      a.effort !== undefined ? String(a.effort) : '',
+      a.context !== undefined ? `ctx ${tokens(a.context)}` : '',
+      a.steps ? `${a.steps} 次請求` : '',
+      a.output ? `輸出 ${tokens(a.output)}` : '',
+    ].filter(x => x !== '').join(' · ')
+    return (
+      <Box key={`ag-${a.id}`} flexDirection="column">
+        <Box flexDirection="row">
+          <Text color={mark.color} bold>{`${mark.glyph} `}</Text>
+          <Text color={SOFT}>{`${a.type}  `}</Text>
+          <Text>{clip(a.description, Math.max(10, width - a.type.length - 12))}</Text>
+          <Box flexGrow={1} />
+          <Text color={DIM}>{time}</Text>
+        </Box>
+        {detail !== '' ? <Text color={DIM}>{`  ${clip(detail, width - 2)}`}</Text> : null}
+      </Box>
+    )
+  }
+  return (
+    <Box flexDirection="column">
+      <Text color={SOFT}>{`共 ${list.length} 個 · 進行中 ${running.length} · 輸出 ${tokens(output)}`}</Text>
+      {running.length > 0 ? (
+        <Box key="running" flexDirection="column" marginTop={1}>
+          <Text color={BLUE}>{'進行中'}</Text>
+          {running.map(row)}
+        </Box>
+      ) : null}
+      {ended.length > 0 ? (
+        <Box key="ended" flexDirection="column" marginTop={1}>
+          <Text color={DIM}>{'已結束'}</Text>
+          {ended.slice(0, 10).map(row)}
+          {ended.length > 10 ? <Text key="more" color={DIM}>{`…還有 ${ended.length - 10} 個`}</Text> : null}
+        </Box>
+      ) : null}
+    </Box>
+  )
+}
+
+// claude-opus-5-5 → opus-5-5；拿掉日期尾巴和 [1m] 這類標記
+function shortModel(id: string): string {
+  return id.replace(/^claude-/, '').replace(/\[.*\]$/, '').replace(/-\d{8}$/, '')
+}
+
+// token 數：1234 → 1.2k、42000 → 42k、1500000 → 1.5M
+function tokens(n: number): string {
+  if (n < 1000) return String(n)
+  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`
+  return `${(n / 1_000_000).toFixed(1)}M`
 }
 
 // 結論框裡這一輪派出去的背景子代理：轉圈＋執行中 已跑時間；跑完照通知列的符號（✓ 完成、! 失敗、– 中止）

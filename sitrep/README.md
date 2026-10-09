@@ -74,6 +74,14 @@ install it from the marketplace with `claude plugin install sitrep@mango-mods`.
   written for the model; for a turn that dispatched background subagents,
   the engine's "Waiting for N background agents" line is not drawn (the box
   already lists them).
+- A subagent pane: `/agents-info` opens or closes it; it never opens by
+  itself. A top line with the count, running count and total output tokens,
+  then "running" and "ended" (latest 10). Each subagent gets two rows: status
+  glyph (spinning while it runs), type, description and run time; then in
+  grey its model, effort, context of its latest request, request count and
+  output tokens. It lists every subagent, including ones a subagent or a
+  workflow started. No cost or context percentage: the engine gives no
+  per-model window or price.
 - An ASCII figure in a reply (a code block with no language, or `text`,
   holding box-drawing characters, arrows, or plain-ASCII `+--` / `|--`)
   is drawn on a gray background under a dim `圖` ("figure") label, so it stands out from the text around it.
@@ -108,6 +116,9 @@ claude --plugin-dir ~/projects/mango-mods/sitrep
   the body at once, so the body still shifts up once.
 - The system-prompt section may also reach subagents; a block inside a
   subagent report is removed from its collapsed row.
+- `/agents-info` records a subagent when `agent.spawn` returns an id; a
+  workflow's remote agent has none and is not listed. A subagent whose
+  `turn.complete` never arrives keeps spinning until the session ends.
 - In focus mode (`/focus`) the engine hides background-task notification
   rows, so their status glyph is not shown there.
 

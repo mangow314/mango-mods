@@ -7,8 +7,12 @@ export type SummaryTask = { text: string; done: boolean }
 export type Summary = { status?: 'done' | 'blocked' | 'partial'; outcome: string; items: Item[]; facets: Facet[]; tasks?: SummaryTask[] }
 // 一輪結束時記下的結論：TurnDuration 那列沒有輪次編號，只能用耗時對回來
 export type TurnNote = { id?: string; durationMs: number; glyph: string; outcome: string }
-// 主對話派出的背景子代理：記在派它那一輪的結論框（card＝ui-summary id）下
-export type AgentNote = { id: string; type: string; description: string; status: string; card: string; durationMs?: number; startedAt?: number }
+// 子代理：主對話派的記在派它那一輪的結論框（card＝ui-summary id）下；card 還沒有＝剛啟動、這一輪還沒結束（''＝不屬於任何框）
+// model／effort／context（最近一次請求的 context）／output（累計輸出 token）／steps（模型請求次數）給 /agents-info 用
+export type AgentNote = {
+  id: string; type: string; description: string; status: string; card?: string; durationMs?: number; startedAt?: number
+  model?: string; effort?: string | number; context?: number; output?: number; steps?: number
+}
 // 還沒 commit 的改動（git diff HEAD --numstat）：repo 內路徑、絕對路徑（跟 touched 比）、增刪行數
 export type ChangeNote = { path: string; abs: string; add: number; del: number }
 // classic.TaskCreated／TaskCompleted 記下的任務
