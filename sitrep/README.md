@@ -13,7 +13,10 @@ and is not in the marketplace yet.
 - Appends a section to the system prompt asking the model to end the reply
   that hands control back to you with a ` ```ui-summary ` block: one line of
   JSON with a one-sentence outcome, the decisions waiting on you with their
-  options, and the sections that can be collapsed.
+  options, and the sections that can be collapsed. A decision from an earlier
+  reply that you left unanswered (you asked about something else instead) is
+  listed again while it still applies; the model may not settle it with a
+  default on its own.
 - Hides that block when the reply is drawn and puts a rounded outcome box
   under the body, styled like your-turn's:
   - The title sits on the top border: the status (`? 等你決定` decisions waiting,

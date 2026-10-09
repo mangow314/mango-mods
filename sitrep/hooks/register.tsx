@@ -58,6 +58,7 @@ const SECTION = [
   'sitrep：當你結束這一輪、把話交還給使用者時，在那則回覆的最末尾附一個 ```ui-summary 程式碼區塊，內容是一行 JSON：',
   '{"status":"done|blocked|partial","outcome":"一句話結果，40 字內","items":[...],"facets":[...],"tasks":[...]}',
   '- items 每項 {"kind":"decision|user-next|agent-next","text":"…","options":[{"key":"A","label":"12 字內"}],"recommended":"A"}。只有真的要使用者選擇才是 decision，並附 options；要使用者親手做的事是 user-next；你接著會做的是 agent-next。沒有就給空陣列。',
+  '- 前幾輪問過、使用者還沒回答的 decision（使用者後來改問別的事，沒選選項也沒在文字裡回答），只要還適用，就在這一輪的 items 照原題目與選項再列一次；不要自己套預設答案就略過。已經不適用的，在正文用一句話說明再拿掉。',
   '- facets 每項 {"label":"變更","summary":"30 字內","heading":"回覆裡那一段標題的原文"}，只列回覆裡確實有、適合預設收合的段落（例如變更、驗證、殘留風險）。',
   '- tasks 只在多步驟的工作才給（否則省略）：整件事的步驟依序列出，每項 {"text":"20 字內","done":true|false}，最多 7 項，已做完的標 done。',
   '- 這個區塊只給介面讀，使用者看不到。正文照常寫完整，不要在正文提到它。工具呼叫之間的訊息不附。',
