@@ -353,7 +353,7 @@ test('預設 lite：fork 指示英文、照對話語言寫；交接檔四欄英�
   const clock = mock.clock(on)
   on('ui.open', () => ({ value: { isPlaced: true as const } }))
   const w = world($, on, {
-    forkText: ['SLUG: demo-task', '=== GOAL ===', 'ship the demo', '=== FILES ===', 'a.ts', '=== VERIFIED ===', '- verified: unit tests pass', '- gap: e2e not run', '=== NEXT ===', '- run e2e'].join('\n'),
+    forkText: ['SLUG: demo-task', '=== GOAL ===', 'ship the demo', '=== FILES ===', 'a.ts', '=== VERIFIED ===', '- Verified: unit tests pass', '- Gap: e2e not run', '=== NEXT ===', '- run e2e'].join('\n'),
   })
   w.files.set(`${ROOT}/progress/sid-1/INDEX.md`, '# 私人進度\nphase: 2')
   await start($)
@@ -362,6 +362,9 @@ test('預設 lite：fork 指示英文、照對話語言寫；交接檔四欄英�
   await clock.settle()
   expect(w.forkPrompts[0]).toContain('in the language of this conversation')
   expect(w.forkPrompts[0]).not.toContain('CONSTRAINTS')
+  // notes pane 靠這兩個前綴分出已驗證與缺口
+  expect(w.forkPrompts[0]).toContain('`Verified:`')
+  expect(w.forkPrompts[0]).toContain('`Gap:`')
   expect(w.forkPrompts[0]).not.toContain('私人進度')
   const [path, content] = handoffFiles(w)[0] ?? ['', '']
   expect(content.startsWith(`Read ${path} and continue from it;`)).toBe(true)

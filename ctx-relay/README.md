@@ -270,8 +270,9 @@ follows.
     a newline, then "do B and install the new mod". Only a first word of `yes`
     counts as confirmation; the rest is the instruction. Without background
     work, `yes` is not needed and all the arguments are the instruction.
-  - The instruction is passed verbatim to the fork for writing the "goal +
-    latest instruction" and "next step" fields, and written verbatim into the
+  - The instruction is passed verbatim to the fork for writing the goal and
+    next-step fields (Goal / Next; in `full`, "goal + latest instruction" and
+    "next step"), and written verbatim into the
     handoff file header and the resume message (each line prefixed with `> `,
     so a `## ` in the instruction never becomes a handoff file heading).
   - With an instruction attached, the resume message tells the new

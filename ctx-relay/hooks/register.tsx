@@ -1182,7 +1182,7 @@ function liteForkPrompt(x: { tokens: number; limits: Limits | null; git: Git; is
     'First line: `SLUG: <kebab-case English slug for the task>`. Then four sections in this order, each starting with its own line `=== KEY ===` (copy the key exactly, nothing else on that line), content from the next line, every section non-empty. The mod adds the headings; do not write `## ` headings yourself:',
     "- `=== GOAL ===`: the task in one sentence plus the user's latest intent (in the user's own words where possible)",
     '- `=== FILES ===`: files changed or about to change, per the git state below: path and what changed',
-    '- `=== VERIFIED ===`: what was checked (exact command and result) and what is still unchecked; never write a gap as done',
+    '- `=== VERIFIED ===`: one item per line, each starting with `Verified:` (what was checked: exact command and result) or `Gap:` (what is still unchecked); keep those two words in English; never write a gap as done',
     '- `=== NEXT ===`: the first concrete step for the new conversation',
     'Rules: where FILES conflicts with your memory of the conversation, git wins. git proves file and commit state, not that tests or checks ran: VERIFIED lists only results you saw in the conversation; everything else is a gap.',
     // 指令只在 /ctx-relay-now 的參數裡，fork 從對話記錄看不到
