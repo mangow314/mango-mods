@@ -876,7 +876,8 @@ async function gitTruth($: EngineInterface, cwd: string): Promise<Git | null> {
   const stat = await run(['diff', '--stat'])
   const log = await run(['log', '--oneline', '-6'])
   if (!status.ok || !stat.ok || !log.ok) return null
-  // 寫進檔頭，接手方用 git log <head>..HEAD 看交接後有沒有新 commit；還沒有 commit 的 repo 取不到，就不寫
+  // 寫進檔頭，接手方用 git log <head>..HEAD 看交接後有沒有新 commit。取不到就不寫
+  // （還沒有 commit 的 repo 走不到這裡：上面的 rev-parse --abbrev-ref 就會失敗，整次交接記失敗）
   const head = await run(['rev-parse', '--short', 'HEAD'])
   return { branch: branch.out, head: head.ok ? head.out : '', status: status.out, stat: stat.out, log: log.out }
 }
