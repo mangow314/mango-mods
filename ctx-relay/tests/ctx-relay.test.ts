@@ -343,6 +343,7 @@ test('越過交接線：倒數 60 秒後 fork 一次、寫交接檔（檔名帶�
   expect(w.submitted[0]).toContain(path)
   expect(w.submitted[0]).toContain('不算完成')
   expect(w.submitted[0]).toContain('已越過自動交接線')
+  expect(w.submitted[0]).toContain('先回報「交接檔可能過時」')
   expect(content).toContain('由 ctx-relay mod 自動交接')
   await clock.advance(120_000)
   expect(w.cleared).toBe(1)
@@ -376,6 +377,7 @@ test('預設 lite：fork 指示英文、照對話語言寫；交接檔四欄英�
   expect(w.cleared).toBe(1)
   expect(w.submitted[0]).toContain(`Read ${path} and continue the task \`demo-task\``)
   expect(w.submitted[0]).toContain('wait for the user')
+  expect(w.submitted[0]).toContain('the handoff file may be stale')
   const ui = await $.ui.mount({
     plugin: 'ctx-relay',
     surface: 'terminal',
@@ -415,6 +417,12 @@ test('fork 指示：git 只能修正檔案與 commit 狀態，「已驗證」只
   expect(w.forkPrompts[0]).toContain('git 只證明檔案與 commit 狀態，證明不了測試或檢查跑過')
   expect(w.forkPrompts[0]).toContain('「已驗證」只寫你在對話裡看過結果的項目，其餘列為缺口')
   expect(w.forkPrompts[0]).not.toContain('「已驗證 vs 驗證缺口」與你的對話記憶矛盾時以 git 真相為準')
+  // notes pane 靠這兩個前綴分出已驗證與缺口（同精簡版）
+  expect(w.forkPrompts[0]).toContain('`Verified:`')
+  expect(w.forkPrompts[0]).toContain('`Gap:`')
+  expect(w.forkPrompts[0]).toContain('憑記憶寫的標「未核實」')
+  expect(w.forkPrompts[0]).toContain('暫存，可能失效')
+  expect(w.forkPrompts[0]).toContain('不寫「本檔取代前一份」')
   for (const key of ['GOAL', 'FILES', 'VERIFIED', 'DIRTY', 'NEXT', 'NOTES', 'CONSTRAINTS', 'POINTERS']) {
     expect(w.forkPrompts[0]).toContain(`\`=== ${key} ===\``)
   }
