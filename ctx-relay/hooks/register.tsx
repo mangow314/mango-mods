@@ -761,6 +761,8 @@ async function prepare($: EngineInterface, gen: number, isManual: boolean, note:
     // 協調契約由 mod 原樣附上，不經模型：fork 寫的 CONTRACT 分段與內文裡的「## 協調契約」段都丟掉
     const body = assemble(slots, contract, format)
     const thin = checkThin(body, format)
+    // 精簡版把不認得的分段併進 Next：Next 有沒有缺，看 fork 原本有沒有寫 NEXT，不看併完的結果
+    if (format === 'lite' && (slots.get('NEXT') ?? '').trim() === '' && !thin.includes('Next')) thin.push('Next')
     const stamp = formatStamp(await $.clock.now())
     const dir = `${root}/handoff`
     // 檔名帶來源 session 與批次編號：同一秒、同 slug 的兩批（或共用 git-common-dir 的兩個 session）不會互相覆寫
@@ -1178,11 +1180,11 @@ function liteForkPrompt(x: { tokens: number; limits: Limits | null; git: Git; is
     : `${x.limits ? `Context reached ${k(x.tokens)}, past the auto handoff line ${k(x.limits.handoff)} (compaction at ${k(x.limits.fuse)})` : 'Context is past the auto handoff line'}. The user is away; this handoff is unattended`
   return [
     `${TAG} ${line}. Write the handoff file for the new conversation that will pick up this work.`,
-    'Output only the file content: no tool calls, no greeting, no code fence around the whole thing. Write the content in the language of this conversation.',
+    'Output only the file content: no tool calls, no greeting, no code fence around the whole thing. Write the content in the language of this conversation, in the same script or regional variant (for example Traditional, not Simplified, Chinese when the conversation uses Traditional).',
     'First line: `SLUG: <kebab-case English slug for the task>`. Then four sections in this order, each starting with its own line `=== KEY ===` (copy the key exactly, nothing else on that line), content from the next line, every section non-empty. The mod adds the headings; do not write `## ` headings yourself:',
     "- `=== GOAL ===`: the task in one sentence plus the user's latest intent (in the user's own words where possible)",
     '- `=== FILES ===`: files changed or about to change, per the git state below: path and what changed',
-    '- `=== VERIFIED ===`: one item per line, each starting with `Verified:` (what was checked: exact command and result) or `Gap:` (what is still unchecked); keep those two words in English; never write a gap as done',
+    '- `=== VERIFIED ===`: one item per line, each starting with `Verified:` (what was checked: exact command and result) or `Gap:` (what is still unchecked); keep those two prefixes in English but write the rest of each line in the language of this conversation; never write a gap as done',
     '- `=== NEXT ===`: the first concrete step for the new conversation',
     'Rules: where FILES conflicts with your memory of the conversation, git wins. git proves file and commit state, not that tests or checks ran: VERIFIED lists only results you saw in the conversation; everything else is a gap.',
     // 指令只在 /ctx-relay-now 的參數裡，fork 從對話記錄看不到

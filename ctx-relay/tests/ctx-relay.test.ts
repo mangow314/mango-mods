@@ -390,6 +390,21 @@ test('預設 lite：fork 指示英文、照對話語言寫；交接檔四欄英�
   expect(text).toContain('ship the demo')
 })
 
+test('lite：fork 漏寫 NEXT 卻多寫了別的分段：內容照附在 Next，但檔頭仍記 thin: Next', async ($, on) => {
+  const clock = mock.clock(on)
+  on('ui.open', () => ({ value: { isPlaced: true as const } }))
+  const w = world($, on, {
+    forkText: ['SLUG: demo-task', '=== GOAL ===', 'ship', '=== FILES ===', 'a.ts', '=== VERIFIED ===', '- Gap: e2e', '=== NOTES ===', 'threshold 433840'].join('\n'),
+  })
+  await start($)
+  await turn($, w, 450_000)
+  await clock.advance(60_000)
+  await clock.settle()
+  const [, content] = handoffFiles(w)[0] ?? ['', '']
+  expect(content).toContain('- thin: Next')
+  expect(content).toContain('threshold 433840')
+})
+
 test('fork 指示：git 只能修正檔案與 commit 狀態，「已驗證」只寫看過結果的項目', { options: { handoffFormat: 'full' } }, async ($, on) => {
   const clock = mock.clock(on)
   const w = world($, on)
