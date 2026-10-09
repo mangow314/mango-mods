@@ -27,7 +27,9 @@ install it from the marketplace with `claude plugin install sitrep@mango-mods`.
     The status follows the one the model gave: a done or blocked reply stays
     green or red even with a `你要做` line; only a reply that stopped halfway
     to wait for you is `等你動手`. The border is a darker shade of the status color; only the two "waiting
-    on you" states are yellow. The box has a fixed width (terminal width
+    on you" states are yellow. All of sitrep's colors are Claude Code theme
+    names (`warning`, `error`, `success`, `inactive`…), so they follow your
+    `/theme`, light and daltonized included. The box has a fixed width (terminal width
     minus 4, at most 88 columns).
   - Then the one-sentence outcome in bold, and right under it `你要做`
     (what you have to do) in yellow.

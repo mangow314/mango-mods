@@ -215,7 +215,7 @@ test('背景工作通知列：完成灰 ✓、失敗紅 !，展開時照原樣',
   expect(await texts(done)).toContain('✓')
   expect(await texts(done)).toContain('54s')
   const failed = await row('failed')
-  expect((await failed.findAll({ type: 'Text' })).find(t => t.text === '! ')?.props.color).toBe('#e0745a')
+  expect((await failed.findAll({ type: 'Text' })).find(t => t.text === '! ')?.props.color).toBe('error')
   expect(await texts(await row('completed', true))).toContain('engine Agent')
 })
 

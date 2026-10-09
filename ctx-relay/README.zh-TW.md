@@ -63,6 +63,7 @@ echo '{"handoffTokens": "400000"}' | claude plugin configure ctx-relay@mango-mod
 6. `· <狀態>`：延後交接（附原因）、正在寫交接檔、失敗、已取消，或這段對話是從哪份交接檔接手的。
 
 - 只用前景色，沒有底色。
+- 文字顏色用 Claude Code 的主題色名稱（`text`、`inactive`、`warning`、`error`…），跟著你的 `/theme` 走，淺色、daltonized 都一樣。圖示和進度條維持上表的固定色：進度條是 `Raster`，只吃 RGB。
 - 不到 80 欄就拿掉進度條（圖示和數字保留）；還是放不下的部分從尾端截掉。
 - 倒數時整行換成 `󰚌 Handoff in 42s · at 400K · send a message to postpone`，旁邊是 `Cancel [1]` 按鈕。
 - 交接後（自動交接，或按待接手那行的 `Resume [1]`），狀態寫 `Resumed from <檔名> · next: <下一步欄的第一行> · /ctx-relay-notes`，自動交接還會跳一個 toast。你一打字，next 那段就收掉。

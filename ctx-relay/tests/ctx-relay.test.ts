@@ -1107,7 +1107,7 @@ test('圖示與膠囊進度條跟著 token÷交接線變：小怪獸綠 → 幽�
   // 越線後倒數：整列換成倒數列（骷髏朱紅）
   expect((await band($)).text).toContain('Handoff in')
   const countdown = await (await band($)).ui.findAll({ type: 'Text' })
-  expect(countdown[0]?.props.color).toBe('#D55E00')
+  expect(countdown[0]?.props.color).toBe('error')
 })
 
 test('動畫：每 250ms 一幀，掃光往右移、圖示每 2 幀明暗切換；快取冷了就停', async ($, on) => {

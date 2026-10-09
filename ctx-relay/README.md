@@ -113,6 +113,10 @@ One line, left to right:
    failed, cancelled, or which file this conversation resumed from.
 
 - Foreground colors only; no backgrounds.
+- Text colors use Claude Code theme names (`text`, `inactive`, `warning`,
+  `error`…), so they follow your `/theme`, light and daltonized included. The
+  icon and progress bar keep the fixed colors in the table above: the bar is a
+  `Raster`, which takes RGB only.
 - Below 80 columns the progress bar is dropped (the icon and numbers stay);
   whatever still does not fit is cut at the end.
 - During the countdown the whole line becomes

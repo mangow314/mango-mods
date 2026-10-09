@@ -62,12 +62,17 @@ const SINCE_KEY = 'pickupSince'
 const CONTRACT = '協調契約'
 const CONSTRAINT_KEYS = ['stop_status', 'unresolved_prerequisite', 'responsible_authority', 'admissible_fallback'] as const
 
-// dark-daltonized 主題下可分辨的三態：天藍＝正常、橘＝過出場提醒線、朱紅＝交接線／倒數／失敗
-const SKY = '#56B4E9'
+// band 文字用引擎的主題色名稱，跟著使用者的 Claude Code 主題（含淺色、daltonized）走：
+// 天藍＝正常、橘＝過出場提醒線、紅＝交接線／倒數／失敗
+const SKY = 'suggestion'
+const WARN = 'warning'
+const ERR = 'error'
+const OK = 'success'
+
+// 開頭圖示＋進度條的比例色維持 hex：Raster 只吃 RGB，圖示的呼吸要拿 RGB 調暗（mood、bar、breathe）。
+// 只用前景色（深色底在 tmux 256 色下會變刺眼的 #00005f）
 const ORANGE = '#E69F00'
 const VERMILION = '#D55E00'
-
-// band 樣式：只用前景色（深色底在 tmux 256 色下會變刺眼的 #00005f）。開頭一個圖示＋進度條，跟著離交接線的比例變色
 const GREEN = '#009E73'
 const YELLOW = '#F0E442'
 const BAR_CELLS = 10
@@ -84,10 +89,10 @@ const MOOD_GHOST = 0.7
 // 窄終端：<110 欄拿掉長條圖、<80 欄再拿掉進度條
 const WIDE_COLUMNS = 110
 const BAR_COLUMNS = 80
-const LABEL = '#7d8794'
-const VALUE = '#f5f7fa'
-const DOT = '#464e5a'
-// notes pane 自帶實心深底，不靠終端機透明背景；色值與對比（APCA Lc 為自算估值）見 scratchpad tui-ux/r3-color-ux.md。
+const LABEL = 'inactive'
+const VALUE = 'text'
+const DOT = 'subtle'
+// notes pane 自帶實心深底、整套自訂色，不跟主題（底和字一起換才不會在淺色主題下變黑底黑字）；色值與對比（APCA Lc 為自算估值）見 scratchpad tui-ux/r3-color-ux.md。
 // 深底上 Okabe-Ito 原色偏暗（Lc 33–56），pane 內改用自訂深底語意色；色盲靠符號（✓ ▲ ✗）＋文字區分。band 不動
 const N = {
   PANE: '#181818',
@@ -403,7 +408,7 @@ async function drawBand($: EngineInterface, e: RenderInput<'AbovePrompt'>): Prom
     // /clear 後還沒有讀數：送出失敗時新對話不會自己跑回合，這裡仍要畫出手動接續的指示
     if (lastHandoff?.error) {
       return (
-        <Text color={VERMILION} bold wrap="truncate-end">
+        <Text color={ERR} bold wrap="truncate-end">
           {` ${SKULL} ${TAG} ${clearedButFailed(lastHandoff)} `}
         </Text>
       )
@@ -420,7 +425,7 @@ async function drawBand($: EngineInterface, e: RenderInput<'AbovePrompt'>): Prom
     const left = Math.max(0, Math.ceil(((auto.deadline ?? now) - now) / 1000))
     return (
       <Box flexDirection="row">
-        <Text color={VERMILION} bold wrap="truncate-end">
+        <Text color={ERR} bold wrap="truncate-end">
           {` ${SKULL} Handoff in `}
           <Text color={VALUE}>{`${left}s`}</Text>
           <Text color={LABEL}>{` · at ${k(limits.handoff)} · send a message to postpone `}</Text>
@@ -432,14 +437,14 @@ async function drawBand($: EngineInterface, e: RenderInput<'AbovePrompt'>): Prom
 
   let status = ''
   let statusColor = LABEL
-  if (auto.phase === 'deferred') [status, statusColor] = [`Handoff deferred: ${auto.detail ?? ''}`, ORANGE]
-  if (auto.phase === 'preparing') [status, statusColor] = ['Writing handoff file…', VERMILION]
+  if (auto.phase === 'deferred') [status, statusColor] = [`Handoff deferred: ${auto.detail ?? ''}`, WARN]
+  if (auto.phase === 'preparing') [status, statusColor] = ['Writing handoff file…', ERR]
   if (auto.phase === 'done') status = auto.detail ?? ''
-  if (auto.phase === 'failed') [status, statusColor] = [`Auto handoff failed: ${auto.detail ?? ''}. Hand off manually`, VERMILION]
-  if (auto.phase === 'cancelled') [status, statusColor] = [`Auto handoff cancelled (${auto.detail ?? ''}; reminders only)`, ORANGE]
+  if (auto.phase === 'failed') [status, statusColor] = [`Auto handoff failed: ${auto.detail ?? ''}. Hand off manually`, ERR]
+  if (auto.phase === 'cancelled') [status, statusColor] = [`Auto handoff cancelled (${auto.detail ?? ''}; reminders only)`, WARN]
   if (auto.phase === 'idle' && lastHandoff) {
     ;[status, statusColor] = lastHandoff.error
-      ? [clearedButFailed(lastHandoff), VERMILION]
+      ? [clearedButFailed(lastHandoff), ERR]
       : [`Resumed from ${basename(lastHandoff.path)}${resumeNext === '' ? '' : ` · next: ${resumeNext}`} · /${NOTES}`, LABEL]
   }
 
@@ -492,12 +497,12 @@ async function drawPickup($: EngineInterface, e: RenderInput<'AbovePrompt'>): Pr
   const { Box, Button, Text } = $.ui.resolve(e)
   const now = await $.clock.now()
   const segments = [
-    <Text color={GREEN} bold>{` ${INVADER} `}</Text>,
+    <Text color={OK} bold>{` ${INVADER} `}</Text>,
     <Text color={LABEL}>{'Pending handoff: '}</Text>,
     <Text color={VALUE} bold>{p.name}</Text>,
     <Text color={LABEL}>{` (${ago(now - p.mtimeMs)}${p.from === '' ? '' : `, from ${p.from}`})`}</Text>,
   ]
-  if (p.more > 0) segments.push(<Text color={ORANGE} bold>{` +${p.more}`}</Text>)
+  if (p.more > 0) segments.push(<Text color={WARN} bold>{` +${p.more}`}</Text>)
   segments.push(<Text> </Text>)
   return (
     <Box flexDirection="row">
@@ -623,7 +628,7 @@ function cacheLabel(cache: Cache, now: number): [string, string] {
   const left = cacheLeft(cache, now)
   if (left <= 0) return [`${SNOW} cold`, SKY]
   const text = left < 60_000 ? `cache ${Math.ceil(left / 1000)}s` : `cache ${Math.floor(left / 60_000)}m`
-  return [text, left <= CACHE_SOON_MS ? ORANGE : LABEL]
+  return [text, left <= CACHE_SOON_MS ? WARN : LABEL]
 }
 
 async function afterStop($: EngineInterface) {

@@ -30,29 +30,30 @@ let tick: Timer | null = null
 let frame = 0
 const SPIN = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
 const spin = () => SPIN[frame % SPIN.length]
-// 顏色只給「需要你」：黃＝等你決定；紅＝卡住；其餘灰階（第三輪設計稿的安靜版）
-const YELLOW = '#F0E442'
-const RED = '#e0745a'
-const GREEN = '#3fc39a'
-const DIM = '#7d8794'
-const SOFT = '#9aa4b1'
-// ASCII 圖的灰底（比終端底色亮一階，跟 DIM 同系）
-const FIG_BG = '#2b3038'
-const BRIGHT = '#f5f7fa'
-// pane（設計稿駕駛艙版）：進行中的藍、需要你那塊的黃底、證據小標籤的框線
-const BLUE = '#56B4E9'
-const NEED_BG = '#29271a'
-const LINE = '#3a414c'
-// pane 選項的鍵帽底色：沒選的暗黃、選過的亮一階（比題目區塊的黃底明顯）
-// 每輪結論框（學 your-turn 的圓角框，標題嵌在上框線）：框線用暗一階的狀態色，標題用亮的；只有「等你決定」是黃
-const FRAMES: Record<string, { border: string; title: string; word: string }> = {
-  '?': { border: '#8a8128', title: YELLOW, word: '等你決定' },
-  '>': { border: '#8a8128', title: YELLOW, word: '等你動手' },
-  '!': { border: '#8a4a3c', title: RED, word: '卡住' },
-  '~': { border: '#3d5a72', title: '#56B4E9', word: '進行中' },
-  '✓': { border: '#3d5a4c', title: GREEN, word: '完成' },
+// 顏色只給「需要你」：黃＝等你決定；紅＝卡住；其餘灰階（第三輪設計稿的安靜版）。
+// 一律用引擎的主題色名稱，跟著使用者的 Claude Code 主題（含淺色、daltonized）走；深色主題預設值：
+// warning 琥珀、error 粉紅、success 綠（daltonized 是藍）、inactive 153 灰、subtle 80 灰、text 白
+const YELLOW = 'warning'
+const RED = 'error'
+const GREEN = 'success'
+const DIM = 'inactive'
+const SOFT = 'inactive'
+// ASCII 圖的灰底：用你的訊息底色（深色 55 灰、淺色 240 灰），淺色主題下字才看得到
+const FIG_BG = 'userMessageBackground'
+const BRIGHT = 'text'
+// pane（設計稿駕駛艙版）：進行中的藍、需要你那塊的底、證據小標籤的框線
+const BLUE = 'suggestion'
+const NEED_BG = 'userMessageBackground'
+const LINE = 'subtle'
+// 每輪結論框（學 your-turn 的圓角框，標題嵌在上框線）：框線是暗一階的狀態色（borderDimColor），標題用亮的；只有「等你決定」是黃
+const FRAMES: Record<string, { title: string; word: string }> = {
+  '?': { title: YELLOW, word: '等你決定' },
+  '>': { title: YELLOW, word: '等你動手' },
+  '!': { title: RED, word: '卡住' },
+  '~': { title: BLUE, word: '進行中' },
+  '✓': { title: GREEN, word: '完成' },
 }
-const DONE_FRAME = { border: '#3d5a4c', title: GREEN, word: '完成' }
+const DONE_FRAME = { title: GREEN, word: '完成' }
 const BOX_MAX = 88
 // TurnDuration 的耗時和 turn.complete 的不一定分毫不差（實測 13s 對得上、42s 對不上）：取差距最小、在這範圍內的那筆
 const MATCH_MS = 3000
@@ -435,7 +436,7 @@ export const register: Register = on => {
       <Box flexDirection="column">
         {body}
         <Box key="lens-wrap" flexDirection="column" marginTop={1} width={width}>
-          <Box key="lens" borderStyle="round" borderColor={frame.border} paddingX={1} flexDirection="column">
+          <Box key="lens" borderStyle="round" borderColor={frame.title} borderDimColor paddingX={1} flexDirection="column">
             {rows}
           </Box>
           <Box key="title" position="absolute" top={0} left={2} flexDirection="row">
