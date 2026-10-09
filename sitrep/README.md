@@ -16,7 +16,8 @@ and is not in the marketplace yet.
   options, and the sections that can be collapsed. A decision from an earlier
   reply that you left unanswered (you asked about something else instead) is
   listed again while it still applies; the model may not settle it with a
-  default on its own.
+  default on its own. The section is in English and asks for the block's
+  text in the language of the reply.
 - Hides that block when the reply is drawn and puts a rounded outcome box
   under the body, styled like your-turn's:
   - The title sits on the top border: the status (`? 等你決定` decisions waiting,

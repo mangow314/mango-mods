@@ -52,7 +52,9 @@ test('系統提示尾端加上 ui-summary 的說明（session 那側）', async 
   expect(sections[1]?.scope).toBe('session')
   expect(sections[1]?.text).toContain('```ui-summary')
   // 使用者改問別的事時，沒答的題目要模型重列：送出訊息會清空待決列，mod 自己分不出是不是回答了
-  expect(sections[1]?.text).toContain('使用者還沒回答的 decision')
+  expect(sections[1]?.text).toContain('that the user has not answered')
+  // 提示是英文，但結論框的文字要跟回覆同語言
+  expect(sections[1]?.text).toContain('in the language of your reply')
 })
 
 test('回覆：區塊藏起來、驗證段落收成一行、兩題畫進等你決定的框', async ($, on) => {

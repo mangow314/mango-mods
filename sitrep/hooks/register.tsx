@@ -55,14 +55,15 @@ const BOX_MAX = 88
 const MATCH_MS = 3000
 
 const SECTION = [
-  'sitrep：當你結束這一輪、把話交還給使用者時，在那則回覆的最末尾附一個 ```ui-summary 程式碼區塊，內容是一行 JSON：',
-  '{"status":"done|blocked|partial","outcome":"一句話結果，40 字內","items":[...],"facets":[...],"tasks":[...]}',
-  '- items 每項 {"kind":"decision|user-next|agent-next","text":"…","options":[{"key":"A","label":"12 字內"}],"recommended":"A"}。只有真的要使用者選擇才是 decision，並附 options；要使用者親手做的事是 user-next；你接著會做的是 agent-next。沒有就給空陣列。',
-  '- 前幾輪問過、使用者還沒回答的 decision（使用者後來改問別的事，沒選選項也沒在文字裡回答），只要還適用，就在這一輪的 items 照原題目與選項再列一次；不要自己套預設答案就略過。已經不適用的，在正文用一句話說明再拿掉。',
-  '- facets 每項 {"label":"變更","summary":"30 字內","heading":"回覆裡那一段標題的原文"}，只列回覆裡確實有、適合預設收合的段落（例如變更、驗證、殘留風險）。',
-  '- tasks 只在多步驟的工作才給（否則省略）：整件事的步驟依序列出，每項 {"text":"20 字內","done":true|false}，最多 7 項，已做完的標 done。',
-  '- 這個區塊只給介面讀，使用者看不到。正文照常寫完整，不要在正文提到它。工具呼叫之間的訊息不附。',
-  '- 被要求寫 recap、session 摘要或其他不是回覆使用者的文字時，也不附。',
+  'sitrep: when you end your turn and hand control back to the user, end that reply with a ```ui-summary code block holding one line of JSON:',
+  '{"status":"done|blocked|partial","outcome":"one-sentence result","items":[...],"facets":[...],"tasks":[...]}',
+  '- Write every text field in the language of your reply. Widths are in terminal columns, a CJK character counting as 2: outcome at most 80, option label 24, facet summary 60, task text 40.',
+  '- Each item is {"kind":"decision|user-next|agent-next","text":"…","options":[{"key":"A","label":"…"}],"recommended":"A"}. Use decision, with options, only when the user really has to choose; user-next is something the user must do by hand; agent-next is what you will do next. Use an empty array when there are none.',
+  '- A decision from an earlier reply that the user has not answered (they asked about something else instead, without picking an option or answering it in words) is listed again in this reply\'s items with its original question and options, as long as it still applies; never settle it with a default on your own. If it no longer applies, say so in one sentence in the body and drop it.',
+  '- Each facet is {"label":"…","summary":"…","heading":"the exact heading of that section in your reply"}. Add one for each section of your reply that holds details the user can expand when needed, such as changes, checks or verification, and remaining risks (label: a short name in your reply\'s language, e.g. 變更 or Changes). Only sections that really exist in the reply.',
+  '- tasks only for multi-step work (otherwise omit it): the steps of the whole job in order, each {"text":"…","done":true|false}, at most 7, finished ones marked done.',
+  '- The block is read by the interface only; the user never sees it. Write the body in full as usual and do not mention the block in it. Do not add it to messages between tool calls.',
+  '- Do not add it either when asked to write a recap, a session summary, or any other text that is not a reply to the user.',
 ].join('\n')
 
 const answersAtom = atom({ plugin: 'sitrep', key: 'answers' } as const, {} as Record<string, Record<number, string>>)
