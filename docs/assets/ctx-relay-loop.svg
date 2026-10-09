@@ -1,0 +1,123 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="380" viewBox="0 0 900 380" role="img" aria-label="ctx-relay loop: context grows turn by turn until the bar reaches the handoff line; the mod writes a handoff file with Goal, Files, Verified and Next; runs /clear; and the fresh conversation reads the file and continues. Loops every 10 seconds.">
+  <!-- 10 秒一輪：0–35% context 長、35–45% 倒數、45–55% 寫交接檔、55–60% /clear、60–95% 新對話接續、95–100% 淡出重來 -->
+  <style>
+    text { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .t { animation-duration: 10s; animation-iteration-count: infinite; animation-timing-function: linear; }
+    .dim { fill: #8b949e; font-size: 12px; }
+    .txt { fill: #c9d1d9; font-size: 13px; }
+    .head { fill: #e6edf3; font-size: 13px; font-weight: 700; }
+    .user { fill: #30363d; }
+    .bot { fill: #21262d; }
+
+    /* 對話列：依序出現，/clear 時一起消失 */
+    .l1 { animation-name: l1; } @keyframes l1 { 0%,4% { opacity: 0 } 6%,55% { opacity: 1 } 59%,100% { opacity: 0 } }
+    .l2 { animation-name: l2; } @keyframes l2 { 0%,11% { opacity: 0 } 13%,55% { opacity: 1 } 59%,100% { opacity: 0 } }
+    .l3 { animation-name: l3; } @keyframes l3 { 0%,18% { opacity: 0 } 20%,55% { opacity: 1 } 59%,100% { opacity: 0 } }
+    .l4 { animation-name: l4; } @keyframes l4 { 0%,25% { opacity: 0 } 27%,55% { opacity: 1 } 59%,100% { opacity: 0 } }
+    .l5 { animation-name: l5; } @keyframes l5 { 0%,31% { opacity: 0 } 33%,55% { opacity: 1 } 59%,100% { opacity: 0 } }
+
+    /* 進度條：跟著 context 長、變色；/clear 後回到幾乎空的綠色 */
+    .fill { transform-box: fill-box; transform-origin: left center; animation-name: fill; }
+    @keyframes fill {
+      0% { transform: scaleX(0.08); fill: #009E73 }
+      20% { transform: scaleX(0.55); fill: #009E73 }
+      27% { transform: scaleX(0.75); fill: #F0E442 }
+      33% { transform: scaleX(0.92); fill: #E69F00 }
+      36%,56% { transform: scaleX(1); fill: #D55E00 }
+      60%,95% { transform: scaleX(0.1); fill: #009E73 }
+      100% { transform: scaleX(0.08); fill: #009E73 }
+    }
+    .icon { animation-name: icon; }
+    @keyframes icon { 0%,26% { fill: #009E73 } 27%,32% { fill: #F0E442 } 33%,35% { fill: #E69F00 } 36%,56% { fill: #D55E00 } 60%,100% { fill: #009E73 } }
+
+    /* band 右側文字：數字、倒數、接續，輪流出現 */
+    .s1 { animation-name: s1; } @keyframes s1 { 0%,35% { opacity: 1 } 36%,100% { opacity: 0 } }
+    .s2 { animation-name: s2; } @keyframes s2 { 0%,35% { opacity: 0 } 36%,45% { opacity: 1 } 46%,100% { opacity: 0 } }
+    .s3 { animation-name: s3; } @keyframes s3 { 0%,45% { opacity: 0 } 46%,56% { opacity: 1 } 57%,100% { opacity: 0 } }
+    .s4 { animation-name: s4; } @keyframes s4 { 0%,60% { opacity: 0 } 62%,95% { opacity: 1 } 99%,100% { opacity: 0 } }
+
+    /* 交接檔：四欄一欄一欄寫出來，留到接手後 */
+    .card { animation-name: card; } @keyframes card { 0%,44% { opacity: 0 } 46%,95% { opacity: 1 } 99%,100% { opacity: 0 } }
+    .f1 { animation-name: f1; } @keyframes f1 { 0%,46% { opacity: 0 } 48%,95% { opacity: 1 } 99%,100% { opacity: 0 } }
+    .f2 { animation-name: f2; } @keyframes f2 { 0%,48% { opacity: 0 } 50%,95% { opacity: 1 } 99%,100% { opacity: 0 } }
+    .f3 { animation-name: f3; } @keyframes f3 { 0%,50% { opacity: 0 } 52%,95% { opacity: 1 } 99%,100% { opacity: 0 } }
+    .f4 { animation-name: f4; } @keyframes f4 { 0%,52% { opacity: 0 } 54%,95% { opacity: 1 } 99%,100% { opacity: 0 } }
+
+    /* /clear 閃一下 */
+    .clear { animation-name: clear; } @keyframes clear { 0%,55% { opacity: 0 } 57% { opacity: 1 } 60%,100% { opacity: 0 } }
+
+    /* 新對話：接續訊息、箭頭、回覆 */
+    .r1 { animation-name: r1; } @keyframes r1 { 0%,61% { opacity: 0 } 63%,95% { opacity: 1 } 99%,100% { opacity: 0 } }
+    .r2 { animation-name: r2; } @keyframes r2 { 0%,70% { opacity: 0 } 72%,95% { opacity: 1 } 99%,100% { opacity: 0 } }
+    .arrow { animation-name: arrow; } @keyframes arrow { 0%,62% { opacity: 0 } 64%,95% { opacity: 1 } 99%,100% { opacity: 0 } }
+
+    /* 底下的步驟說明 */
+    .c1 { animation-name: c1; } @keyframes c1 { 0%,35% { opacity: 1 } 36%,100% { opacity: 0 } }
+    .c2 { animation-name: c2; } @keyframes c2 { 0%,35% { opacity: 0 } 36%,55% { opacity: 1 } 56%,100% { opacity: 0 } }
+    .c3 { animation-name: c3; } @keyframes c3 { 0%,55% { opacity: 0 } 56%,60% { opacity: 1 } 61%,100% { opacity: 0 } }
+    .c4 { animation-name: c4; } @keyframes c4 { 0%,60% { opacity: 0 } 61%,100% { opacity: 1 } }
+
+    @media (prefers-reduced-motion: reduce) {
+      .t { animation: none; }
+      .s2, .s3, .s4, .clear, .r1, .r2, .arrow, .c2, .c3, .c4 { opacity: 0; }
+    }
+  </style>
+
+  <rect x="0.5" y="0.5" width="899" height="379" rx="14" fill="#0d1117" stroke="#30363d"/>
+
+  <!-- 對話 -->
+  <rect x="24" y="24" width="520" height="290" rx="8" fill="#161b22" stroke="#30363d"/>
+  <text x="40" y="46" class="dim">conversation</text>
+  <rect class="t l1 user" x="40" y="62" width="300" height="16" rx="4"/>
+  <rect class="t l2 bot" x="60" y="88" width="440" height="16" rx="4"/>
+  <rect class="t l3 user" x="40" y="114" width="220" height="16" rx="4"/>
+  <rect class="t l4 bot" x="60" y="140" width="460" height="16" rx="4"/>
+  <rect class="t l5 bot" x="60" y="166" width="380" height="16" rx="4"/>
+
+  <g class="t r1">
+    <rect x="40" y="62" width="488" height="40" rx="4" fill="#30363d"/>
+    <text x="52" y="80" class="txt">Read …/handoff/20261009-1530-demo-task.md</text>
+    <text x="52" y="96" class="dim">and continue the task `demo-task`.</text>
+  </g>
+  <g class="t r2">
+    <rect x="60" y="112" width="468" height="40" rx="4" fill="#21262d"/>
+    <text x="72" y="130" class="txt">Checked git: matches the file. Next: run e2e.</text>
+    <text x="72" y="146" class="dim">Waiting for you.</text>
+  </g>
+
+  <rect class="t clear" x="24" y="24" width="520" height="290" rx="8" fill="#e6edf3" opacity="0"/>
+  <text class="t clear" x="284" y="176" text-anchor="middle" fill="#0d1117" font-size="28" font-weight="700" opacity="0">/clear</text>
+
+  <!-- band：圖示＋10 格進度條＋右側文字 -->
+  <line x1="24" y1="262" x2="544" y2="262" stroke="#30363d"/>
+  <circle class="t icon" cx="48" cy="288" r="8" fill="#009E73"/>
+  <rect x="64" y="281" width="180" height="14" rx="7" fill="#464e5a"/>
+  <rect class="t fill" x="64" y="281" width="180" height="14" rx="7" fill="#009E73"/>
+  <line x1="246" y1="274" x2="246" y2="302" stroke="#D55E00" stroke-dasharray="3 3"/>
+  <text x="246" y="270" text-anchor="middle" class="dim" font-size="10">handoff line</text>
+  <text class="t s1 txt" x="258" y="292">context grows each turn · $0.50</text>
+  <text class="t s2 txt" x="258" y="292" fill="#D55E00" style="fill:#D55E00">Handoff in 60s · cancel [1]</text>
+  <text class="t s3 txt" x="258" y="292">writing handoff file…</text>
+  <text class="t s4 txt" x="258" y="292">Resumed · next: run e2e</text>
+
+  <!-- 交接檔 -->
+  <g class="t card">
+    <rect x="570" y="24" width="306" height="290" rx="8" fill="#161b22" stroke="#30363d"/>
+    <text x="586" y="46" class="dim">handoff/20261009-1530-demo-task.md</text>
+  </g>
+  <g class="t f1"><text x="586" y="80" class="head">## Goal</text><text x="586" y="98" class="txt">ship the demo build</text></g>
+  <g class="t f2"><text x="586" y="128" class="head">## Files</text><text x="586" y="146" class="txt">M src/parse.ts</text></g>
+  <g class="t f3"><text x="586" y="176" class="head">## Verified</text><text x="586" y="194" class="txt">unit tests pass · e2e not run</text></g>
+  <g class="t f4"><text x="586" y="224" class="head">## Next</text><text x="586" y="242" class="txt">run e2e</text></g>
+
+  <g class="t arrow">
+    <path d="M568 82 C 556 82, 548 82, 532 82" stroke="#58a6ff" stroke-width="2" fill="none"/>
+    <path d="M532 82 l 8 -5 v 10 z" fill="#58a6ff"/>
+  </g>
+
+  <!-- 步驟說明 -->
+  <text class="t c1 txt" x="24" y="350">1 · Context grows turn by turn toward the handoff line</text>
+  <text class="t c2 txt" x="24" y="350">2 · Past the line: a 60 s countdown, then the mod writes a handoff file</text>
+  <text class="t c3 txt" x="24" y="350">3 · /clear</text>
+  <text class="t c4 txt" x="24" y="350">4 · The fresh conversation reads the file, checks git, and picks up</text>
+</svg>

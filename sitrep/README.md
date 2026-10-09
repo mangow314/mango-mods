@@ -1,12 +1,13 @@
-# sitrep (P0 experiment)
+# sitrep
 
 Formerly named reply-lens. "Sitrep" is short for situation report.
 
-> 繁體中文版：[README.zh-TW.md](README.zh-TW.md). The mod's on-screen text is
-> in Traditional Chinese.
+> 繁體中文版：[README.zh-TW.md](README.zh-TW.md). The mod's on-screen labels
+> are in Traditional Chinese; the text inside the box follows the language of
+> the reply.
 
-A Claude Code mod that makes replies easier to scan. This is a P0 experiment
-and is not in the marketplace yet.
+A Claude Code mod that makes replies easier to scan. Still an experiment;
+install it from the marketplace with `claude plugin install sitrep@mango-mods`.
 
 ## What it does
 

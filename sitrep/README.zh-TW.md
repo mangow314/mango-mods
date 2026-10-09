@@ -1,10 +1,10 @@
-# sitrep（P0 實驗）
+# sitrep
 
 原名 reply-lens。sitrep 是 situation report 的縮寫，意思是「戰況簡報」。
 
 > English: [README.md](README.md)
 
-讓 Claude Code 的回覆比較好掃讀的 mod，目前是 P0 實驗版，還沒放進 marketplace。
+讓 Claude Code 的回覆比較好掃讀的 mod，仍是實驗版；從 marketplace 安裝：`claude plugin install sitrep@mango-mods`。
 
 ## 做什麼
 
