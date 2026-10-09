@@ -16,6 +16,7 @@ import type { AgentNote, ChangeNote, Evidence, Facet, Item, Summary, SummaryTask
 // 7. 回覆裡的 ASCII 圖（含框線字元或箭頭的程式碼區塊）畫在灰底區塊、上方一行灰字「圖」，不被大量文字蓋過。
 // 8. 回覆裡的 ```dot 區塊照 7 畫原文，標籤附粗算的節點與邊數。
 // 9. /agents-info 開關子代理 pane：每個子代理一啟動就記下（agent.spawn），每次模型請求更新 model、effort、context、輸出 token（turn.step）。
+//    沒地方放 pane 時改用文字回；子代理在跑、pane 沒畫出來時，prompt 上方多一行「子代理 N 個進行中」。
 
 const TAG = 'sitrep'
 // 圍欄要在行首：正文裡行內提到 ` ```ui-summary ` 不算（實機：行內那個被當成開頭，把真的區塊吃掉，結論框讀不懂）
@@ -109,8 +110,11 @@ export const register: Register = on => {
       await $.ui.close({ id: AGENTS_PANE })
       return { text: `${TAG}：已關閉子代理 pane（/agents-info 可再打開）` }
     }
-    await $.ui.open({ id: AGENTS_PANE, title: '子代理', columns: 60 })
-    return { text: `${TAG}：已打開子代理 pane（再打一次 /agents-info 關閉）` }
+    const opened = await $.ui.open({ id: AGENTS_PANE, title: '子代理', columns: 60 })
+    if (opened.isPlaced) return { text: `${TAG}：已打開子代理 pane（再打一次 /agents-info 關閉）` }
+    // 指令開的 pane 任何寬度都會畫；沒畫＝這裡沒有能放 pane 的畫面（雲端、-p、舊版桌面）：關掉免得下次變成「關閉」，清單改成文字回
+    await $.ui.close({ id: AGENTS_PANE })
+    return { text: await agentsText($) }
   })
 
   // 子代理一啟動就記下：開始時間與 model 是真的。主對話派的等這一輪結束由 trackAgents 補上結論框；
@@ -264,12 +268,22 @@ export const register: Register = on => {
     const first = open[0]
     const todo = pending?.todo[0]
     // pane 開著時題目在 pane 裡選：這列不畫，alt+n（ctrl+x tab）才會直接跳到 pane
-    if (!pending || (!first && todo === undefined) || (await read($, paneOpenAtom))) return next(e)
+    const hasAsk = !!pending && (!!first || todo !== undefined) && !(await read($, paneOpenAtom))
+    const running = await runningAgents($)
+    if (!hasAsk && running.length === 0) return next(e)
     // band 只有一個：先讓排在下面的 mod 畫（例如 ctx-relay 的交接列），自己這列疊在它下面
     const below = await next(e)
     const { Box, Button, Text } = $.ui.resolve(e)
-    let line: RenderElement
-    if (first) {
+    // 子代理在跑、子代理 pane 沒畫出來時一行：tmux 預設不是 fullscreen，pane 疊在提示框上方太占位，平常看這行就夠
+    const agentsLine = running.length > 0 ? (
+      <Text key="above-agents" wrap="truncate-end">
+        <Text color={BLUE} bold>{`${spin()} `}</Text>
+        <Text color={SOFT}>{`子代理 ${running.length} 個進行中 · 輸出 ${tokens(running.reduce((n, a) => n + (a.output ?? 0), 0))}`}</Text>
+        <Text color={DIM}>{'   /agents-info 看細節'}</Text>
+      </Text>
+    ) : null
+    let line: RenderElement | null = null
+    if (hasAsk && pending && first) {
       const { d, n } = first
       const total = pending.decisions.length
       // hotkey 只收一個小寫字母；數字不給：空的提示框裡按數字會直接按到 band 的按鈕，也會撞 ctx-relay 的 "1"
@@ -289,7 +303,7 @@ export const register: Register = on => {
           <Text color={DIM} wrap="truncate-end">{'   · 聚焦後按字母，只填入輸入框'}</Text>
         </Box>
       )
-    } else {
+    } else if (hasAsk) {
       line = (
         <Text key="above-todo" wrap="truncate-end">
           <Text color={YELLOW} bold>{'等你動手：'}</Text>
@@ -300,6 +314,7 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column">
         {below}
+        {agentsLine}
         {line}
       </Box>
     )
@@ -700,37 +715,27 @@ async function drawAgents($: EngineInterface, e: RenderEvent, width: number) {
   const list = await read($, agentsAtom)
   if (list.length === 0) return <Text color={DIM}>{'這個 session 還沒派過子代理'}</Text>
   const now = await $.clock.now().catch(() => null)
-  const running = list.filter(a => !(a.status in TASK_MARKS)).reverse()
-  const ended = list.filter(a => a.status in TASK_MARKS).reverse()
-  const output = list.reduce((n, a) => n + (a.output ?? 0), 0)
+  const { running, ended } = splitAgents(list)
   const row = (a: AgentNote) => {
-    const mark = TASK_MARKS[a.status] ?? { glyph: spin(), color: BLUE }
-    const time = a.status in TASK_MARKS
-      ? (a.durationMs !== undefined ? duration(a.durationMs) : '')
-      : now !== null && a.startedAt !== undefined ? duration(now - a.startedAt) : ''
-    const detail = [
-      a.model ? shortModel(a.model) : '',
-      a.effort !== undefined ? String(a.effort) : '',
-      a.context !== undefined ? `ctx ${tokens(a.context)}` : '',
-      a.steps ? `${a.steps} 次請求` : '',
-      a.output ? `輸出 ${tokens(a.output)}` : '',
-    ].filter(x => x !== '').join(' · ')
+    const { mark, time, detail } = agentLine(a, now)
+    // 描述的預算扣掉符號、類型、右邊的時間（都按欄寬算，中文 2 欄），太窄也至少留 6 欄
+    const room = Math.max(6, width - 2 - cols(a.type) - 2 - (time === '' ? 0 : cols(time) + 1))
     return (
       <Box key={`ag-${a.id}`} flexDirection="column">
         <Box flexDirection="row">
           <Text color={mark.color} bold>{`${mark.glyph} `}</Text>
           <Text color={SOFT}>{`${a.type}  `}</Text>
-          <Text>{clip(a.description, Math.max(10, width - a.type.length - 12))}</Text>
+          <Text wrap="truncate-end">{clip(a.description, room)}</Text>
           <Box flexGrow={1} />
           <Text color={DIM}>{time}</Text>
         </Box>
-        {detail !== '' ? <Text color={DIM}>{`  ${clip(detail, width - 2)}`}</Text> : null}
+        {detail !== '' ? <Text color={DIM} wrap="truncate-end">{`  ${clip(detail, Math.max(1, width - 2))}`}</Text> : null}
       </Box>
     )
   }
   return (
     <Box flexDirection="column">
-      <Text color={SOFT}>{`共 ${list.length} 個 · 進行中 ${running.length} · 輸出 ${tokens(output)}`}</Text>
+      <Text color={SOFT}>{agentsHeader(list)}</Text>
       {running.length > 0 ? (
         <Box key="running" flexDirection="column" marginTop={1}>
           <Text color={BLUE}>{'進行中'}</Text>
@@ -746,6 +751,57 @@ async function drawAgents($: EngineInterface, e: RenderEvent, width: number) {
       ) : null}
     </Box>
   )
+}
+
+// 進行中照最新排前面；已結束同樣最新在前
+function splitAgents(list: AgentNote[]) {
+  return {
+    running: list.filter(a => !(a.status in TASK_MARKS)).reverse(),
+    ended: list.filter(a => a.status in TASK_MARKS).reverse(),
+  }
+}
+
+function agentsHeader(list: AgentNote[]): string {
+  const output = list.reduce((n, a) => n + (a.output ?? 0), 0)
+  return `共 ${list.length} 個 · 進行中 ${splitAgents(list).running.length} · 輸出 ${tokens(output)}`
+}
+
+// 一個子代理的狀態符號、耗時（跑完的是總耗時，跑的時候是已跑時間）、灰字細節：model · effort · ctx · 請求次數 · 輸出
+function agentLine(a: AgentNote, now: number | null) {
+  const mark = TASK_MARKS[a.status] ?? { glyph: spin(), color: BLUE }
+  const time = a.status in TASK_MARKS
+    ? (a.durationMs !== undefined ? duration(a.durationMs) : '')
+    : now !== null && a.startedAt !== undefined ? duration(now - a.startedAt) : ''
+  const detail = [
+    a.model ? shortModel(a.model) : '',
+    a.effort !== undefined ? String(a.effort) : '',
+    a.context !== undefined ? `ctx ${tokens(a.context)}` : '',
+    a.steps ? `${a.steps} 次請求` : '',
+    a.output ? `輸出 ${tokens(a.output)}` : '',
+  ].filter(x => x !== '').join(' · ')
+  return { mark, time, detail }
+}
+
+// 還在跑的子代理；子代理 pane 已經畫出來時回空的（prompt 上方那行不必重複）
+async function runningAgents($: EngineInterface): Promise<AgentNote[]> {
+  const { running } = splitAgents(await read($, agentsAtom))
+  if (running.length === 0) return []
+  const panes = await $.ui.panes().catch(() => [])
+  return panes.some(p => p.id === AGENTS_PANE && p.isPlaced) ? [] : running
+}
+
+// 沒地方放 pane 時 /agents-info 回的文字：跟 pane 同樣的內容，每個子代理一行
+async function agentsText($: EngineInterface): Promise<string> {
+  const list = await read($, agentsAtom)
+  if (list.length === 0) return `${TAG}：這個 session 還沒派過子代理`
+  const now = await $.clock.now().catch(() => null)
+  const { running, ended } = splitAgents(list)
+  const lines = [...running, ...ended.slice(0, 10)].map(a => {
+    const { mark, time, detail } = agentLine(a, now)
+    return [`${mark.glyph} ${a.type}  ${a.description}`, time, detail].filter(x => x !== '').join(' · ')
+  })
+  if (ended.length > 10) lines.push(`…還有 ${ended.length - 10} 個已結束`)
+  return [`${TAG}：這裡沒有能放 pane 的畫面，改用文字列出子代理`, agentsHeader(list), ...lines].join('\n')
 }
 
 // claude-opus-5-5 → opus-5-5；拿掉日期尾巴和 [1m] 這類標記
@@ -1046,10 +1102,13 @@ function hash(s: string): string {
   return h.toString(36)
 }
 
-// 終端欄寬：CJK 與全形字佔 2 欄
+// 終端欄寬：中日韓字與全形字 2 欄，其他 1 欄（範圍同 your-turn）
 function charCols(ch: string): number {
   const c = ch.codePointAt(0) ?? 0
-  return (c >= 0x2e80 && c <= 0xa4cf) || (c >= 0xac00 && c <= 0xd7a3) || (c >= 0xf900 && c <= 0xfaff) || (c >= 0xff00 && c <= 0xff60) ? 2 : 1
+  const isWide = (c >= 0x1100 && c <= 0x115f) || (c >= 0x2e80 && c <= 0xa4cf) || (c >= 0xac00 && c <= 0xd7a3)
+    || (c >= 0xf900 && c <= 0xfaff) || (c >= 0xfe30 && c <= 0xfe4f) || (c >= 0xff00 && c <= 0xff60)
+    || (c >= 0xffe0 && c <= 0xffe6) || (c >= 0x20000 && c <= 0x3fffd)
+  return isWide ? 2 : 1
 }
 
 function cols(s: string): number {
@@ -1058,14 +1117,16 @@ function cols(s: string): number {
   return n
 }
 
+// 超過 width 欄才截斷，最後一欄換成 …；剛好放得下的照原樣
 function clip(s: string, width: number): string {
+  if (cols(s) <= width) return s
   let out = ''
   let used = 0
   for (const ch of s) {
     const w = charCols(ch)
-    if (used + w > width - 1) return `${out}…`
+    if (used + w > width - 1) break
     out += ch
     used += w
   }
-  return out
+  return `${out}…`
 }

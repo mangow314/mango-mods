@@ -278,7 +278,8 @@ test('結論框：這一輪派出的背景子代理列在框裡，跑的時候�
 })
 
 // pane 的假環境：記下開關；env 給 TMUX 與否；git diff --stat 回兩個檔
-function paneWorld(on: On, opts: { tmux?: boolean } = {}) {
+// placed: false＝開了但沒畫出來（這裡沒有能放 pane 的畫面）
+function paneWorld(on: On, opts: { tmux?: boolean; placed?: boolean } = {}) {
   const p = { opens: [] as string[], closes: [] as string[], open: new Set<string>() }
   on('env.get', (_$, e) => ({ value: e.name === 'TMUX' && opts.tmux ? '/tmp/tmux-1000/default,1,0' : undefined }))
   // git：repo 在 /repo；未 commit 的是 sitrep/a.ts（這次改的）與 your-turn 兩個檔（不是這次改的）
@@ -291,7 +292,7 @@ function paneWorld(on: On, opts: { tmux?: boolean } = {}) {
   on('ui.open', (_$, e) => {
     p.opens.push(e.id)
     p.open.add(e.id)
-    return { value: { isPlaced: true as const } }
+    return { value: opts.placed === false ? { isPlaced: false as const, reason: 'no surface places panes' } : { isPlaced: true as const } }
   })
   on('ui.close', (_$, e) => {
     p.closes.push(e.id)
@@ -584,6 +585,63 @@ test('/agents-info：啟動就列進行中＋model，每次請求更新 ctx 與�
   expect(done).toContain('進行中 0')
   await $.command.run({ command: 'agents-info', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 160 } })
   expect(p.closes).toEqual(['sitrep-agents'])
+})
+
+test('/agents-info：沒有能放 pane 的畫面（isPlaced false）時關掉 pane、改用文字列出，下次照樣再試開', async ($, on) => {
+  mock.clock(on)
+  world(on)
+  const p = paneWorld(on, { placed: false })
+  agentWorld(on)
+  await $.agent.spawn(SPAWN)
+  await step($, 'a1')
+  const run = () => $.command.run({ command: 'agents-info', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 160 } })
+  const first = await run()
+  expect(p.closes).toEqual(['sitrep-agents'])
+  const text = (first as { text?: string }).text ?? ''
+  expect(text).toContain('改用文字')
+  expect(text).toContain('共 1 個 · 進行中 1')
+  expect(text).toContain('Explore  讀 README')
+  expect(text).toContain('sonnet-5-5')
+  await run()
+  expect(p.opens).toEqual(['sitrep-agents', 'sitrep-agents'])
+})
+
+test('prompt 上方：子代理在跑、子代理 pane 沒畫出來時一行「子代理 N 個進行中」；pane 開著或都跑完就不畫', async ($, on) => {
+  mock.clock(on)
+  world(on)
+  const p = paneWorld(on)
+  agentWorld(on)
+  expect(await texts(await above($))).not.toContain('子代理')
+  await $.agent.spawn(SPAWN)
+  await step($, 'a1')
+  const busy = await texts(await above($))
+  expect(busy).toContain('engine')
+  expect(busy).toContain('子代理 1 個進行中 · 輸出 1.5k')
+  p.open.add('sitrep-agents')
+  expect(await texts(await above($))).not.toContain('進行中')
+  p.open.delete('sitrep-agents')
+  await $.turn.complete({ answer: '摘要', durationMs: 4_000, isAborted: false, turnId: 't2', reason: 'answer', agentId: 'a1' })
+  expect(await texts(await above($))).not.toContain('進行中')
+})
+
+test('子代理 pane 很窄：中文描述按欄寬截斷，右邊耗時不被擠掉', async ($, on) => {
+  const clock = mock.clock(on)
+  world(on)
+  paneWorld(on)
+  agentWorld(on)
+  await $.agent.spawn({ ...SPAWN, description: '讀完整個專案的中文說明文件並整理重點清單' })
+  await clock.advance(65_000)
+  const ui = await $.ui.mount({
+    plugin: 'sitrep',
+    surface: 'terminal',
+    component: 'Pane',
+    requestId: 'sitrep-agents',
+    props: { title: '子代理', isFocused: false, bodyColumns: 34, placement: 'inline' as const, scroll: { offset: 0, bodyRows: 20 }, view: {} },
+  })
+  const all = (await ui.findAll({ type: 'Text' })).map(t => t.text)
+  // 34 欄扣掉符號 2、Explore＋空白 9、耗時「1m 5s」6 → 描述最多 17 欄：中文 8 字＋…
+  expect(all).toContain('讀完整個專案的中…')
+  expect(all).toContain('1m 5s')
 })
 
 test('agent.spawn 先記下的子代理，這一輪結束時一樣掛到結論框', async ($, on) => {

@@ -81,7 +81,11 @@ install it from the marketplace with `claude plugin install sitrep@mango-mods`.
   grey its model, effort, context of its latest request, request count and
   output tokens. It lists every subagent, including ones a subagent or a
   workflow started. No cost or context percentage: the engine gives no
-  per-model window or price.
+  per-model window or price. Where nothing can show a pane (a cloud
+  session, `claude -p`), `/agents-info` replies with the same list as text
+  instead. While subagents run and the pane is not shown, the line above the
+  prompt adds `⠋ 子代理 2 個進行中 · 輸出 12k`, so in tmux (not fullscreen by
+  default) you need not keep the pane open above the prompt.
 - An ASCII figure in a reply (a code block with no language, or `text`,
   holding box-drawing characters, arrows, or plain-ASCII `+--` / `|--`)
   is drawn on a gray background under a dim `圖` ("figure") label, so it stands out from the text around it.
