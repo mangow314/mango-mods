@@ -1,6 +1,8 @@
 {
   "name": "mango-mods",
-  "owner": { "name": "Mango" },
+  "owner": {
+    "name": "Mango"
+  },
   "metadata": {
     "description": "個人用 Claude Code mods（function hooks plugin）。"
   },
@@ -14,21 +16,6 @@
       "name": "sitrep",
       "source": "./sitrep",
       "description": "回覆戰況簡報：正文下方一個結論框（狀態、一句結論、可收合段落、待決題目），提示框上方一行待決列可鍵盤選答。"
-    },
-    {
-      "name": "repo-ledger",
-      "source": "./repo-ledger",
-      "description": "提示框上方列出這個對話動過、還沒 commit 的 repo，和本輪改了幾檔。"
-    },
-    {
-      "name": "your-turn",
-      "source": "./your-turn",
-      "description": "把回覆裡要你親手跑的指令（sudo、! <cmd>、叫你自己跑的 shell 區塊）列成對話旁可勾選的清單，帶上回覆裡的說明，全部完成後一鍵回報。"
-    },
-    {
-      "name": "away-receipt",
-      "source": "./away-receipt",
-      "description": "離開一段時間回來時，對話旁列出離開期間發生了什麼：多久、幾輪、花多少，動過的 repo、跑過的測試、背景工作。"
     }
   ]
 }

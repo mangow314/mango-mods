@@ -45,15 +45,9 @@ claude plugin install sitrep@mango-mods
 claude plugin install ctx-relay@mango-mods
 ```
 
-## 其他實驗（目前沒在用）
+## 已下架
 
-還能安裝，README 也還有效，但我已經不每天用，之後可能移除。
-
-| plugin | 用途 |
-|---|---|
-| [repo-ledger](repo-ledger/README.md) | 列出這個對話動過、還沒 commit 的 repo |
-| [your-turn](your-turn/README.md) | 把要你親手跑的指令列成對話旁可勾選的清單，全部完成後按 r 回報 |
-| [away-receipt](away-receipt/README.md) | 離開一段時間回來時，對話旁列出離開期間發生了什麼 |
+repo-ledger、your-turn、away-receipt 已在 2026-10-10 移除，最後一版留在 git tag `archive/mods-before-cleanup`。
 
 ## 開發與發布
 - 開發時直接載入目錄，不要用已安裝的副本，因為已安裝的 plugin 會按版本快取：

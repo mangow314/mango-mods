@@ -1,8 +1,0 @@
-{
-  "name": "away-receipt",
-  "version": "0.2.0",
-  "description": "離開一段時間回來時，對話旁列出離開期間發生了什麼：多久、跑了幾輪、花多少，動過的 repo、跑過的測試、做完的背景工作",
-  "author": { "name": "Mango" },
-  "license": "MIT",
-  "types": "./types/index.d.ts"
-}

@@ -20,7 +20,7 @@ install it from the marketplace with `claude plugin install sitrep@mango-mods`.
   default on its own. The section is in English and asks for the block's
   text in the language of the reply.
 - Hides that block when the reply is drawn and puts a rounded outcome box
-  under the body, styled like your-turn's:
+  under the body:
   - The title sits on the top border: the status (`? 等你決定` decisions waiting,
     `> 等你動手` something for you to do by hand, `! 卡住` blocked,
     `~ 進行中` in progress, `✓ 完成` done) with the duration at the right.

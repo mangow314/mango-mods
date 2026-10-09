@@ -69,16 +69,10 @@ claude plugin install sitrep@mango-mods
 claude plugin install ctx-relay@mango-mods
 ```
 
-## Other experiments (not in active use)
+## Retired plugins
 
-These still install and their READMEs still apply, but I no longer run them
-day to day and they may be removed.
-
-| Plugin | What it does |
-| --- | --- |
-| [repo-ledger](repo-ledger/README.md) | Band listing every repo this conversation touched that still has uncommitted changes |
-| [your-turn](your-turn/README.md) | Lists the commands you must run yourself in a pane you tick off; when all are done, press `r` to tell Claude |
-| [away-receipt](away-receipt/README.md) | When you come back after a while, a pane shows what happened while you were away |
+repo-ledger, your-turn and away-receipt were removed on 2026-10-10. Their last
+version is kept at the git tag `archive/mods-before-cleanup`.
 
 ## Development
 
