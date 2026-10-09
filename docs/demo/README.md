@@ -73,7 +73,12 @@ Extra requirement: `ffmpeg`.
    ```
 
    The trim points depend on when the turn ended; read them off a few frames
-   (`ffmpeg -ss <t> -i raw.mp4 -frames:v 1 t.png`).
+   (`ffmpeg -ss <t> -i raw.mp4 -frames:v 1 t.png`). The committed sitrep.gif
+   starts at 4.0 s (after the prompt is sent) and paints over the
+   "· 4 messages hidden (/focus to show)" text that focus mode adds to the
+   turn-end line, with `drawbox=x=312:y=480:w=340:h=21:color=0x1a1a1a:t=fill`
+   (and `y=501:h=23` once the row above the prompt goes away), each enabled
+   only for its time range; turn focus mode off before recording to skip this.
 
 ## Concept animation (ctx-relay-loop.svg)
 
