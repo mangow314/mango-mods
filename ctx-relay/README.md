@@ -87,19 +87,21 @@ is not read, so the handoff line is the automatic value.
 
 One line, left to right:
 
-1. An icon and a 10-cell capsule progress bar, both colored by how close
-   context is to the handoff line (tokens ÷ handoff line):
+1. A space invader icon and a 10-cell capsule progress bar, both colored by
+   how close context is to the handoff line (tokens ÷ handoff line):
 
-   | Tokens ÷ handoff line | Icon | Color |
-   | --- | --- | --- |
-   | below 70% | space invader | green |
-   | 70% up to the warning line | ghost | yellow |
-   | warning line up to the handoff line | skull | orange |
-   | at or past the handoff line | skull | vermilion |
+   | Tokens ÷ handoff line | Color |
+   | --- | --- |
+   | below 70% | green |
+   | 70% up to the warning line | yellow |
+   | warning line up to the handoff line | orange |
+   | at or past the handoff line | vermilion |
 
-   The bar moves: every 250 ms a highlight steps right across the filled part,
-   and the icon pulses. Once the prompt cache has expired (you are probably
-   away), the animation stops; it starts again when the next turn ends.
+   The bar stays still; when a turn ends, the cells that turn added light up
+   for half a second (the leading cell, when it added less than a cell). The
+   icon pulses, one frame every 250 ms. Once the prompt cache has expired (you
+   are probably away), the pulse stops; it starts again when the next turn
+   ends.
 2. `220K/434K 51%`: current context / handoff line, and the share.
 3. `· +20K $0.50 12s`: how much context this turn added, what it cost, and how
    long it took. When this turn's cache hit rate (summed over every request in
@@ -108,7 +110,8 @@ One line, left to right:
 4. `· cache 42m`: the prompt cache countdown; see "Cache countdown". Hidden
    while a turn runs.
 5. Bars: context at the end of each recent turn, a full bar = at the handoff
-   line. Only when the terminal is at least 110 columns wide.
+   line, each in that turn's color from the table above. Drawn only when it
+   fits on the line (with a dock pane open, the narrower width counts).
 6. `· <status>`: handoff deferred (with the reason), writing the handoff file,
    failed, cancelled, or which file this conversation resumed from.
 

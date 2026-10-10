@@ -69,7 +69,7 @@ const WARN = 'warning'
 const ERR = 'error'
 const OK = 'success'
 
-// 開頭圖示＋進度條的比例色維持 hex：Raster 只吃 RGB，圖示的呼吸要拿 RGB 調暗（mood、bar、breathe）。
+// 開頭圖示＋進度條＋長條圖的比例色維持 hex：Raster 只吃 RGB，圖示的呼吸要拿 RGB 調暗（mood、bar、breathe、spark）。
 // 只用前景色（深色底在 tmux 256 色下會變刺眼的 #00005f）
 const ORANGE = '#E69F00'
 const VERMILION = '#D55E00'
@@ -82,12 +82,13 @@ const FIRA_FILLED = 3
 // Raster 的顏色是 0xRRGGBB 整數；0x01000000＝終端預設色
 const TRACK = 0x464e5a
 const TERMINAL_DEFAULT = 0x01000000
-// 動畫一幀（掃光往右一格、圖示呼吸）
+// 動畫一幀（圖示呼吸、新增格閃亮）
 const FRAME_MS = 250
-// 比例＝token ÷ 交接線：<70% 小怪獸（綠）、到提醒線前幽靈（黃）、過提醒線骷髏（橘）、過交接線骷髏（朱紅）
-const MOOD_GHOST = 0.7
-// 窄終端：<110 欄拿掉長條圖、<80 欄再拿掉進度條
-const WIDE_COLUMNS = 110
+// 每輪結束，這輪新增的格子亮幾幀（2＝0.5 秒），之後進度條靜止（使用者 2026-10-10 選 A1：取代一直跑的掃光）
+const FRESH_FRAMES = 2
+// 比例＝token ÷ 交接線：<70% 綠、到提醒線前黃、過提醒線橘、過交接線朱紅；圖示固定小怪獸
+const MOOD_YELLOW = 0.7
+// 窄終端：<80 欄拿掉進度條；長條圖放不下就不畫（drawBand 依文字寬度算）
 const BAR_COLUMNS = 80
 const LABEL = 'inactive'
 const VALUE = 'text'
@@ -107,7 +108,6 @@ const N = {
   DANGER: '#FF8F66',
 }
 const INVADER = '󰯉' // Nerd Font md-space_invaders U+F0BC9
-const GHOST = '󰊠' // md-ghost U+F02A0
 const SKULL = '󰚌' // md-skull U+F068C
 // cache 冷暖：熱＝大多命中（便宜），冷＝大多重算（貴，例如閒置超過 cache 存活時間）
 const SNOW = '󰜗' // md-snowflake U+F0717
@@ -154,6 +154,8 @@ const cacheAtom = atom({ plugin: 'ctx-relay', key: 'cache' } as const, { lastReq
 let tick: Timer | null = null
 // band 動畫計時器（startFrames）；跟交接倒數的 tick 分開，disarm() 不會停到它
 let frameTimer: Timer | null = null
+// 最近一次讀數時的 frame；進度條拿來決定新增格還亮不亮
+let freshFrame = -FRESH_FRAMES
 let frame = 0
 let fireTimer: Timer | null = null
 let mainTurns = 0
@@ -450,40 +452,45 @@ async function drawBand($: EngineInterface, e: RenderInput<'AbovePrompt'>): Prom
 
   // 圖示與進度條用比例色、標籤灰、數值白
   const ratio = tokens / Math.max(limits.handoff, 1)
-  const [glyph, color] = mood(tokens, limits)
-  const sep = () => <Text color={DOT}>{' · '}</Text>
-  const icon = <Text color={breathe(color)} bold>{` ${glyph} `}</Text>
+  const color = mood(tokens, limits)
+  const icon = <Text color={breathe(color)} bold>{` ${INVADER} `}</Text>
   const cache = await read($, cacheAtom)
   const isCold = cache.lastRequestAt !== null && cacheLeft(cache, now) <= 0
-  const segments = [
-    <Text color={VALUE} bold>{k(tokens)}</Text>,
-    <Text color={LABEL}>{`/${k(limits.handoff)} `}</Text>,
-    <Text color={color}>{`${Math.round(ratio * 100)}%`}</Text>,
-  ]
+  // Raster 只有終端機有（桌面版沒有）
+  const Raster = e.surface === 'terminal' && columns >= BAR_COLUMNS ? $.ui.resolve(e).Raster : null
+  // 文字寬度照字數估（都是單寬字元）：長條圖放得下才畫，不再看固定欄數（旁邊開了 dock pane 時 body 會變窄）
+  let width = 3 + (Raster === null ? 0 : BAR_CELLS + 1)
+  const say = (text: string, color: string, bold = false) => {
+    width += text.length
+    return <Text color={color} bold={bold}>{text}</Text>
+  }
+  const sep = () => say(' · ', DOT)
+  const segments = [say(k(tokens), VALUE, true), say(`/${k(limits.handoff)} `, LABEL), say(`${Math.round(ratio * 100)}%`, color)]
   if (receipt) {
-    segments.push(sep(), <Text color={VALUE} bold>{`${signed(receipt.deltaTokens)} $${receipt.deltaCost.toFixed(2)}`}</Text>)
-    segments.push(<Text color={LABEL}>{` ${duration(receipt.durationMs)}`}</Text>)
+    segments.push(sep(), say(`${signed(receipt.deltaTokens)} $${receipt.deltaCost.toFixed(2)}`, VALUE, true))
+    segments.push(say(` ${duration(receipt.durationMs)}`, LABEL))
     // 快取已過期就不再顯示上一輪的命中率，免得一列兩個雪花
     if (!isCold && receipt.cachePct !== null && receipt.cachePct < CACHE_COLD) {
-      segments.push(<Text color={SKY}>{` ${SNOW} ${receipt.cachePct}%`}</Text>)
+      segments.push(say(` ${SNOW} ${receipt.cachePct}%`, SKY))
     }
   }
   if (!e.props.isWorking && cache.lastRequestAt !== null) {
     const [text, c] = cacheLabel(cache, now)
-    segments.push(sep(), <Text color={c}>{text}</Text>)
+    segments.push(sep(), say(text, c))
   }
-  if (columns >= WIDE_COLUMNS && readings.length >= 2) segments.push(<Text color={LABEL}>{` ${spark(readings, limits.handoff)}`}</Text>)
+  const tail = status === '' ? 1 : status.length + 4
+  if (readings.length >= 2 && width + 1 + readings.length + tail <= columns) {
+    segments.push(<Text> </Text>, ...spark(readings, limits).map(([ch, c]) => <Text color={c}>{ch}</Text>))
+  }
   if (status !== '') segments.push(sep(), <Text color={statusColor}>{status}</Text>)
   segments.push(<Text> </Text>)
 
   const rest = <Text wrap="truncate-end">{segments}</Text>
-  // Raster 只有終端機有（桌面版沒有）
-  const Raster = e.surface === 'terminal' ? $.ui.resolve(e).Raster : null
-  if (Raster === null || columns < BAR_COLUMNS) return <Box flexDirection="row">{icon}{rest}</Box>
+  if (Raster === null) return <Box flexDirection="row">{icon}{rest}</Box>
   return (
     <Box flexDirection="row">
       {icon}
-      <Raster key="bar" columns={BAR_CELLS} rows={1} cells={bar(ratio, color)} />
+      <Raster key="bar" columns={BAR_CELLS} rows={1} cells={bar(ratio, receipt ? (tokens - receipt.deltaTokens) / Math.max(limits.handoff, 1) : ratio, color)} />
       <Text> </Text>
       {rest}
     </Box>
@@ -564,6 +571,7 @@ async function takeReading($: EngineInterface, e: TurnCompleteInput) {
     }))
   }
   await update($, readingsAtom, list => [...list, { tokens, costUsd }].slice(-HISTORY))
+  freshFrame = frame
   // 快取倒數只是附加資訊：讀不到 env／settings 也不能拖垮讀數與交接判斷
   await noteCache($, e).catch(err => $.ui.log(`${TAG} cache countdown skipped: ${String(err)}`))
   await update($, limitsAtom, () => deriveLimits(usage.context))
@@ -1429,19 +1437,21 @@ async function setAuto($: EngineInterface, auto: Auto) {
   await update($, autoAtom, () => auto)
 }
 
-// 比例圖示：小怪獸 → 幽靈 → 骷髏，顏色綠 → 黃 → 橘 → 朱紅
-function mood(tokens: number, limits: Limits): [string, string] {
-  if (tokens >= limits.handoff) return [SKULL, VERMILION]
-  if (tokens >= limits.nudge) return [SKULL, ORANGE]
-  if (tokens / Math.max(limits.handoff, 1) >= MOOD_GHOST) return [GHOST, YELLOW]
-  return [INVADER, GREEN]
+// 比例色：綠 → 黃 → 橘 → 朱紅
+function mood(tokens: number, limits: Limits): string {
+  if (tokens >= limits.handoff) return VERMILION
+  if (tokens >= limits.nudge) return ORANGE
+  if (tokens / Math.max(limits.handoff, 1) >= MOOD_YELLOW) return YELLOW
+  return GREEN
 }
 
 // 膠囊進度條（Raster 的 cells）：Nerd Font 的 Fira Code 進度字形，亮格實心比例色、暗格空心深灰；滿格＝到交接線。
-// 掃光：一道亮光每幀往右一格，掃過亮格後從頭再來（使用者 2026-10-08 選 P2＋掃光）
-function bar(ratio: number, color: string): string {
-  const lit = Math.max(0, Math.min(BAR_CELLS, Math.round(ratio * BAR_CELLS)))
-  const sweep = frame % (lit + 4)
+// 平常靜止；每輪結束，這輪新增的格子（上一輪的比例到這輪）調亮 FRESH_FRAMES 幀。增量不到一格時亮最前面那格
+function bar(ratio: number, before: number, color: string): string {
+  const cell = (r: number) => Math.max(0, Math.min(BAR_CELLS, Math.round(r * BAR_CELLS)))
+  const lit = cell(ratio)
+  const from = before < ratio ? Math.min(cell(before), lit - 1) : lit
+  const fresh = frame - freshFrame < FRESH_FRAMES
   const words: number[] = []
   for (let x = 0; x < BAR_CELLS; x++) {
     const shape = FIRA + (x === 0 ? 0 : x === BAR_CELLS - 1 ? 2 : 1)
@@ -1449,8 +1459,7 @@ function bar(ratio: number, color: string): string {
       words.push(shape, TRACK, TERMINAL_DEFAULT)
       continue
     }
-    const glow = x === sweep ? 0.6 : Math.abs(x - sweep) === 1 ? 0.3 : 0
-    words.push(shape + FIRA_FILLED, mix(rgb(color), 0xffffff, glow), TERMINAL_DEFAULT)
+    words.push(shape + FIRA_FILLED, fresh && x >= from ? mix(rgb(color), 0xffffff, 0.6) : rgb(color), TERMINAL_DEFAULT)
   }
   return btoa(String.fromCharCode(...new Uint8Array(Uint32Array.from(words).buffer)))
 }
@@ -1469,9 +1478,9 @@ function mix(c: number, toward: number, t: number): number {
   return (ch(16) << 16) | (ch(8) << 8) | ch(0)
 }
 
-// 長條高度對交接線：滿格＝到交接線
-function spark(readings: readonly Reading[], handoff: number): string {
-  return readings.map(r => BARS[Math.min(BARS.length - 1, Math.floor((r.tokens / Math.max(handoff, 1)) * (BARS.length - 1)))]).join('')
+// 長條高度對交接線：滿格＝到交接線；每根用那一輪的比例色（灰色長條看不出哪幾輪已過提醒線）
+function spark(readings: readonly Reading[], limits: Limits): [string, string][] {
+  return readings.map(r => [BARS[Math.min(BARS.length - 1, Math.floor((r.tokens / Math.max(limits.handoff, 1)) * (BARS.length - 1)))] ?? '', mood(r.tokens, limits)])
 }
 
 function formatStamp(ms: number): string {

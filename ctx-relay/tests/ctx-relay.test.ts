@@ -218,9 +218,6 @@ function cells(b64: string): number[][] {
   return Array.from({ length: words.length / 3 }, (_, i) => words.slice(i * 3, i * 3 + 3))
 }
 
-function luma(c: number): number {
-  return ((c >> 16) & 255) + ((c >> 8) & 255) + (c & 255)
-}
 
 // band 動畫每 250ms 重畫一次：同時掛著的 band 越多越慢，所以每次只留最新一個
 let mounted: { unmount: () => Promise<void> } | null = null
@@ -1082,33 +1079,36 @@ test('別的 mod 也畫 band（例如 blast-radius 的按鈕）：兩邊都畫�
   expect(await ui.find({ key: 'proceed' })).toBeDefined()
 })
 
-test('圖示與膠囊進度條跟著 token÷交接線變：小怪獸綠 → 幽靈黃 → 過提醒線骷髏橘 → 過交接線骷髏朱紅；不用背景色', async ($, on) => {
+test('圖示固定小怪獸、跟膠囊進度條一起跟著 token÷交接線變色：綠 → 黃 → 過提醒線橘 → 過交接線朱紅；不用背景色', async ($, on) => {
   mock.clock(on)
   const w = world($, on)
   await start($)
   // 交接線 433840、提醒線 381779
   const head = async () => {
-    const { ui, text } = await band($)
+    const { ui } = await band($)
     const texts = await ui.findAll({ type: 'Text' })
     const boxes = await ui.findAll({ type: 'Box' })
     expect(boxes.some(b => b.props.backgroundColor !== undefined)).toBe(false)
     const [raster] = await ui.findAll({ type: 'Raster' })
-    return { glyph: texts[0]?.text.trim(), color: texts[0]?.props.color, cells: cells(String(raster?.props.cells ?? '')), text }
+    return { glyph: texts[0]?.text.trim(), color: texts[0]?.props.color, cells: cells(String(raster?.props.cells ?? '')) }
   }
   await turn($, w, 100_000)
-  // 23%：10 格亮 2 格（frame 0 掃光在第 0 格，兩格都調亮），其餘暗格深灰
+  // 23%：10 格亮 2 格，其餘暗格深灰
   let h = await head()
   expect(h).toMatchObject({ glyph: '󰯉', color: '#009E73' })
   expect(h.cells.map(c => c[0])).toEqual([0xee03, 0xee04, ...Array(7).fill(0xee01), 0xee02])
   expect(h.cells[5]?.[1]).toBe(0x464e5a)
   await turn($, w, 330_000)
-  // 76%：亮 8 格，第 2 格起是本色
+  // 76%：亮 8 格，圖示還是小怪獸
   h = await head()
-  expect(h).toMatchObject({ glyph: '󰊠', color: '#F0E442' })
+  expect(h).toMatchObject({ glyph: '󰯉', color: '#F0E442' })
   expect(h.cells.filter(c => (c[0] ?? 0) >= 0xee03).length).toBe(8)
-  expect(h.cells[4]?.[1]).toBe(0xf0e442)
+  // 長條每根用那一輪的比例色：前面幾輪綠、這輪黃
+  const bars = (await (await band($)).ui.findAll({ type: 'Text' })).filter(t => /^[▁▂▃▄▅▆▇█]$/.test(t.text))
+  expect(bars.at(-1)?.props.color).toBe('#F0E442')
+  expect(bars.at(-2)?.props.color).toBe('#009E73')
   await turn($, w, 400_000)
-  expect(await head()).toMatchObject({ glyph: '󰚌', color: '#E69F00' })
+  expect(await head()).toMatchObject({ glyph: '󰯉', color: '#E69F00' })
   await turn($, w, 450_000)
   // 越線後倒數：整列換成倒數列（骷髏朱紅）
   expect((await band($)).text).toContain('Handoff in')
@@ -1116,22 +1116,26 @@ test('圖示與膠囊進度條跟著 token÷交接線變：小怪獸綠 → 幽�
   expect(countdown[0]?.props.color).toBe('error')
 })
 
-test('動畫：每 250ms 一幀，掃光往右移、圖示每 2 幀明暗切換；快取冷了就停', async ($, on) => {
+test('動畫：每 250ms 一幀，圖示每 2 幀明暗切換；每輪結束這輪新增的格子亮 0.5 秒後靜止；快取冷了就停', async ($, on) => {
   const clock = mock.clock(on)
   const w = world($, on)
   await start($)
-  await turn($, w, 200_000)
   const look = async () => {
     const { ui } = await band($)
     const [raster] = await ui.findAll({ type: 'Raster' })
-    const brightest = cells(String(raster?.props.cells ?? '')).reduce((best, c, i, all) => (luma(c[1] ?? 0) > luma(all[best]?.[1] ?? 0) ? i : best), 0)
-    return { icon: (await ui.findAll({ type: 'Text' }))[0]?.props.color, brightest }
+    const bar = cells(String(raster?.props.cells ?? ''))
+    return { icon: (await ui.findAll({ type: 'Text' }))[0]?.props.color, bright: bar.flatMap((c, i) => (c[1] !== 0x009e73 && c[1] !== 0x464e5a ? [i] : [])) }
   }
-  expect(await look()).toEqual({ icon: '#009E73', brightest: 0 })
+  await turn($, w, 100_000)
+  await turn($, w, 200_000)
+  // 23% → 46%：第 2～4 格是這輪新增的，調亮；第 0、1 格維持本色
+  expect(await look()).toEqual({ icon: '#009E73', bright: [2, 3, 4] })
   await clock.advance(250)
-  expect(await look()).toEqual({ icon: '#009E73', brightest: 1 })
+  expect(await look()).toEqual({ icon: '#009E73', bright: [2, 3, 4] })
   await clock.advance(250)
-  expect(await look()).toEqual({ icon: '#00573f', brightest: 2 })
+  expect(await look()).toEqual({ icon: '#00573f', bright: [] })
+  await clock.advance(1000)
+  expect((await look()).bright).toEqual([])
   // 快取冷了（人多半不在）就停：之後畫面不再變
   await idle(clock, 61 * 60_000)
   const still = await look()
@@ -1139,14 +1143,20 @@ test('動畫：每 250ms 一幀，掃光往右移、圖示每 2 幀明暗切換�
   expect(await look()).toEqual(still)
 })
 
-test('窄終端：<110 欄拿掉長條圖，<80 欄再拿掉進度條，圖示與數字保留', async ($, on) => {
+test('窄終端：長條圖放不下才拿掉（旁邊開 dock pane 也照算），<80 欄拿掉進度條，圖示與數字保留', async ($, on) => {
   mock.clock(on)
   const w = world($, on)
   await start($)
   await turn($, w, 100_000)
   await turn($, w, 200_000)
   expect((await band($)).text).toMatch(/[▁▂▃▄▅▆▇█]{2}/)
-  expect((await band($, 100)).text).not.toMatch(/ [▁▂▃▄▅▆▇]+/)
+  // 長條每根用那一輪的比例色（都在 70% 以下：綠）
+  const bars = (await (await band($)).ui.findAll({ type: 'Text' })).filter(t => /^[▁▂▃▄▅▆▇█]$/.test(t.text))
+  expect(bars.length).toBeGreaterThanOrEqual(2)
+  expect(bars.every(t => t.props.color === '#009E73')).toBe(true)
+  // 100 欄（例如開著 dock pane）放得下就照畫；40 欄放不下就拿掉
+  expect((await band($, 100)).text).toMatch(/[▁▂▃▄▅▆▇█]{2}/)
+  expect((await band($, 40)).text).not.toMatch(/[▁▂▃▄▅▆▇█]/)
   expect(await (await band($, 100)).ui.findAll({ type: 'Raster' })).toHaveLength(1)
   const narrow = (await band($, 70)).text
   expect(await (await band($, 70)).ui.findAll({ type: 'Raster' })).toHaveLength(0)
