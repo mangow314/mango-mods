@@ -32,7 +32,9 @@ TC and Symbols Nerd Font.
 3. Drive it with `tmux -L shot send-keys`, and run `shot.sh <name>` at each
    state:
    - At startup: the ctx-relay pickup line.
-   - After a few turns: the ctx-relay band.
+   - After a few turns: the ctx-relay band. The committed ctx-relay-band.png
+     comes from the bands.gif session after `tmux -L shot resize-window -t s -x 172 -y 48`,
+     cropped with `-crop 600x26+8+801`.
 4. Crop with `magick <raw>.png -crop WxH+X+Y +repage <out>.png` to the band or
    pane. Every crop leaves out Claude Code's status line below the prompt.
 5. `tmux -L shot kill-server` when done.
@@ -50,9 +52,14 @@ Extra requirement: `ffmpeg`.
    - sitrep.gif (Sonnet 5.5): ask Claude to change `greet()` to take a `name`,
      run it once, then ask whether to add pytest or mypy. When the turn ends,
      send `C-x`, `Tab` (focuses the row above the prompt), then `a`.
-   - bands.gif (Haiku 4.5, so the handoff line is 142K): have Claude read a
-     ~170 KB text file to bring context to about 79% (yellow), end with a
-     question so sitrep's row shows, then `./record.sh band-raw 5`.
+   - bands.gif (Claude Code 2.1.296, Haiku 4.5, so the handoff line is 142K):
+     add four ~74 KB filler text files to the repo and have Claude read them
+     over several turns (whole files or `offset`/`limit` slices) to about 66%,
+     so the bars on the right go green. Start `./record.sh band-raw 50`, then
+     send one more read that ends near 76% (yellow): the clip is that turn
+     ending. Start Claude with
+     `--settings '{"enabledPlugins":{"filetree@claude-code-filetree":false,"ctx-relay@mango-mods":false,"sitrep@mango-mods":false}}'`
+     so no dock pane narrows the band and the installed copies stay out.
 2. Cut, crop and encode. The crop starts and ends on character rows (12 px
    padding + 20.3 px per row) and leaves out the status line. The model's
    thinking time is played at 4×:
@@ -63,7 +70,7 @@ Extra requirement: `ffmpeg`.
    [c]trim=17.5:26.5,setpts=PTS-STARTPTS[c1];[a1][b1][c1]concat=n=3:v=1,fps=12,\
    scale=800:-1:flags=lanczos,split[x][y];[x]palettegen=max_colors=96:stats_mode=diff[p];\
    [y][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle" sitrep.gif
-   ffmpeg -ss 1 -t 3 -i band-raw.mp4 -filter_complex "crop=860:44:0:498,fps=8,split[x][y];\
+   ffmpeg -ss 12.5 -t 4.5 -i band-raw.mp4 -filter_complex "crop=860:22:0:522,fps=8,split[x][y];\
    [x]palettegen=max_colors=64[p];[y][p]paletteuse=dither=none" bands.gif
    ```
 

@@ -24,9 +24,9 @@ mod 在系統提示裡請模型在回覆末尾附一個小小的 ` ```ui-summary
 
 ## ctx-relay
 
-![ctx-relay band 和下面的 sitrep 待決列：黃色小幽靈、79% 的膠囊進度條上有掃光、token、費用、快取倒數](docs/assets/bands.gif)
+![ctx-relay band 在一輪結束時：小怪獸和膠囊進度條從 66% 綠變成 76% 黃，這輪新增的那格亮一下；右邊是 token、費用、快取倒數，和綠、黃兩色的每輪長條](docs/assets/bands.gif)
 
-進度條往交接線填滿，越接近越變色（這裡 79%，黃色）；prompt cache 還熱時，掃光會在進度條上跑。右邊是本輪增量、花費，和 cache 還熱多久。下面一行是 sitrep 的待決列。
+進度條往交接線填滿，越接近越變色（這裡一輪從 66% 綠漲到 76% 黃）。進度條平常靜止，每輪結束時這輪新增的格子亮一下。右邊是本輪增量、花費、cache 還熱多久，以及最近幾輪的長條，每根用那一輪的顏色。
 
 ![ctx-relay 待接手：有一份還沒人接手的交接檔，按 1 接續](docs/assets/ctx-relay-pickup.png)
 

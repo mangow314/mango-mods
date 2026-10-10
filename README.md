@@ -35,12 +35,13 @@ system prompt; the mod hides it and draws the box from it. Details:
 
 ## ctx-relay
 
-![ctx-relay band with the sitrep row under it: a yellow ghost, the capsule bar at 79% with a highlight sweeping across it, tokens, cost and cache countdown](docs/assets/bands.gif)
+![ctx-relay band as a turn ends: the space invader and capsule bar go from 66% green to 76% yellow, the cell the turn added lights up for a moment, then tokens, cost, cache countdown and per-turn bars in green and yellow](docs/assets/bands.gif)
 
 The bar fills toward the handoff line and changes color as it gets close (here
-79%, yellow); a highlight sweeps across it while the prompt cache is warm. The
-right side shows this turn's growth, cost and how long the cache stays warm.
-Under it, sitrep's row with the open question.
+a turn takes it from 66%, green, to 76%, yellow). It stays still; when a turn
+ends, the cells that turn added light up for a moment. The right side shows
+this turn's growth, cost, how long the cache stays warm, and the last few
+turns as bars in their own colors.
 
 ![ctx-relay pickup line: an unclaimed handoff file, press 1 to resume](docs/assets/ctx-relay-pickup.png)
 
