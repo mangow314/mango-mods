@@ -1,0 +1,8 @@
+{
+  "name": "xv-band",
+  "version": "0.1.0",
+  "description": "提示框上方一列顯示 xv 跨廠 job 的即時狀態：執行中與 10 分鐘內結束的 job，各一行（廠商、輪次、狀態、耗時、最近動作、job 尾碼）",
+  "author": { "name": "Mango" },
+  "license": "MIT",
+  "types": "./types/index.d.ts"
+}
