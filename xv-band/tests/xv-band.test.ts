@@ -87,8 +87,8 @@ test('執行中的 codex 顯示轉圈、中文狀態、耗時與拆掉 bash -lc 
   ])
   await start($, on)
   expect(await band($)).toEqual([
-    '/ codex  4553 r1  跑中   12m03s  執行 rg -n foo src',
-    '  agy    d266 r2  完成   31s',
+    '/ codex  4553 r1  running 12m03s  執行 rg -n foo src',
+    '  agy    d266 r2  done    31s',
   ])
 })
 
@@ -99,9 +99,9 @@ test('profile 接在廠商後並決定對齊寬度；agy 最新事件是 agent_r
   job(w, 'c-codex-0003', { vendor: 'codex', round: 2, status: 'failed', secs: 6, profile: 'local' }, 3_000)
   await start($, on)
   expect(await band($)).toEqual([
-    '- agy          0001 r1  跑中   45s     撰寫回答',
-    '- agy          0002 r3  跑中   5s      工具 grep_search',
-    '  codex:local  0003 r2  失敗   6s',
+    '- agy          0001 r1  running 45s     撰寫回答',
+    '- agy          0002 r3  running 5s      工具 grep_search',
+    '  codex:local  0003 r2  failed  6s',
   ])
 })
 
@@ -117,7 +117,7 @@ test('9 分 59 秒前結束的還在；過了 10 分鐘的下一輪刷新就消�
   const w = world(on)
   job(w, 'x-codex-cccc', { vendor: 'codex', round: 1, status: 'timeout', secs: 1200 }, 9 * 60_000 + 59_000)
   const clock = await start($, on)
-  expect(await band($)).toEqual(['  codex  cccc r1  逾時   20m00s'])
+  expect(await band($)).toEqual(['  codex  cccc r1  timeout 20m00s'])
   await clock.advance(2_000)
   await clock.settle()
   expect(await band($)).toEqual([])
@@ -131,7 +131,7 @@ test('寫到一半的最後一行略過，改顯示前一個事件；只有第�
     '{"type":"item.started","item":{"type":"command_exe',
   ])
   await start($, on)
-  expect(await band($)).toEqual(['/ codex  dddd r1  跑中   3s      回報 第一行結論'])
+  expect(await band($)).toEqual(['/ codex  dddd r1  running 3s      回報 第一行結論'])
 })
 
 test('events.jsonl 超過 16KB 時用 tail 只讀尾端，切斷的第一行不算', async ($, on) => {
@@ -140,7 +140,7 @@ test('events.jsonl 超過 16KB 時用 tail 只讀尾端，切斷的第一行不�
   job(w, 'big-codex-eeee', { vendor: 'codex', round: 2, status: 'running', round_started: NOW / 1000 }, 1_000, [...filler, codexCmd('cargo test')])
   await start($, on)
   expect(w.tails).toEqual([`${ROOT}/jobs/big-codex-eeee/round-2/events.jsonl`])
-  expect(await band($)).toEqual(['| codex  eeee r2  跑中   0s      執行 cargo test'])
+  expect(await band($)).toEqual(['| codex  eeee r2  running 0s      執行 cargo test'])
 })
 
 test('執行中優先；結束的只畫最新 2 個，其餘收成一行；壞掉的 meta 跳過', async ($, on) => {
@@ -161,6 +161,6 @@ test('窄寬度時截斷最近動作，整行不超過寬度', async ($, on) => 
   await start($, on)
   const [line = ''] = await band($, 50)
   expect(line.length).toBeLessThanOrEqual(50)
-  expect(line.startsWith('\\ codex  1234 r1  跑中   7s      執行 xxx')).toBe(true)
+  expect(line.startsWith('\\ codex  1234 r1  running 7s      執行 xxx')).toBe(true)
   expect(line.endsWith('...')).toBe(true)
 })

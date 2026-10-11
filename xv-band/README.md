@@ -18,15 +18,15 @@ A Claude Code mod that draws a band above the prompt with the live status of
   one line. With no such job the band draws nothing.
 
   ```
-  / codex        4553 r1  跑中   12m03s  執行 rg -n foo src
-  - agy          d266 r2  跑中   45s     撰寫回答
-    codex:local  c2bc r2  完成   6s
+  / codex        4553 r1  running 12m03s  執行 rg -n foo src
+  - agy          d266 r2  running 45s     撰寫回答
+    codex:local  c2bc r2  done    6s
     另有 3 個已完成（xv list）
   ```
 
   `<spinner> <vendor>[:<profile>]  <id suffix> r<round>  <status> <elapsed>  <last activity>`,
   columns aligned. The spinner (`| / - \`) turns on running lines only. Status
-  is shown in Chinese (跑中 / 完成 / 失敗 / 逾時 / 已停止). The id suffix is the
+  is `meta.json`'s own word (running / done / failed / timeout / stopped). The id suffix is the
   job id's last 4 characters; `xv` accepts it in place of the full id. Elapsed is
   now − `round_started` while running, `secs` once finished (`-` when missing).
   Last activity (running only, cut to the band's width): codex's latest command
@@ -34,7 +34,7 @@ A Claude Code mod that draws a band above the prompt with the live status of
   its latest agent message (`回報 …`); agy's latest tool (`工具 <tool_name>`) or
   `撰寫回答` while it streams a response.
 - Colors: vendor bold (codex green, agy blue), status yellow while running,
-  red for 失敗 / 逾時, grey for 已停止; finished-and-done lines and the last
+  red for failed / timeout, grey for stopped; finished-and-done lines and the last
   activity are dim.
 - A partial last line, a missing or corrupt job directory, or a failed read is
   skipped; the mod never throws. It steps aside for a survey and stacks under

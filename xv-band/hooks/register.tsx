@@ -15,7 +15,6 @@ const TAIL_BYTES = 16 * 1024
 
 const bandAtom = atom({ plugin: 'xv-band', key: 'band' } as const, { rows: [], more: 0 } as Band)
 
-const STATUS_LABEL: Record<string, string> = { running: '跑中', done: '完成', failed: '失敗', timeout: '逾時', stopped: '已停止' }
 const STATUS_COLOR: Record<string, string> = { running: 'warning', failed: 'error', timeout: 'error', stopped: 'inactive' }
 const VENDOR_COLOR: Record<string, string> = { codex: 'success', agy: 'suggestion' }
 const SPINNER = ['|', '/', '-', '\\']
@@ -214,7 +213,7 @@ function who(row: Row): string {
   return row.profile ? `${row.vendor}:${row.profile}` : row.vendor
 }
 
-// 一行拆成幾段（各自上色）；欄位對齊：廠商補到 whoWidth、狀態補到 6 欄、耗時補到 6 欄，
+// 一行拆成幾段（各自上色）；欄位對齊：廠商補到 whoWidth、狀態補到 7 欄、耗時補到 6 欄，
 // 最近動作吃剩下的寬度，放不下就不畫
 export function rowParts(row: Row, columns: number, whoWidth: number) {
   const spin = row.status === 'running' ? (SPINNER[Math.floor((row.elapsed ?? 0) / 2) % SPINNER.length] ?? '|') : ' '
@@ -222,7 +221,8 @@ export function rowParts(row: Row, columns: number, whoWidth: number) {
     spin,
     who: pad(who(row), whoWidth),
     id: `${row.id.slice(-4)} r${row.round}`,
-    status: pad(STATUS_LABEL[row.status] ?? row.status, 6),
+    // meta.json 的狀態原字（running／done／failed／timeout／stopped），補到最長的 7 欄
+    status: pad(row.status, 7),
     elapsed: pad(formatElapsed(row.elapsed), 6),
     activity: '',
   }
