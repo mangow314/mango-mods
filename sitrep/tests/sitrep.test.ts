@@ -209,6 +209,23 @@ test('編號超出範圍或結論指到標題：整份不收，框的位置寫�
   expect(await texts(await message($, REPLY))).toContain('摘錄失敗：回傳的編號對不上原文')
 })
 
+test('次要欄位指錯只丟那一項：你要做、段落、選項指錯時框照畫，其餘照常', ZH, async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+  const bad = JSON.parse(PICKS) as { todo: number[]; sections: { heading: number; summary: number }[]; decisions: { options: number[] }[] }
+  bad.todo = [999]
+  bad.sections = [{ heading: 2, summary: 3 }]
+  bad.decisions[1] = { ...bad.decisions[1], options: [10, 999] }
+  await say($, clock, w, REPLY, JSON.stringify(bad))
+  const text = await texts(await message($, REPLY))
+  expect(text).not.toContain('摘錄失敗')
+  expect(text).toContain('照 A 改好，測試全過。')
+  expect(text).toContain('開新 mod')
+  expect(text).toContain('band 再精簡？')
+  expect(text).not.toContain('拿掉')
+  expect(text).not.toContain('明天實機看 5 處')
+})
+
 test('推薦指到選項後面那句「I\'d pick A」：取那句第一個選項字母；認不出字母就不標推薦，框照畫', async ($, on) => {
   const clock = mock.clock(on)
   const w = world(on)

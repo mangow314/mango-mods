@@ -1133,7 +1133,8 @@ function optionOf(line: string, n: number): Option {
   return m ? { key: (m[1] ?? '').toUpperCase(), label: m[2] ?? '' } : { key: String.fromCharCode(65 + n), label: text }
 }
 
-// 模型回的編號 → 結論框。任何編號超出範圍、指錯種類的行（例如結論指到標題）就整份不收，回 null
+// 模型回的編號 → 結論框。結論、題目指錯（超出範圍、結論指到標題）才整份不收，回 null；
+// 選項、推薦、你要做、之後我、段落指錯只丟那一項，框照畫（使用者 2026-10-12 選逐欄降級）
 function buildSummary(lines: string[], raw: string): Summary | null {
   let d: Record<string, unknown>
   try {
@@ -1144,20 +1145,18 @@ function buildSummary(lines: string[], raw: string): Summary | null {
   }
   const at = (n: unknown): string | null => (typeof n === 'number' && Number.isInteger(n) && n >= 1 && n <= lines.length ? lines[n - 1] ?? null : null)
   const isHeading = (n: unknown) => HEADING_RE.test(at(n) ?? '')
-  const list = (x: unknown): unknown[] | null => (x === undefined ? [] : Array.isArray(x) ? x : null)
+  const list = (x: unknown): unknown[] => (Array.isArray(x) ? x : [])
   const outcome = at(d.outcome)
   if (outcome === null || isHeading(d.outcome)) return null
   const status = d.status === 'blocked' || d.status === 'partial' || d.status === 'done' ? d.status : undefined
   const items: Item[] = []
-  const decisions = list(d.decisions)
-  if (decisions === null) return null
-  for (const x of decisions) {
+  for (const x of list(d.decisions)) {
     const q = x as Record<string, unknown>
     const question = at(q?.question)
+    if (question === null) return null
     const opts = list(q?.options)
-    if (question === null || opts === null || opts.some(o => at(o) === null)) return null
-    // 選項指回題目那行、重複、或只有一個：當成沒列選項的開放題，只畫題目（實機：兩個選項都是題目那行，框裡 A、B 一模一樣）
-    const choices = opts.length >= 2 && new Set(opts).size === opts.length && !opts.includes(q.question) ? opts : []
+    // 選項有指錯的、指回題目那行、重複、或只有一個：當成沒列選項的開放題，只畫題目（實機：兩個選項都是題目那行，框裡 A、B 一模一樣）
+    const choices = opts.length >= 2 && opts.every(o => at(o) !== null) && new Set(opts).size === opts.length && !opts.includes(q.question) ? opts : []
     const options = choices.map((o, i) => optionOf(at(o) ?? '', i))
     // 推薦常指到選項後面那句「我建議 A：…」（實測 haiku 約三成）：取那句第一個提到的選項字母；指到別行又認不出就不標推薦，不整份作廢
     let recommended: string | undefined
@@ -1172,22 +1171,20 @@ function buildSummary(lines: string[], raw: string): Summary | null {
     items.push({ kind: 'decision', text: cleanLine(question), options, ...(recommended !== undefined ? { recommended } : {}) })
   }
   for (const [field, kind] of [['todo', 'user-next'], ['next', 'agent-next']] as const) {
-    const picks = list(d[field])
-    if (picks === null || picks.some(n => at(n) === null)) return null
     // 跟結論或前面的項目同一句就不再列（實機：之後我把結論那句又列一次）
-    for (const n of picks) {
-      const text = cleanLine(at(n) ?? '')
+    for (const n of list(d[field])) {
+      const line = at(n)
+      if (line === null) continue
+      const text = cleanLine(line)
       if (text !== cleanLine(outcome) && !items.some(i => i.text === text)) items.push({ kind, text })
     }
   }
-  const sections = list(d.sections)
-  if (sections === null) return null
   const facets: Facet[] = []
-  for (const x of sections) {
+  for (const x of list(d.sections)) {
     const sec = x as Record<string, unknown>
     const h = typeof sec?.heading === 'number' ? sec.heading : -1
     const m = HEADING_RE.exec(at(h) ?? '')
-    if (!m) return null
+    if (!m) continue
     // 摘要行要在這段裡：標題之後、下一個同級或更高的標題之前，本身不是標題
     const level = m[1]?.length ?? 1
     let end = lines.length
@@ -1199,7 +1196,7 @@ function buildSummary(lines: string[], raw: string): Summary | null {
       }
     }
     const s = sec.summary
-    if (typeof s !== 'number' || s <= h || s > end || isHeading(s)) return null
+    if (typeof s !== 'number' || s <= h || s > end || isHeading(s)) continue
     const heading = m[2] ?? ''
     facets.push({ label: clip(norm(heading), 16), summary: clip(cleanLine(at(s) ?? ''), 60), heading })
   }
