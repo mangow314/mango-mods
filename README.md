@@ -18,7 +18,7 @@ one directory per plugin.
 
 | Plugin | What it does |
 | --- | --- |
-| [sitrep](sitrep/README.md) | Under each reply, a box with the status, a one-line outcome, what you have to do, collapsed sections (changes, checks) and the questions waiting on you; one row above the prompt answers them from the keyboard. A question you skipped comes back in the next reply |
+| [sitrep](sitrep/README.md) | Under each reply, a box with the status, a one-line outcome, what you have to do, collapsed sections (changes, checks) and the questions waiting on you; one row above the prompt answers them from the keyboard. The box is excerpted from the reply's own lines after a long reply |
 | [ctx-relay](ctx-relay/README.md) | Band with context size, per-turn cost and the prompt cache countdown. Past the handoff line it writes a handoff file, runs `/clear`, and resumes in the new conversation. Needs no other skill or hook |
 
 ## sitrep
