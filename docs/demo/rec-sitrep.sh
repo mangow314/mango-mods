@@ -1,5 +1,5 @@
 #!/bin/bash
-# 錄 sitrep.gif 的原始影片：在拋棄式 repo 開 tmux -L shot 跑 Claude，送提示、等摘錄框、選答，
+# 錄 sitrep.gif 的原始影片：在拋棄式 repo 開 tmux -L shot 跑 Claude（sitrep 標籤設成 en），送提示、等摘錄框、選答，
 # 同時用 record.sh 錄影。剪接與轉 GIF 見 README.md「GIFs」一節。
 # 產出（本檔同目錄）：sitrep-raw.mp4、events.log（各動作在第幾秒，影片 0 秒約等於 prompt）、final.txt（結束畫面）
 set -euo pipefail
@@ -24,7 +24,7 @@ git -C "$repo" -c user.name=demo -c user.email=demo@example.com commit -qm init
 tmux -L shot -f /dev/null new-session -d -s s -x 120 -y 34 -c "$repo" \
   "env CLAUDE_CODE_TMUX_TRUECOLOR=1 STOP_CLAIM_AUDIT_LOG=/nonexistent claude --model claude-sonnet-5-5 \
     --plugin-dir $M/sitrep --plugin-dir $M/ctx-relay \
-    --settings '{\"enabledPlugins\":{\"filetree@claude-code-filetree\":false,\"ctx-relay@mango-mods\":false,\"sitrep@mango-mods\":false}}' \
+    --settings '{\"enabledPlugins\":{\"filetree@claude-code-filetree\":false,\"ctx-relay@mango-mods\":false,\"sitrep@mango-mods\":false},\"pluginConfigs\":{\"sitrep\":{\"options\":{\"language\":\"en\"}}}}' \
     --allowedTools 'Bash(python3 greet.py)' 'Bash(python greet.py)' Edit; echo CLAUDE-EXIT=\$?; sleep 600"
 tmux -L shot set -g status off
 tmux -L shot set -g window-size manual
@@ -67,8 +67,8 @@ mark prompt
 tmux -L shot send-keys -t s -l "$prompt"
 tmux -L shot send-keys -t s Enter
 
-wait_for '摘錄中' 85 present && mark excerpt-pending
-wait_for '摘錄中' 30 absent && mark excerpt-done
+wait_for 'excerpting' 85 present && mark excerpt-pending
+wait_for 'excerpting' 30 absent && mark excerpt-done
 sleep 2
 mark C-x;  tmux -L shot send-keys -t s C-x; sleep 1.5
 mark Tab;  tmux -L shot send-keys -t s Tab; sleep 1.5

@@ -21,6 +21,134 @@ import type { AgentNote, ChangeNote, Evidence, Excerpt, Facet, Item, Option, Sum
 //    沒地方放 pane 時改用文字回；子代理在跑、pane 沒畫出來時，prompt 上方多一行「子代理 N 個進行中」。
 
 const TAG = 'sitrep'
+
+// 畫面上的字：userConfig language 選 en（預設）或 zh-TW；回覆內容照對話語言，不在這裡
+const ZH = {
+  status: { '?': '等你決定', '>': '等你動手', '!': '卡住', '~': '進行中', '✓': '完成' } as Record<string, string>,
+  cmdPane: 'sitrep：開關狀態 pane（需要你、進行中、任務、證據、變更）',
+  cmdAgents: 'sitrep：開關子代理 pane（進行中、已結束，含 model、context、輸出 token、耗時）',
+  registerFailed: (name: string, err: string) => `${TAG} 註冊 /${name} 失敗：${err}`,
+  logFailed: (what: string, err: string) => `${TAG} ${what}失敗：${err}`,
+  logSpawn: '記錄子代理啟動',
+  logUsage: '記錄子代理用量',
+  agentsClosed: `${TAG}：已關閉子代理 pane（/agents-info 可再打開）`,
+  agentsTitle: '子代理',
+  agentsOpened: `${TAG}：已打開子代理 pane（再打一次 /agents-info 關閉）`,
+  paneClosed: `${TAG}：已關閉狀態 pane（/sitrep-pane 可再打開）`,
+  paneOpened: `${TAG}：已打開狀態 pane（實驗中；再打一次 /sitrep-pane 關閉）`,
+  excerpting: '摘錄中',
+  noExcerpt: '本輪結束（無摘錄）',
+  agentsRunning: (n: number, out: string) => `子代理 ${n} 個進行中 · 輸出 ${out}`,
+  agentsHint: '   /agents-info 看細節',
+  openCount: (n: number) => `? ${n} 題待決`,
+  recommended: ' 建議',
+  recShort: ' 建議',
+  rowHint: '   · 聚焦後按字母，只填入輸入框',
+  yourMove: '等你動手：',
+  figure: '圖',
+  dotFigure: (nodes: number, edges: number) => `圖：${nodes} 個節點、${edges} 條邊（dot 原文）`,
+  excerptFailed: (reason: string) => `摘錄失敗：${reason}`,
+  excerptTag: '摘錄 ',
+  fullText: '  (ctrl+o 看全文)',
+  timedOut: (s: number) => `逾時或中止（${s}s）`,
+  mismatch: '回傳的編號對不上原文',
+  superseded: '本輪結束（新一輪已開始，摘錄作廢）',
+  needsYou: (n: number) => `需要你 · ${n}`,
+  running: '進行中',
+  subagent: (d: string) => `子代理 ${d}`,
+  background: (b: string) => `背景 ${b}`,
+  tasks: (done: number, all: number) => `任務 ${done}/${all}`,
+  evidence: '證據',
+  evidenceAge: (n: number) => `證據 · ${n} 輪前`,
+  moreProof: (n: number) => `…還有 ${n} 行，點結論框的 › 驗證看全部`,
+  changes: '變更 · 未 commit',
+  notThisTime: '（不是這次改的）',
+  files: (n: number) => `${n} 檔`,
+  nothing: '目前沒有需要你或進行中的事',
+  more: (n: number) => `…還有 ${n} 項`,
+  noAgents: '這個 session 還沒派過子代理',
+  finished: '已結束',
+  moreAgents: (n: number) => `…還有 ${n} 個`,
+  agentsHeader: (all: number, running: number, out: string) => `共 ${all} 個 · 進行中 ${running} · 輸出 ${out}`,
+  requests: (n: number) => `${n} 次請求`,
+  output: (out: string) => `輸出 ${out}`,
+  moreFinished: (n: number) => `…還有 ${n} 個已結束`,
+  noPane: `${TAG}：這裡沒有能放 pane 的畫面，改用文字列出子代理`,
+  stateRunning: '執行中',
+  stateDone: '完成',
+  stateFailed: '失敗',
+  stateKilled: '已中止',
+  optionsLabel: '利弊',
+  optionsSummary: '各選項的說明與建議',
+  backInReply: '（已放回正文）',
+  youDo: '你要做  ',
+  thenI: '之後我  ',
+  notFilled: (why: string | undefined) => `${TAG}：沒填進提示框（${why ?? '原因不明'}）`,
+}
+type Texts = typeof ZH
+const EN: Texts = {
+  status: { '?': 'Your call', '>': 'Your move', '!': 'Blocked', '~': 'In progress', '✓': 'Done' },
+  cmdPane: 'sitrep: toggle the status pane (needs you, running, tasks, evidence, changes)',
+  cmdAgents: 'sitrep: toggle the subagent pane (running and finished, with model, context, output tokens, time)',
+  registerFailed: (name, err) => `${TAG} could not register /${name}: ${err}`,
+  logFailed: (what, err) => `${TAG} ${what} failed: ${err}`,
+  logSpawn: 'recording a subagent start',
+  logUsage: 'recording subagent usage',
+  agentsClosed: `${TAG}: closed the subagent pane (/agents-info opens it again)`,
+  agentsTitle: 'Subagents',
+  agentsOpened: `${TAG}: opened the subagent pane (/agents-info again closes it)`,
+  paneClosed: `${TAG}: closed the status pane (/sitrep-pane opens it again)`,
+  paneOpened: `${TAG}: opened the status pane (experimental; /sitrep-pane again closes it)`,
+  excerpting: 'excerpting',
+  noExcerpt: 'turn ended (no excerpt)',
+  agentsRunning: (n, out) => `${n} subagent${n === 1 ? '' : 's'} running · output ${out}`,
+  agentsHint: '   /agents-info for details',
+  openCount: n => `? ${n} open`,
+  recommended: ' recommended',
+  recShort: ' rec',
+  rowHint: '   · focus, then press a letter; only fills the prompt',
+  yourMove: 'Your move: ',
+  figure: 'figure',
+  dotFigure: (nodes, edges) => `figure: ${nodes} nodes, ${edges} edges (dot source)`,
+  excerptFailed: reason => `excerpt failed: ${reason}`,
+  excerptTag: 'excerpt ',
+  fullText: '  (ctrl+o for the full text)',
+  timedOut: s => `timed out or aborted (${s}s)`,
+  mismatch: 'line numbers did not match the reply',
+  superseded: 'turn ended (a new turn started; excerpt dropped)',
+  needsYou: n => `Needs you · ${n}`,
+  running: 'Running',
+  subagent: d => `subagent ${d}`,
+  background: b => `background ${b}`,
+  tasks: (done, all) => `Tasks ${done}/${all}`,
+  evidence: 'Evidence',
+  evidenceAge: n => `Evidence · ${n} turn${n === 1 ? '' : 's'} ago`,
+  moreProof: n => `…${n} more lines; open the checks row in the box to see all`,
+  changes: 'Changes · uncommitted',
+  notThisTime: ' (not changed this turn)',
+  files: n => `${n} file${n === 1 ? '' : 's'}`,
+  nothing: 'Nothing needs you and nothing is running',
+  more: n => `…${n} more`,
+  noAgents: 'No subagents in this session yet',
+  finished: 'Finished',
+  moreAgents: n => `…${n} more`,
+  agentsHeader: (all, running, out) => `${all} total · ${running} running · output ${out}`,
+  requests: n => `${n} request${n === 1 ? '' : 's'}`,
+  output: out => `output ${out}`,
+  moreFinished: n => `…${n} more finished`,
+  noPane: `${TAG}: no room for a pane here; listing subagents as text`,
+  stateRunning: 'running',
+  stateDone: 'done',
+  stateFailed: 'failed',
+  stateKilled: 'killed',
+  optionsLabel: 'Options',
+  optionsSummary: 'what each option means, and the pick',
+  backInReply: ' (back in the reply)',
+  youDo: 'You do  ',
+  thenI: 'Then I  ',
+  notFilled: why => `${TAG}: could not fill the prompt (${why ?? 'unknown reason'})`,
+}
+let T: Texts = EN
 const KEEP_TURNS = 50
 const KEEP_AGENTS = 50
 const PANE = 'sitrep'
@@ -46,14 +174,14 @@ const BLUE = 'suggestion'
 const NEED_BG = 'userMessageBackground'
 const LINE = 'subtle'
 // 每輪結論框（學 your-turn 的圓角框，標題嵌在上框線）：框線是暗一階的狀態色（borderDimColor），標題用亮的；只有「等你決定」是黃
-const FRAMES: Record<string, { title: string; word: string }> = {
-  '?': { title: YELLOW, word: '等你決定' },
-  '>': { title: YELLOW, word: '等你動手' },
-  '!': { title: RED, word: '卡住' },
-  '~': { title: BLUE, word: '進行中' },
-  '✓': { title: GREEN, word: '完成' },
+const FRAMES: Record<string, { title: string }> = {
+  '?': { title: YELLOW },
+  '>': { title: YELLOW },
+  '!': { title: RED },
+  '~': { title: BLUE },
+  '✓': { title: GREEN },
 }
-const DONE_FRAME = { title: GREEN, word: '完成' }
+const DONE_FRAME = { title: GREEN }
 const BOX_MAX = 88
 // TurnDuration 的耗時和 turn.complete 的不一定分毫不差（實測 13s 對得上、42s 對不上）：取差距最小、在這範圍內的那筆
 const MATCH_MS = 3000
@@ -94,7 +222,8 @@ const touchedAtom = atom({ plugin: 'sitrep', key: 'touched' } as const, [] as st
 const paneOpenAtom = atom({ plugin: 'sitrep', key: 'paneOpen' } as const, false)
 const pendingAtom = atom({ plugin: 'sitrep', key: 'pending' } as const, null as { id: string; decisions: Item[]; todo: string[] } | null)
 
-export const register: Register = on => {
+export const register: Register = (on, options) => {
+  T = options.language === 'zh-TW' ? ZH : EN
   on('turn.start', async ($, e, next) => {
     turnGen++
     return next(e)
@@ -104,14 +233,14 @@ export const register: Register = on => {
     const result = await next(e)
     // 名稱衝突會丟例外，包住免得中斷 hook
     try {
-      await $.command.register({ name: 'sitrep-pane', description: 'sitrep：開關狀態 pane（需要你、進行中、任務、證據、變更）' })
+      await $.command.register({ name: 'sitrep-pane', description: T.cmdPane })
     } catch (err) {
-      $.ui.log(`${TAG} 註冊 /sitrep-pane 失敗：${String(err)}`)
+      $.ui.log(T.registerFailed('sitrep-pane', String(err)))
     }
     try {
-      await $.command.register({ name: 'agents-info', description: 'sitrep：開關子代理 pane（進行中、已結束，含 model、context、輸出 token、耗時）' })
+      await $.command.register({ name: 'agents-info', description: T.cmdAgents })
     } catch (err) {
-      $.ui.log(`${TAG} 註冊 /agents-info 失敗：${String(err)}`)
+      $.ui.log(T.registerFailed('agents-info', String(err)))
     }
     return result
   })
@@ -120,10 +249,10 @@ export const register: Register = on => {
   on('command.run', { command: 'agents-info' }, async $ => {
     if ((await $.ui.panes()).some(p => p.id === AGENTS_PANE)) {
       await $.ui.close({ id: AGENTS_PANE })
-      return { text: `${TAG}：已關閉子代理 pane（/agents-info 可再打開）` }
+      return { text: T.agentsClosed }
     }
-    const opened = await $.ui.open({ id: AGENTS_PANE, title: '子代理', columns: 60 })
-    if (opened.isPlaced) return { text: `${TAG}：已打開子代理 pane（再打一次 /agents-info 關閉）` }
+    const opened = await $.ui.open({ id: AGENTS_PANE, title: T.agentsTitle, columns: 60 })
+    if (opened.isPlaced) return { text: T.agentsOpened }
     // 指令開的 pane 任何寬度都會畫；沒畫＝這裡沒有能放 pane 的畫面（雲端、-p、舊版桌面）：關掉免得下次變成「關閉」，清單改成文字回
     await $.ui.close({ id: AGENTS_PANE })
     return { text: await agentsText($) }
@@ -142,7 +271,7 @@ export const register: Register = on => {
       await update($, agentsAtom, list => [...list.filter(a => a.id !== id), note].slice(-KEEP_AGENTS))
       startTick($)
     } catch (err) {
-      $.ui.log(`${TAG} 記錄子代理啟動失敗：${String(err)}`)
+      $.ui.log(T.logFailed(T.logSpawn, String(err)))
     }
     return started
   }).catch(($, e, next) => next(e)) // 這個 hook 本身出錯也照常啟動子代理（next 已呼叫過就回放那次結果，不會啟動兩次）
@@ -164,7 +293,7 @@ export const register: Register = on => {
         steps: (a.steps ?? 0) + 1,
       })))
     } catch (err) {
-      $.ui.log(`${TAG} 記錄子代理用量失敗：${String(err)}`)
+      $.ui.log(T.logFailed(T.logUsage, String(err)))
     }
     return result
   })
@@ -173,10 +302,10 @@ export const register: Register = on => {
   on('command.run', { command: 'sitrep-pane' }, async $ => {
     if ((await $.ui.panes()).some(p => p.id === PANE)) {
       await $.ui.close({ id: PANE })
-      return { text: `${TAG}：已關閉狀態 pane（/sitrep-pane 可再打開）` }
+      return { text: T.paneClosed }
     }
     await openPane($)
-    return { text: `${TAG}：已打開狀態 pane（實驗中；再打一次 /sitrep-pane 關閉）` }
+    return { text: T.paneOpened }
   })
 
   // pane 關了：結論框與 prompt 上方那列回來
@@ -232,8 +361,8 @@ export const register: Register = on => {
     // 有子代理在跑時每 250ms 重畫一次：轉圈字形和已跑時間證明它還活著（使用者 2026-10-08 選轉圈）；都跑完就停
     if ((await read($, agentsAtom)).some(a => !(a.status in TASK_MARKS))) startTick($)
     const note: TurnNote = id
-      ? { id, durationMs: e.durationMs, glyph: '…', outcome: '摘錄中' }
-      : { durationMs: e.durationMs, glyph: '–', outcome: '本輪結束（無摘錄）' }
+      ? { id, durationMs: e.durationMs, glyph: '…', outcome: T.excerpting }
+      : { durationMs: e.durationMs, glyph: '–', outcome: T.noExcerpt }
     await update($, turnsAtom, list => [...list, note].slice(-KEEP_TURNS))
     if (id) {
       // 不在這裡等模型：回合結束不能被摘錄拖住，回來後再補畫
@@ -278,8 +407,8 @@ export const register: Register = on => {
     const agentsLine = running.length > 0 ? (
       <Text key="above-agents" wrap="truncate-end">
         <Text color={BLUE} bold>{`${spin()} `}</Text>
-        <Text color={SOFT}>{`子代理 ${running.length} 個進行中 · 輸出 ${tokens(running.reduce((n, a) => n + (a.output ?? 0), 0))}`}</Text>
-        <Text color={DIM}>{'   /agents-info 看細節'}</Text>
+        <Text color={SOFT}>{T.agentsRunning(running.length, tokens(running.reduce((n, a) => n + (a.output ?? 0), 0)))}</Text>
+        <Text color={DIM}>{T.agentsHint}</Text>
       </Text>
     ) : null
     let line: RenderElement | null = null
@@ -289,24 +418,27 @@ export const register: Register = on => {
       // hotkey 只收一個小寫字母；數字不給：空的提示框裡按數字會直接按到 band 的按鈕，也會撞 ctx-relay 的 "1"
       line = (
         <Box key="above-row" flexDirection="row">
-          <Text color={YELLOW} bold>{`? ${open.length} 題待決`}</Text>
-          <Text color={BRIGHT}>{total > 1 ? `   ${n + 1}.` : '  '}</Text>
+          {/* 計數和選項不縮：英文較長時會被擠成兩行（實機），只讓最後的說明截斷 */}
+          <Box flexShrink={0}>
+            <Text color={YELLOW} bold>{T.openCount(open.length)}</Text>
+            <Text color={BRIGHT}>{total > 1 ? `   ${n + 1}.` : '  '}</Text>
+          </Box>
           {(d.options ?? []).map(o => {
             const hotkey = /^[a-z]$/i.test(o.key) ? o.key.toLowerCase() : undefined
             return (
-              <Box key={`above-opt-${o.key}`} flexDirection="row" marginLeft={2}>
+              <Box key={`above-opt-${o.key}`} flexDirection="row" marginLeft={2} flexShrink={0}>
                 <Button key={`above-pick-${n}-${o.key}`} plain label={clip(hotkey ? o.label : `${o.key} ${o.label}`, 24)} {...(hotkey ? { hotkey } : {})} onPress={() => pick($, pending.id, n, o.key, total)} />
-                {d.recommended === o.key ? <Text color={YELLOW}>{' 建議'}</Text> : null}
+                {d.recommended === o.key ? <Text color={YELLOW}>{T.recShort}</Text> : null}
               </Box>
             )
           })}
-          <Text color={DIM} wrap="truncate-end">{'   · 聚焦後按字母，只填入輸入框'}</Text>
+          <Text color={DIM} wrap="truncate-end">{T.rowHint}</Text>
         </Box>
       )
     } else if (hasAsk) {
       line = (
         <Text key="above-todo" wrap="truncate-end">
-          <Text color={YELLOW} bold>{'等你動手：'}</Text>
+          <Text color={YELLOW} bold>{T.yourMove}</Text>
           <Text>{todo}</Text>
         </Text>
       )
@@ -342,10 +474,10 @@ export const register: Register = on => {
           continue
         }
         // dot 區塊跟 ASCII 圖一樣畫原文，標籤附粗算的節點與邊數（不畫成圖片：Claude Code 在 tmux 裡關掉圖片，使用者 2026-10-08 選不做）
-        let label = '圖'
+        let label = T.figure
         if (p.kind === 'dot') {
           const c = countDot(p.text)
-          label = `圖：${c.nodes} 個節點、${c.edges} 條邊（dot 原文）`
+          label = T.dotFigure(c.nodes, c.edges)
         }
         out.push(
           <Box key={`fig-${i}`} flexDirection="column" marginLeft={2} marginY={1} alignSelf="flex-start">
@@ -366,7 +498,7 @@ export const register: Register = on => {
       return (
         <Box flexDirection="column">
           {await draw(e.props.text)}
-          <Text key="excerpt-note" color={DIM}>{ex.state === 'pending' ? '  … 摘錄中' : `  – 摘錄失敗：${ex.reason}`}</Text>
+          <Text key="excerpt-note" color={DIM}>{ex.state === 'pending' ? `  … ${T.excerpting}` : `  – ${T.excerptFailed(ex.reason)}`}</Text>
         </Box>
       )
     }
@@ -418,7 +550,10 @@ export const register: Register = on => {
         </Box>
       )
     }
-    const items = await itemRows($, e, found.id, found.summary.items)
+    // 框寬固定（不跟內容跳，實機 36～81 欄）：終端寬減 4，最寬 88
+    const width = Math.min((e.viewport?.columns ?? 92) - 4, BOX_MAX)
+    // 選項標籤可用的欄數：框線 2、內距 2、縮排 2、選項鍵 2、空一格
+    const items = await itemRows($, e, found.id, found.summary.items, width - 9)
     const rows = [
       <Text key="outcome" color={BRIGHT} bold>{found.summary.outcome}</Text>,
       ...items.todo,
@@ -429,8 +564,6 @@ export const register: Register = on => {
     ]
     // 標題疊在上框線（2026-10-09 使用者要再試）：框自己的子元素會被框線蓋掉（your-turn 2026-10-05 實測），
     // 所以標題是框的「後一個兄弟」、absolute 疊上去。舊紀錄：框頂捲出畫面時標題曾疊到內容上（實機 opus/s2:1），這次重看
-    // 框寬固定（不跟內容跳，實機 36～81 欄）：終端寬減 4，最寬 88
-    const width = Math.min((e.viewport?.columns ?? 92) - 4, BOX_MAX)
     return (
       <Box flexDirection="column">
         {body}
@@ -440,8 +573,8 @@ export const register: Register = on => {
           </Box>
           <Box key="title" position="absolute" top={0} left={2} flexDirection="row">
             {isOld ? <Button key="box-close" plain label="▾" onPress={toggleBox} /> : null}
-            <Text color={frame.title} bold>{` ${glyph} ${frame.word} `}</Text>
-            <Text color={DIM}>{'摘錄 '}</Text>
+            <Text color={frame.title} bold>{` ${glyph} ${T.status[glyph] ?? T.status['✓']} `}</Text>
+            <Text color={DIM}>{T.excerptTag}</Text>
           </Box>
           {turn ? <Box key="time" position="absolute" top={0} right={2}><Text color={DIM}>{` ${duration(turn.durationMs)} `}</Text></Box> : null}
         </Box>
@@ -486,7 +619,7 @@ export const register: Register = on => {
         <Text color={DIM}>{'› '}</Text>
         <Text color={SOFT}>{`${from.name}  `}</Text>
         <Text>{clip(first, 90)}</Text>
-        <Text color={DIM}>{'  (ctrl+o 看全文)'}</Text>
+        <Text color={DIM}>{T.fullText}</Text>
       </Text>
     )
   })
@@ -498,23 +631,23 @@ async function excerpt($: EngineInterface, id: string, answer: string, lines: st
   const r = await $.model.complete({ model: EXCERPT_MODEL, system: PICK_RULES, prompt, effort: 'low', maxTokens: 600, timeoutMs: EXCERPT_TIMEOUT_MS })
     .catch((err: unknown) => ({ isAnswered: false as const, reason: String(err) }))
   let result: Excerpt
-  if (!r.isAnswered) result = { state: 'failed', reason: r.reason === 'aborted' ? `逾時或中止（${EXCERPT_TIMEOUT_MS / 1000}s）` : r.reason }
+  if (!r.isAnswered) result = { state: 'failed', reason: r.reason === 'aborted' ? T.timedOut(EXCERPT_TIMEOUT_MS / 1000) : r.reason }
   else {
     const summary = buildSummary(lines, r.text)
-    result = summary ? { state: 'ready', summary } : { state: 'failed', reason: '回傳的編號對不上原文' }
+    result = summary ? { state: 'ready', summary } : { state: 'failed', reason: T.mismatch }
   }
   if (gen !== turnGen) {
     await update($, excerptsAtom, all => {
       const { [id]: _, ...rest } = all
       return rest
     })
-    await update($, turnsAtom, list => list.map(t => (t.id === id ? { durationMs: t.durationMs, glyph: '–', outcome: '本輪結束（新一輪已開始，摘錄作廢）' } : t)))
+    await update($, turnsAtom, list => list.map(t => (t.id === id ? { durationMs: t.durationMs, glyph: '–', outcome: T.superseded } : t)))
     $.ui.invalidate('ui.render')
     return
   }
   await update($, excerptsAtom, all => keepLast({ ...all, [id]: result }))
   if (result.state === 'failed') {
-    await update($, turnsAtom, list => list.map(t => (t.id === id ? { ...t, glyph: '–', outcome: `摘錄失敗：${result.reason}` } : t)))
+    await update($, turnsAtom, list => list.map(t => (t.id === id ? { ...t, glyph: '–', outcome: T.excerptFailed(result.reason) } : t)))
     $.ui.invalidate('ui.render')
     return
   }
@@ -526,7 +659,7 @@ async function excerpt($: EngineInterface, id: string, answer: string, lines: st
   await update($, pendingAtom, () => ({ id, decisions: decisionsOf(summary.items), todo }))
   await update($, lastAtom, () => ({ id, summary }))
   // 證據：沿用最近一輪有「驗證」段的結果，直到下一次驗證蓋過去（問題輪通常沒有驗證段，pane 卻正好開著）
-  const verify = summary.facets.map((f, i) => ({ f, i })).filter(({ f }) => f.label.includes('驗證'))
+  const verify = summary.facets.map((f, i) => ({ f, i })).filter(({ f }) => /驗證|verif|check|test/i.test(f.label))
   if (verify.length > 0) {
     // 細節：回覆裡「驗證」那段的前幾行（跑過的指令與結果），pane 的證據段畫在小標籤下面
     const { sections } = cutSections(answer, summary.facets, () => false)
@@ -577,7 +710,7 @@ async function drawPane($: EngineInterface, e: RenderEvent, width: number) {
                 <Box key={`pane-opt-${n}-${o.key}`} flexDirection="row" marginRight={3}>
                   {picked === o.key ? <Text color={BRIGHT} bold>{'● '}</Text> : null}
                   <Button key={`pane-pick-${n}-${o.key}`} plain label={clip(hotkey ? o.label : `${letter}: ${o.label}`, 24)} {...(hotkey ? { hotkey } : {})} {...(picked !== undefined && picked !== o.key ? { dimColor: true } : {})} onPress={() => pick($, pending.id, n, o.key, total)} />
-                  {d.recommended === o.key && picked === undefined ? <Text color={YELLOW}>{' 建議'}</Text> : null}
+                  {d.recommended === o.key && picked === undefined ? <Text color={YELLOW}>{T.recommended}</Text> : null}
                 </Box>
               )
             })}
@@ -590,7 +723,7 @@ async function drawPane($: EngineInterface, e: RenderEvent, width: number) {
   for (const [i, item] of userNext.entries()) {
     need.push(<Text key={`you-${i}`}><Text color={YELLOW} bold>{'> '}</Text>{clip(item.text, width - 2)}</Text>)
   }
-  sections.push({ title: `需要你 · ${left + userNext.length}`, color: YELLOW, rows: need, max: 8 })
+  sections.push({ title: T.needsYou(left + userNext.length), color: YELLOW, rows: need, max: 8 })
 
   // 進行中：轉圈字形＋子代理／背景 描述，已跑時間靠右
   const now = await $.clock.now().catch(() => null)
@@ -604,11 +737,11 @@ async function drawPane($: EngineInterface, e: RenderEvent, width: number) {
   )
   const agents = (await read($, agentsAtom)).filter(a => !(a.status in TASK_MARKS))
   sections.push({
-    title: '進行中',
+    title: T.running,
     color: DIM,
     rows: [
-      ...agents.map(a => runningRow(`run-${a.id}`, `子代理 ${a.description}`, a.startedAt)),
-      ...(await read($, backgroundAtom)).map((b, i) => runningRow(`bg-${i}`, `背景 ${b}`, undefined)),
+      ...agents.map(a => runningRow(`run-${a.id}`, T.subagent(a.description), a.startedAt)),
+      ...(await read($, backgroundAtom)).map((b, i) => runningRow(`bg-${i}`, T.background(b), undefined)),
     ],
     max: 5,
   })
@@ -618,7 +751,7 @@ async function drawPane($: EngineInterface, e: RenderEvent, width: number) {
   const tasks = await read($, tasksAtom)
   const current = tasks.findIndex(t => !t.done)
   sections.push({
-    title: `任務 ${tasks.filter(t => t.done).length}/${tasks.length}`,
+    title: T.tasks(tasks.filter(t => t.done).length, tasks.length),
     color: DIM,
     rows: tasks.map((t, i) => (
       <Text key={`task-${t.id}`}>
@@ -634,7 +767,7 @@ async function drawPane($: EngineInterface, e: RenderEvent, width: number) {
   const chips = evidence?.chips ?? []
   const proof = evidence?.proof ?? []
   sections.push({
-    title: evidence && evidence.age > 0 ? `證據 · ${evidence.age} 輪前` : '證據',
+    title: evidence && evidence.age > 0 ? T.evidenceAge(evidence.age) : T.evidence,
     color: DIM,
     rows: chips.length === 0 ? [] : [
       ...[
@@ -651,7 +784,7 @@ async function drawPane($: EngineInterface, e: RenderEvent, width: number) {
       ],
       // 細節：回覆「驗證」段的前 4 行（指令與結果），超過的看結論框的 › 驗證
       ...proof.slice(0, 4).map((l, i) => <Text key={`proof-${i}`} color={SOFT}>{clip(l, width)}</Text>),
-      ...(proof.length > 4 ? [<Text key="proof-more" color={DIM}>{`…還有 ${proof.length - 4} 行，點結論框的 › 驗證看全部`}</Text>] : []),
+      ...(proof.length > 4 ? [<Text key="proof-more" color={DIM}>{T.moreProof(proof.length - 4)}</Text>] : []),
     ],
     max: 6,
   })
@@ -667,7 +800,7 @@ async function drawPane($: EngineInterface, e: RenderEvent, width: number) {
   }
   const pathWidth = Math.max(12, width - 14)
   sections.push({
-    title: '變更 · 未 commit',
+    title: T.changes,
     color: DIM,
     rows: [
       ...mine.map((c, i) => (
@@ -679,8 +812,8 @@ async function drawPane($: EngineInterface, e: RenderEvent, width: number) {
       )),
       ...[...others].map(([top, n]) => (
         <Box key={`other-${top}`} flexDirection="row">
-          <Box width={pathWidth}><Text color={DIM}>{clip(`${top}（不是這次改的）`, pathWidth - 1)}</Text></Box>
-          <Text color={DIM}>{`${n} 檔`}</Text>
+          <Box width={pathWidth}><Text color={DIM}>{clip(`${top}${T.notThisTime}`, pathWidth - 1)}</Text></Box>
+          <Text color={DIM}>{T.files(n)}</Text>
         </Box>
       )),
     ],
@@ -688,13 +821,13 @@ async function drawPane($: EngineInterface, e: RenderEvent, width: number) {
   })
 
   const shown = sections.filter(sec => sec.rows.length > 0)
-  if (shown.length === 0) return <Text color={DIM}>{'目前沒有需要你或進行中的事'}</Text>
+  if (shown.length === 0) return <Text color={DIM}>{T.nothing}</Text>
   return (
     <Box flexDirection="column">
       {shown.map(sec => (
         <Box key={`sec-${sec.title}`} flexDirection="column" marginBottom={1}>
           <Text color={sec.color} bold={sec.color === YELLOW}>{sec.title}</Text>
-          {sec.rows.length > sec.max ? [...sec.rows.slice(0, sec.max - 1), <Text key="more" color={DIM}>{`…還有 ${sec.rows.length - sec.max + 1} 項`}</Text>] : sec.rows}
+          {sec.rows.length > sec.max ? [...sec.rows.slice(0, sec.max - 1), <Text key="more" color={DIM}>{T.more(sec.rows.length - sec.max + 1)}</Text>] : sec.rows}
         </Box>
       ))}
     </Box>
@@ -705,7 +838,7 @@ async function drawPane($: EngineInterface, e: RenderEvent, width: number) {
 function chipOf(text: string): { glyph: string; color: string; text: string } {
   const bare = text.replace(/[✓✔✗✘]/g, '').trim()
   if (/[✗✘]|fail|失敗/i.test(text)) return { glyph: '✗', color: RED, text: bare }
-  if (/未|沒|–|待/.test(text) && !/[✓✔]/.test(text)) return { glyph: '○', color: DIM, text: bare }
+  if (/未|沒|–|待|\bnot\b|pending|skipped/i.test(text) && !/[✓✔]/.test(text)) return { glyph: '○', color: DIM, text: bare }
   return { glyph: '✓', color: GREEN, text: bare }
 }
 
@@ -761,7 +894,7 @@ function startTick($: EngineInterface) {
 async function drawAgents($: EngineInterface, e: RenderEvent, width: number) {
   const { Box, Text } = $.ui.resolve(e)
   const list = await read($, agentsAtom)
-  if (list.length === 0) return <Text color={DIM}>{'這個 session 還沒派過子代理'}</Text>
+  if (list.length === 0) return <Text color={DIM}>{T.noAgents}</Text>
   const now = await $.clock.now().catch(() => null)
   const { running, ended } = splitAgents(list)
   const row = (a: AgentNote) => {
@@ -786,15 +919,15 @@ async function drawAgents($: EngineInterface, e: RenderEvent, width: number) {
       <Text color={SOFT}>{agentsHeader(list)}</Text>
       {running.length > 0 ? (
         <Box key="running" flexDirection="column" marginTop={1}>
-          <Text color={BLUE}>{'進行中'}</Text>
+          <Text color={BLUE}>{T.running}</Text>
           {running.map(row)}
         </Box>
       ) : null}
       {ended.length > 0 ? (
         <Box key="ended" flexDirection="column" marginTop={1}>
-          <Text color={DIM}>{'已結束'}</Text>
+          <Text color={DIM}>{T.finished}</Text>
           {ended.slice(0, 10).map(row)}
-          {ended.length > 10 ? <Text key="more" color={DIM}>{`…還有 ${ended.length - 10} 個`}</Text> : null}
+          {ended.length > 10 ? <Text key="more" color={DIM}>{T.moreAgents(ended.length - 10)}</Text> : null}
         </Box>
       ) : null}
     </Box>
@@ -811,7 +944,7 @@ function splitAgents(list: AgentNote[]) {
 
 function agentsHeader(list: AgentNote[]): string {
   const output = list.reduce((n, a) => n + (a.output ?? 0), 0)
-  return `共 ${list.length} 個 · 進行中 ${splitAgents(list).running.length} · 輸出 ${tokens(output)}`
+  return T.agentsHeader(list.length, splitAgents(list).running.length, tokens(output))
 }
 
 // 一個子代理的狀態符號、耗時（跑完的是總耗時，跑的時候是已跑時間）、灰字細節：model · effort · ctx · 請求次數 · 輸出
@@ -824,8 +957,8 @@ function agentLine(a: AgentNote, now: number | null) {
     a.model ? shortModel(a.model) : '',
     a.effort !== undefined ? String(a.effort) : '',
     a.context !== undefined ? `ctx ${tokens(a.context)}` : '',
-    a.steps ? `${a.steps} 次請求` : '',
-    a.output ? `輸出 ${tokens(a.output)}` : '',
+    a.steps ? T.requests(a.steps) : '',
+    a.output ? T.output(tokens(a.output)) : '',
   ].filter(x => x !== '').join(' · ')
   return { mark, time, detail }
 }
@@ -841,15 +974,15 @@ async function runningAgents($: EngineInterface): Promise<AgentNote[]> {
 // 沒地方放 pane 時 /agents-info 回的文字：跟 pane 同樣的內容，每個子代理一行
 async function agentsText($: EngineInterface): Promise<string> {
   const list = await read($, agentsAtom)
-  if (list.length === 0) return `${TAG}：這個 session 還沒派過子代理`
+  if (list.length === 0) return `${TAG}: ${T.noAgents}`
   const now = await $.clock.now().catch(() => null)
   const { running, ended } = splitAgents(list)
   const lines = [...running, ...ended.slice(0, 10)].map(a => {
     const { mark, time, detail } = agentLine(a, now)
     return [`${mark.glyph} ${a.type}  ${a.description}`, time, detail].filter(x => x !== '').join(' · ')
   })
-  if (ended.length > 10) lines.push(`…還有 ${ended.length - 10} 個已結束`)
-  return [`${TAG}：這裡沒有能放 pane 的畫面，改用文字列出子代理`, agentsHeader(list), ...lines].join('\n')
+  if (ended.length > 10) lines.push(T.moreFinished(ended.length - 10))
+  return [T.noPane, agentsHeader(list), ...lines].join('\n')
 }
 
 // claude-opus-5-5 → opus-5-5；拿掉日期尾巴和 [1m] 這類標記
@@ -871,8 +1004,8 @@ async function agentRows($: EngineInterface, e: RenderEvent, card: string) {
   const now = await $.clock.now().catch(() => null)
   return agents.map(a => {
     const mark = TASK_MARKS[a.status] ?? { glyph: spin(), color: BLUE }
-    const running = now !== null && a.startedAt !== undefined ? `執行中 ${duration(now - a.startedAt)}` : '執行中'
-    const state = a.status === 'completed' ? (a.durationMs !== undefined ? duration(a.durationMs) : '完成') : a.status === 'failed' ? '失敗' : a.status === 'killed' ? '已中止' : running
+    const running = now !== null && a.startedAt !== undefined ? `${T.stateRunning} ${duration(now - a.startedAt)}` : T.stateRunning
+    const state = a.status === 'completed' ? (a.durationMs !== undefined ? duration(a.durationMs) : T.stateDone) : a.status === 'failed' ? T.stateFailed : a.status === 'killed' ? T.stateKilled : running
     return (
       <Text key={`agent-${a.id}`}>
         <Text color={mark.color} bold>{`${mark.glyph} `}</Text>
@@ -994,7 +1127,7 @@ function cleanLine(l: string): string {
 // 選項行：「選項 A：…」「A. …」「**A**）…」→ key＋標籤；認不出字母就照順序給 A、B…
 function optionOf(line: string, n: number): Option {
   const text = cleanLine(line)
-  const m = /^(?:選項\s*)?([A-Za-z])\s*[.)）:：、]\s*(.+)$/.exec(text)
+  const m = /^(?:(?:選項|option)\s*)?([A-Za-z])\s*[.)）:：、]\s*(.+)$/i.exec(text)
   return m ? { key: (m[1] ?? '').toUpperCase(), label: m[2] ?? '' } : { key: String.fromCharCode(65 + n), label: text }
 }
 
@@ -1112,8 +1245,8 @@ function withDecisionFacet(summary: Summary | null, text: string): Facet[] {
   const facets = summary?.facets ?? []
   if (!summary || decisionsOf(summary.items).length === 0) return facets
   const taken = new Set(facets.map(f => norm(f.heading ?? '')))
-  const heading = text.split('\n').map(l => /^#{1,6}\s+(.+?)\s*#*\s*$/.exec(l)?.[1]).find(h => h !== undefined && h.includes('決定') && !taken.has(norm(h)))
-  return heading === undefined ? facets : [...facets, { label: '利弊', summary: '各選項的說明與建議', heading }]
+  const heading = text.split('\n').map(l => /^#{1,6}\s+(.+?)\s*#*\s*$/.exec(l)?.[1]).find(h => h !== undefined && /決定|decision|choose|choice/i.test(h) && !taken.has(norm(h)))
+  return heading === undefined ? facets : [...facets, { label: T.optionsLabel, summary: T.optionsSummary, heading }]
 }
 
 function norm(s: string): string {
@@ -1137,14 +1270,14 @@ function facetRows($: EngineInterface, e: RenderEvent, id: string, facets: Facet
           : <Text color={DIM}>{'·'}</Text>}
         {/* 灰階分層（不加新顏色）：標籤亮一階加粗、內文用亮字，「之後我」維持最暗，兩者分得開（使用者實機：收合列太灰不顯眼） */}
         <Text color={SOFT} bold>{` ${f.label}${' '.repeat(width - cols(f.label))}  `}</Text>
-        <Text color={BRIGHT}>{isOpen ? `${f.summary}（已放回正文）` : f.summary}</Text>
+        <Text color={BRIGHT}>{isOpen ? `${f.summary}${T.backInReply}` : f.summary}</Text>
       </Box>
     )
   })
 }
 
 // 待你決定的題目（選項按鈕）、你要做的事（黃）、之後我接著做的事（灰）
-async function itemRows($: EngineInterface, e: RenderEvent, id: string, items: Item[]) {
+async function itemRows($: EngineInterface, e: RenderEvent, id: string, items: Item[], room: number) {
   const answers = (await read($, answersAtom))[id] ?? {}
   const { Box, Button, Text } = $.ui.resolve(e)
   const decisions = decisionsOf(items)
@@ -1163,10 +1296,15 @@ async function itemRows($: EngineInterface, e: RenderEvent, id: string, items: I
           return (
             <Box key={`opt-${n}-${o.key}`} flexDirection="row">
               <Button key={`pick-${n}-${o.key}`} plain label={`${picked ? '●' : ' '}${o.key}`} onPress={() => pick($, id, n, o.key, decisions.length)} />
-              <Text>
-                {` ${o.label}`}
-                {d.recommended === o.key ? <Text color={YELLOW}>{' 建議'}</Text> : null}
-              </Text>
+              {/* 自己按欄寬斷行：引擎只在空白處換行，中文長句會整段跳到下一行（實機） */}
+              <Box flexDirection="column">
+                {wrapCols(o.label, room).map((l, i, all) => (
+                  <Text key={`opt-${n}-${o.key}-${i}`}>
+                    {` ${l}`}
+                    {d.recommended === o.key && i === all.length - 1 ? <Text color={YELLOW}>{T.recommended}</Text> : null}
+                  </Text>
+                ))}
+              </Box>
             </Box>
           )
         })}
@@ -1187,12 +1325,12 @@ async function itemRows($: EngineInterface, e: RenderEvent, id: string, items: I
   // 符號換成字（評審：> 和 ~ 第一次看不懂）；你要做的排在結論下第一行，之後我排最後
   const todo = others.filter(o => o.kind === 'user-next').map((o, i) => (
     <Text key={`todo-${i}`}>
-      <Text color={YELLOW} bold>{'你要做  '}</Text>
+      <Text color={YELLOW} bold>{T.youDo}</Text>
       <Text>{o.text}</Text>
     </Text>
   ))
   const later = others.filter(o => o.kind !== 'user-next').map((o, i) => (
-    <Text key={`later-${i}`} color={DIM}>{`之後我  ${o.text}`}</Text>
+    <Text key={`later-${i}`} color={DIM}>{`${T.thenI}${o.text}`}</Text>
   ))
   return { todo, questions, later }
 }
@@ -1203,7 +1341,7 @@ async function pick($: EngineInterface, id: string, n: number, key: string, tota
   const mine = all[id] ?? {}
   const draft = Object.keys(mine).map(Number).sort((a, b) => a - b).map(i => (total > 1 ? `${i + 1}. ${mine[i]}` : `${mine[i]}`)).join('  ')
   const filled = await $.prompt.fill({ text: draft })
-  if (!filled.isFilled) $.ui.toast(`${TAG}：沒填進提示框（${filled.refusal ?? '原因不明'}）`, { timeoutMs: 4000 })
+  if (!filled.isFilled) $.ui.toast(T.notFilled(filled.refusal), { timeoutMs: 4000 })
 }
 
 function firstSentence(text: string): string {
@@ -1242,6 +1380,24 @@ function cols(s: string): number {
 }
 
 // 超過 width 欄才截斷，最後一欄換成 …；剛好放得下的照原樣
+// 按顯示欄寬（中文算 2）切成多行，不管空白在哪
+function wrapCols(s: string, width: number): string[] {
+  const lines: string[] = []
+  let line = ''
+  let used = 0
+  for (const ch of s) {
+    const w = charCols(ch)
+    if (used + w > width && line !== '') {
+      lines.push(line)
+      line = ''
+      used = 0
+    }
+    line += ch
+    used += w
+  }
+  return [...lines, line]
+}
+
 function clip(s: string, width: number): string {
   if (cols(s) <= width) return s
   let out = ''
