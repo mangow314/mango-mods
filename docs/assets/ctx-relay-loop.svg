@@ -1,8 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="900" height="380" viewBox="0 0 900 380" role="img" aria-label="ctx-relay loop: context grows turn by turn until the bar reaches the handoff line; the mod writes a handoff file with Goal, Files, Verified and Next; runs /clear; and the fresh conversation reads the file and continues. Loops every 10 seconds.">
-  <!-- 10 秒一輪：0–35% context 長、35–45% 倒數、45–55% 寫交接檔、55–60% /clear、60–95% 新對話接續、95–100% 淡出重來 -->
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="380" viewBox="0 0 900 380" role="img" aria-label="ctx-relay loop: context grows turn by turn until the bar reaches the handoff line; the mod writes a handoff file with Goal, Files, Verified and Next; runs /clear; and the fresh conversation reads the file and continues. Loops every 14 seconds.">
+  <!-- 14 秒一輪：0–3.5 秒 context 長、3.5–5 倒數、5–7 寫交接檔、7–9 /clear、9–13.5 新對話接續、13.5–14 淡出重來 -->
   <style>
     text { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-    .t { animation-duration: 10s; animation-iteration-count: infinite; animation-timing-function: linear; }
+    .t { animation-duration: 14s; animation-iteration-count: infinite; animation-timing-function: linear; }
     .dim { fill: #8b949e; font-size: 12px; }
     .txt { fill: #c9d1d9; font-size: 13px; }
     .head { fill: #e6edf3; font-size: 13px; font-weight: 700; }
@@ -10,52 +10,44 @@
     .bot { fill: #21262d; }
 
     /* 對話列：依序出現，/clear 時一起消失 */
-    .l1 { animation-name: l1; } @keyframes l1 { 0%,4% { opacity: 0 } 6%,55% { opacity: 1 } 59%,100% { opacity: 0 } }
-    .l2 { animation-name: l2; } @keyframes l2 { 0%,11% { opacity: 0 } 13%,55% { opacity: 1 } 59%,100% { opacity: 0 } }
-    .l3 { animation-name: l3; } @keyframes l3 { 0%,18% { opacity: 0 } 20%,55% { opacity: 1 } 59%,100% { opacity: 0 } }
-    .l4 { animation-name: l4; } @keyframes l4 { 0%,25% { opacity: 0 } 27%,55% { opacity: 1 } 59%,100% { opacity: 0 } }
-    .l5 { animation-name: l5; } @keyframes l5 { 0%,31% { opacity: 0 } 33%,55% { opacity: 1 } 59%,100% { opacity: 0 } }
+    .l1 { animation-name: l1; } @keyframes l1 { 0%,2.86% { opacity: 0 } 4.64%,50% { opacity: 1 } 51.79%,100% { opacity: 0 } }
+    .l2 { animation-name: l2; } @keyframes l2 { 0%,7.86% { opacity: 0 } 9.64%,50% { opacity: 1 } 51.79%,100% { opacity: 0 } }
+    .l3 { animation-name: l3; } @keyframes l3 { 0%,12.86% { opacity: 0 } 14.64%,50% { opacity: 1 } 51.79%,100% { opacity: 0 } }
+    .l4 { animation-name: l4; } @keyframes l4 { 0%,17.86% { opacity: 0 } 19.64%,50% { opacity: 1 } 51.79%,100% { opacity: 0 } }
+    .l5 { animation-name: l5; } @keyframes l5 { 0%,22.14% { opacity: 0 } 23.93%,50% { opacity: 1 } 51.79%,100% { opacity: 0 } }
 
     /* 進度條：跟著 context 長、變色；/clear 後回到幾乎空的綠色 */
     .fill { transform-box: fill-box; transform-origin: left center; animation-name: fill; }
-    @keyframes fill {
-      0% { transform: scaleX(0.08); fill: #009E73 }
-      20% { transform: scaleX(0.55); fill: #009E73 }
-      27% { transform: scaleX(0.75); fill: #F0E442 }
-      33% { transform: scaleX(0.92); fill: #E69F00 }
-      36%,56% { transform: scaleX(1); fill: #D55E00 }
-      60%,95% { transform: scaleX(0.1); fill: #009E73 }
-      100% { transform: scaleX(0.08); fill: #009E73 }
-    }
+    @keyframes fill { 0% { transform: scaleX(0.08); fill: #009E73 } 14.29% { transform: scaleX(0.55); fill: #009E73 } 19.29% { transform: scaleX(0.75); fill: #F0E442 } 22.86% { transform: scaleX(0.92); fill: #E69F00 } 25%,52.86% { transform: scaleX(1); fill: #D55E00 } 57.14%,96.43% { transform: scaleX(0.1); fill: #009E73 } 100% { transform: scaleX(0.08); fill: #009E73 } }
     .icon { animation-name: icon; }
-    @keyframes icon { 0%,26% { fill: #009E73 } 27%,32% { fill: #F0E442 } 33%,35% { fill: #E69F00 } 36%,56% { fill: #D55E00 } 60%,100% { fill: #009E73 } }
+    @keyframes icon { 0%,18.57% { fill: #009E73 } 19.29%,22.14% { fill: #F0E442 } 22.86%,24.29% { fill: #E69F00 } 25%,52.86% { fill: #D55E00 } 57.14%,100% { fill: #009E73 } }
 
     /* band 右側文字：數字、倒數、接續，輪流出現 */
-    .s1 { animation-name: s1; } @keyframes s1 { 0%,35% { opacity: 1 } 36%,100% { opacity: 0 } }
-    .s2 { animation-name: s2; } @keyframes s2 { 0%,35% { opacity: 0 } 36%,45% { opacity: 1 } 46%,100% { opacity: 0 } }
-    .s3 { animation-name: s3; } @keyframes s3 { 0%,45% { opacity: 0 } 46%,56% { opacity: 1 } 57%,100% { opacity: 0 } }
-    .s4 { animation-name: s4; } @keyframes s4 { 0%,60% { opacity: 0 } 62%,95% { opacity: 1 } 99%,100% { opacity: 0 } }
+    .s1 { animation-name: s1; } @keyframes s1 { 0%,25% { opacity: 1 } 26.79%,100% { opacity: 0 } }
+    .s2 { animation-name: s2; } @keyframes s2 { 0%,25% { opacity: 0 } 26.79%,35.71% { opacity: 1 } 37.5%,100% { opacity: 0 } }
+    .s3 { animation-name: s3; } @keyframes s3 { 0%,35.71% { opacity: 0 } 37.5%,52.86% { opacity: 1 } 54.64%,100% { opacity: 0 } }
+    .s4 { animation-name: s4; } @keyframes s4 { 0%,65.71% { opacity: 0 } 67.5%,96.43% { opacity: 1 } 98.21%,100% { opacity: 0 } }
 
     /* 交接檔：四欄一欄一欄寫出來，留到接手後 */
-    .card { animation-name: card; } @keyframes card { 0%,44% { opacity: 0 } 46%,95% { opacity: 1 } 99%,100% { opacity: 0 } }
-    .f1 { animation-name: f1; } @keyframes f1 { 0%,46% { opacity: 0 } 48%,95% { opacity: 1 } 99%,100% { opacity: 0 } }
-    .f2 { animation-name: f2; } @keyframes f2 { 0%,48% { opacity: 0 } 50%,95% { opacity: 1 } 99%,100% { opacity: 0 } }
-    .f3 { animation-name: f3; } @keyframes f3 { 0%,50% { opacity: 0 } 52%,95% { opacity: 1 } 99%,100% { opacity: 0 } }
-    .f4 { animation-name: f4; } @keyframes f4 { 0%,52% { opacity: 0 } 54%,95% { opacity: 1 } 99%,100% { opacity: 0 } }
+    .card { animation-name: card; } @keyframes card { 0%,35% { opacity: 0 } 36.79%,96.43% { opacity: 1 } 98.21%,100% { opacity: 0 } }
+    .f1 { animation-name: f1; } @keyframes f1 { 0%,37.14% { opacity: 0 } 38.93%,96.43% { opacity: 1 } 98.21%,100% { opacity: 0 } }
+    .f2 { animation-name: f2; } @keyframes f2 { 0%,40% { opacity: 0 } 41.79%,96.43% { opacity: 1 } 98.21%,100% { opacity: 0 } }
+    .f3 { animation-name: f3; } @keyframes f3 { 0%,42.86% { opacity: 0 } 44.64%,96.43% { opacity: 1 } 98.21%,100% { opacity: 0 } }
+    .f4 { animation-name: f4; } @keyframes f4 { 0%,45.71% { opacity: 0 } 47.5%,96.43% { opacity: 1 } 98.21%,100% { opacity: 0 } }
 
     /* /clear 閃一下 */
-    .clear { animation-name: clear; } @keyframes clear { 0%,55% { opacity: 0 } 57% { opacity: 1 } 60%,100% { opacity: 0 } }
+    .clear { animation-name: clear; } @keyframes clear { 0%,50% { opacity: 0 } 52.86%,58.57% { opacity: 1 } 62.86%,100% { opacity: 0 } }
 
     /* 新對話：接續訊息、箭頭、回覆 */
-    .r1 { animation-name: r1; } @keyframes r1 { 0%,61% { opacity: 0 } 63%,95% { opacity: 1 } 99%,100% { opacity: 0 } }
-    .r2 { animation-name: r2; } @keyframes r2 { 0%,70% { opacity: 0 } 72%,95% { opacity: 1 } 99%,100% { opacity: 0 } }
-    .arrow { animation-name: arrow; } @keyframes arrow { 0%,62% { opacity: 0 } 64%,95% { opacity: 1 } 99%,100% { opacity: 0 } }
+    .r1 { animation-name: r1; } @keyframes r1 { 0%,65% { opacity: 0 } 66.79%,96.43% { opacity: 1 } 98.21%,100% { opacity: 0 } }
+    .r2 { animation-name: r2; } @keyframes r2 { 0%,75.71% { opacity: 0 } 77.5%,96.43% { opacity: 1 } 98.21%,100% { opacity: 0 } }
+    .arrow { animation-name: arrow; } @keyframes arrow { 0%,67.14% { opacity: 0 } 68.93%,96.43% { opacity: 1 } 98.21%,100% { opacity: 0 } }
 
     /* 底下的步驟說明 */
-    .c1 { animation-name: c1; } @keyframes c1 { 0%,35% { opacity: 1 } 36%,100% { opacity: 0 } }
-    .c2 { animation-name: c2; } @keyframes c2 { 0%,35% { opacity: 0 } 36%,55% { opacity: 1 } 56%,100% { opacity: 0 } }
-    .c3 { animation-name: c3; } @keyframes c3 { 0%,55% { opacity: 0 } 56%,60% { opacity: 1 } 61%,100% { opacity: 0 } }
-    .c4 { animation-name: c4; } @keyframes c4 { 0%,60% { opacity: 0 } 61%,100% { opacity: 1 } }
+    .c1 { animation-name: c1; } @keyframes c1 { 0%,25% { opacity: 1 } 26.79%,100% { opacity: 0 } }
+    .c2 { animation-name: c2; } @keyframes c2 { 0%,25% { opacity: 0 } 26.79%,50% { opacity: 1 } 51.79%,100% { opacity: 0 } }
+    .c3 { animation-name: c3; } @keyframes c3 { 0%,50% { opacity: 0 } 51.79%,64.29% { opacity: 1 } 66.07%,100% { opacity: 0 } }
+    .c4 { animation-name: c4; } @keyframes c4 { 0%,64.29% { opacity: 0 } 66.07%,100% { opacity: 1 } }
 
     @media (prefers-reduced-motion: reduce) {
       .t { animation: none; }

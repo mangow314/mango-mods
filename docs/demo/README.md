@@ -93,7 +93,7 @@ Extra requirement: `ffmpeg`.
 
 ## Concept animations (ctx-relay-loop.svg, sitrep-excerpt.svg)
 
-Hand-written SVGs with CSS keyframes, each a 10-second loop on a dark card so it
+Hand-written SVGs with CSS keyframes, each a 14-second loop on a dark card so it
 reads on both GitHub themes; `aria-label` describes each and
 `prefers-reduced-motion` shows a still frame. To check a change, render it
 paused at a few points of the loop in headless Chrome: wrap the SVG in an HTML

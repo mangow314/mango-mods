@@ -1,8 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" xml:space="preserve" width="900" height="380" viewBox="0 0 900 380" role="img" aria-label="sitrep excerpt: a long reply ends and is marked excerpting; haiku returns only line numbers for the outcome, the sections, the question and its options; every number must point at a real line; the box under the reply is built from those lines, and the question is answered from the row above the prompt. Loops every 10 seconds.">
-  <!-- 10 秒一輪：0–22% 回覆逐行出現、22–40% 摘錄中＋haiku 回行號、40–56% 行號對回原句、56–95% 結論框與選答、95–100% 淡出重來 -->
+<svg xmlns="http://www.w3.org/2000/svg" xml:space="preserve" width="900" height="380" viewBox="0 0 900 380" role="img" aria-label="sitrep excerpt: a long reply ends and is marked excerpting; haiku returns only line numbers for the outcome, the sections, the question and its options; every number must point at a real line; the box under the reply is built from those lines, and the question is answered from the row above the prompt. Loops every 14 seconds.">
+  <!-- 14 秒一輪：0–2.6 秒回覆逐行出現、2.6–6.4 摘錄中＋箭頭送給 haiku＋回行號、6.4–9.2 行號對回原句、9.2–13.5 結論框與選答、13.5–14 淡出重來 -->
   <style>
     text { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-    .t { animation-duration: 10s; animation-iteration-count: infinite; animation-timing-function: linear; }
+    .t { animation-duration: 14s; animation-iteration-count: infinite; animation-timing-function: linear; }
     .dim { fill: #8b949e; font-size: 12px; }
     .txt { fill: #c9d1d9; font-size: 13px; }
     .head { fill: #e6edf3; font-size: 13px; font-weight: 700; }
@@ -11,45 +11,48 @@
     .q { fill: #E6A23C; }
 
     /* 回覆逐行出現；收成結論框時 3–9 行收起，1–2 行留著 */
-    .a1 { animation-name: a1; } @keyframes a1 { 0%,1% { opacity: 0 } 3%,95% { opacity: 1 } 99%,100% { opacity: 0 } }
-    .a2 { animation-name: a2; } @keyframes a2 { 0%,3% { opacity: 0 } 5%,95% { opacity: 1 } 99%,100% { opacity: 0 } }
-    .a3 { animation-name: a3; } @keyframes a3 { 0%,5% { opacity: 0 } 7%,55% { opacity: 1 } 57%,100% { opacity: 0 } }
-    .a4 { animation-name: a4; } @keyframes a4 { 0%,7% { opacity: 0 } 9%,55% { opacity: 1 } 57%,100% { opacity: 0 } }
-    .a5 { animation-name: a5; } @keyframes a5 { 0%,9% { opacity: 0 } 11%,55% { opacity: 1 } 57%,100% { opacity: 0 } }
-    .a6 { animation-name: a6; } @keyframes a6 { 0%,11% { opacity: 0 } 13%,55% { opacity: 1 } 57%,100% { opacity: 0 } }
-    .a7 { animation-name: a7; } @keyframes a7 { 0%,13% { opacity: 0 } 15%,55% { opacity: 1 } 57%,100% { opacity: 0 } }
-    .a8 { animation-name: a8; } @keyframes a8 { 0%,15% { opacity: 0 } 17%,55% { opacity: 1 } 57%,100% { opacity: 0 } }
-    .a9 { animation-name: a9; } @keyframes a9 { 0%,17% { opacity: 0 } 19%,55% { opacity: 1 } 57%,100% { opacity: 0 } }
+    .a1 { animation-name: a1; } @keyframes a1 { 0%,0.71% { opacity: 0 } 2.5%,96.43% { opacity: 1 } 98.21%,100% { opacity: 0 } }
+    .a2 { animation-name: a2; } @keyframes a2 { 0%,2.64% { opacity: 0 } 4.43%,96.43% { opacity: 1 } 98.21%,100% { opacity: 0 } }
+    .a3 { animation-name: a3; } @keyframes a3 { 0%,4.57% { opacity: 0 } 6.36%,64.29% { opacity: 1 } 66.07%,100% { opacity: 0 } }
+    .a4 { animation-name: a4; } @keyframes a4 { 0%,6.5% { opacity: 0 } 8.29%,64.29% { opacity: 1 } 66.07%,100% { opacity: 0 } }
+    .a5 { animation-name: a5; } @keyframes a5 { 0%,8.43% { opacity: 0 } 10.21%,64.29% { opacity: 1 } 66.07%,100% { opacity: 0 } }
+    .a6 { animation-name: a6; } @keyframes a6 { 0%,10.36% { opacity: 0 } 12.14%,64.29% { opacity: 1 } 66.07%,100% { opacity: 0 } }
+    .a7 { animation-name: a7; } @keyframes a7 { 0%,12.29% { opacity: 0 } 14.07%,64.29% { opacity: 1 } 66.07%,100% { opacity: 0 } }
+    .a8 { animation-name: a8; } @keyframes a8 { 0%,14.21% { opacity: 0 } 16%,64.29% { opacity: 1 } 66.07%,100% { opacity: 0 } }
+    .a9 { animation-name: a9; } @keyframes a9 { 0%,16.14% { opacity: 0 } 17.93%,64.29% { opacity: 1 } 66.07%,100% { opacity: 0 } }
 
     /* 被挑中的行亮起來 */
-    .hl { animation-name: hl; } @keyframes hl { 0%,40% { opacity: 0 } 42%,54% { opacity: 1 } 56%,100% { opacity: 0 } }
+    .hl { animation-name: hl; } @keyframes hl { 0%,46.43% { opacity: 0 } 48.21%,64.29% { opacity: 1 } 66.07%,100% { opacity: 0 } }
+
+    /* 摘錄中：箭頭把帶行號的回覆送給 haiku */
+    .pipe { animation-name: pipe; } @keyframes pipe { 0%,20% { opacity: 0 } 21.79%,45% { opacity: 1 } 46.79%,100% { opacity: 0 } }
 
     /* haiku 卡片：一欄一欄回行號，接著檢查 */
-    .card { animation-name: card; } @keyframes card { 0%,25% { opacity: 0 } 27%,95% { opacity: 1 } 99%,100% { opacity: 0 } }
-    .k1 { animation-name: k1; } @keyframes k1 { 0%,28% { opacity: 0 } 30%,95% { opacity: 1 } 99%,100% { opacity: 0 } }
-    .k2 { animation-name: k2; } @keyframes k2 { 0%,31% { opacity: 0 } 33%,95% { opacity: 1 } 99%,100% { opacity: 0 } }
-    .k3 { animation-name: k3; } @keyframes k3 { 0%,34% { opacity: 0 } 36%,95% { opacity: 1 } 99%,100% { opacity: 0 } }
-    .k4 { animation-name: k4; } @keyframes k4 { 0%,37% { opacity: 0 } 39%,95% { opacity: 1 } 99%,100% { opacity: 0 } }
-    .ok { animation-name: ok; } @keyframes ok { 0%,43% { opacity: 0 } 45%,95% { opacity: 1 } 99%,100% { opacity: 0 } }
+    .card { animation-name: card; } @keyframes card { 0%,21.43% { opacity: 0 } 23.21%,96.43% { opacity: 1 } 98.21%,100% { opacity: 0 } }
+    .k1 { animation-name: k1; } @keyframes k1 { 0%,24.29% { opacity: 0 } 26.07%,96.43% { opacity: 1 } 98.21%,100% { opacity: 0 } }
+    .k2 { animation-name: k2; } @keyframes k2 { 0%,28.57% { opacity: 0 } 30.36%,96.43% { opacity: 1 } 98.21%,100% { opacity: 0 } }
+    .k3 { animation-name: k3; } @keyframes k3 { 0%,32.86% { opacity: 0 } 34.64%,96.43% { opacity: 1 } 98.21%,100% { opacity: 0 } }
+    .k4 { animation-name: k4; } @keyframes k4 { 0%,37.14% { opacity: 0 } 38.93%,96.43% { opacity: 1 } 98.21%,100% { opacity: 0 } }
+    .ok { animation-name: ok; } @keyframes ok { 0%,49.29% { opacity: 0 } 51.07%,96.43% { opacity: 1 } 98.21%,100% { opacity: 0 } }
 
     /* 結論框 */
-    .box { animation-name: box; } @keyframes box { 0%,56% { opacity: 0 } 58%,95% { opacity: 1 } 99%,100% { opacity: 0 } }
+    .box { animation-name: box; } @keyframes box { 0%,66.43% { opacity: 0 } 68.21%,96.43% { opacity: 1 } 98.21%,100% { opacity: 0 } }
 
     /* 提示框上方那一列：摘錄中 → 待決題目 → 選 a → 填進提示框 */
-    .s1 { animation-name: s1; } @keyframes s1 { 0%,21% { opacity: 0 } 22%,56% { opacity: 1 } 57%,100% { opacity: 0 } }
-    .s2 { animation-name: s2; } @keyframes s2 { 0%,61% { opacity: 0 } 63%,80% { opacity: 1 } 81%,100% { opacity: 0 } }
-    .sel { animation-name: sel; } @keyframes sel { 0%,71% { opacity: 0 } 72%,80% { opacity: 1 } 81%,100% { opacity: 0 } }
-    .s3 { animation-name: s3; } @keyframes s3 { 0%,80% { opacity: 0 } 81%,95% { opacity: 1 } 99%,100% { opacity: 0 } }
+    .s1 { animation-name: s1; } @keyframes s1 { 0%,18.57% { opacity: 0 } 20.36%,64.29% { opacity: 1 } 66.07%,100% { opacity: 0 } }
+    .s2 { animation-name: s2; } @keyframes s2 { 0%,70% { opacity: 0 } 71.79%,87.14% { opacity: 1 } 88.93%,100% { opacity: 0 } }
+    .sel { animation-name: sel; } @keyframes sel { 0%,78.57% { opacity: 0 } 80.36%,87.14% { opacity: 1 } 88.93%,100% { opacity: 0 } }
+    .s3 { animation-name: s3; } @keyframes s3 { 0%,87.14% { opacity: 0 } 88.93%,96.43% { opacity: 1 } 98.21%,100% { opacity: 0 } }
 
     /* 底下的步驟說明 */
-    .c1 { animation-name: c1; } @keyframes c1 { 0%,22% { opacity: 1 } 23%,100% { opacity: 0 } }
-    .c2 { animation-name: c2; } @keyframes c2 { 0%,22% { opacity: 0 } 23%,40% { opacity: 1 } 41%,100% { opacity: 0 } }
-    .c3 { animation-name: c3; } @keyframes c3 { 0%,40% { opacity: 0 } 41%,56% { opacity: 1 } 57%,100% { opacity: 0 } }
-    .c4 { animation-name: c4; } @keyframes c4 { 0%,56% { opacity: 0 } 57%,100% { opacity: 1 } }
+    .c1 { animation-name: c1; } @keyframes c1 { 0%,18.57% { opacity: 1 } 20.36%,100% { opacity: 0 } }
+    .c2 { animation-name: c2; } @keyframes c2 { 0%,18.57% { opacity: 0 } 20.36%,45.71% { opacity: 1 } 47.5%,100% { opacity: 0 } }
+    .c3 { animation-name: c3; } @keyframes c3 { 0%,45.71% { opacity: 0 } 47.5%,65.71% { opacity: 1 } 67.5%,100% { opacity: 0 } }
+    .c4 { animation-name: c4; } @keyframes c4 { 0%,65.71% { opacity: 0 } 67.5%,100% { opacity: 1 } }
 
     @media (prefers-reduced-motion: reduce) {
       .t { animation: none; }
-      .a3, .a4, .a5, .a6, .a7, .a8, .a9, .hl, .s1, .sel, .s3, .c1, .c2, .c3 { opacity: 0; }
+      .a3, .a4, .a5, .a6, .a7, .a8, .a9, .hl, .s1, .pipe, .sel, .s3, .c1, .c2, .c3 { opacity: 0; }
     }
   </style>
 
@@ -102,6 +105,13 @@
     <text x="250" y="292" class="txt">b: mypy</text>
   </g>
   <text class="t s3 txt" x="40" y="292">❯ A   <tspan fill="#8b949e">(in the prompt box, not sent)</tspan></text>
+
+  <!-- 摘錄中 → haiku -->
+  <g class="t pipe">
+    <path d="M136 288 H 548 Q 557 288 557 279 V 76 Q 557 66 566 66" stroke="#58a6ff" stroke-width="2" fill="none"/>
+    <path d="M572 66 l -8 -5 v 10 z" fill="#58a6ff"/>
+    <text x="300" y="306" class="dim" font-size="11">numbered lines → haiku</text>
+  </g>
 
   <!-- haiku 只回行號 -->
   <g class="t card">
