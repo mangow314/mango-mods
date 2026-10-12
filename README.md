@@ -10,8 +10,6 @@ follows the official
 [claude-code-playground/claude-code/mods](https://github.com/anthropics/claude-code-playground/tree/main/claude-code/mods):
 one directory per plugin.
 
-![ctx-relay loop: context grows to the handoff line, the mod writes a handoff file, runs /clear, and the fresh conversation picks up](docs/assets/ctx-relay-loop.svg)
-
 > 繁體中文版：[README.zh-TW.md](README.zh-TW.md); each plugin's README also
 > has a `README.zh-TW.md`. The on-screen labels are partly in Traditional
 > Chinese; what the model writes follows the language of your conversation.
@@ -22,6 +20,8 @@ one directory per plugin.
 | [ctx-relay](ctx-relay/README.md) | Band with context size, per-turn cost and the prompt cache countdown. Past the handoff line it writes a handoff file, runs `/clear`, and resumes in the new conversation. Needs no other skill or hook |
 
 ## sitrep
+
+![sitrep excerpt: a long reply ends, haiku returns only line numbers, each number is checked against the reply, and the box is built from those lines](docs/assets/sitrep-excerpt.svg)
 
 ![sitrep: a reply ends, the outcome box folds the changes and checks into one line each, and the question is answered from the row above the prompt](docs/assets/sitrep.gif)
 
@@ -35,6 +35,8 @@ does not. Details:
 [sitrep/README.md](sitrep/README.md).
 
 ## ctx-relay
+
+![ctx-relay loop: context grows to the handoff line, the mod writes a handoff file, runs /clear, and the fresh conversation picks up](docs/assets/ctx-relay-loop.svg)
 
 ![ctx-relay band as a turn ends: the space invader and capsule bar go from 66% green to 76% yellow, the cell the turn added lights up for a moment, then tokens, cost, cache countdown and per-turn bars in green and yellow](docs/assets/bands.gif)
 
@@ -56,7 +58,7 @@ were made is in [docs/demo/](docs/demo/).
 
 ## Status
 
-- A personal experiment, tested on Claude Code 2.1.289 to 2.1.295. The mods
+- A personal experiment, tested on Claude Code 2.1.289 to 2.1.296. The mods
   API is still in early access, so a Claude Code release may break these
   mods. No compatibility guarantee, and issues may go unanswered.
 - Read the code before installing: these mods run git commands and write

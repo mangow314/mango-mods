@@ -5,8 +5,6 @@
 這個 Claude Code marketplace 收我每天在用的 mods。mod 就是用 JS/TS function hooks 寫成的 plugin：可以在提示框上方畫一行 band、在對話旁開 pane、對 session 事件做反應。
 結構和官方 [claude-code-playground/claude-code/mods](https://github.com/anthropics/claude-code-playground/tree/main/claude-code/mods) 一樣，每個 plugin 一個目錄。
 
-![ctx-relay 循環：context 長到交接線，mod 寫交接檔、/clear，新對話接手](docs/assets/ctx-relay-loop.svg)
-
 > English: [README.md](README.md)。這份是它的繁體中文對譯；各 plugin 的中文說明在該目錄的 `README.zh-TW.md`。畫面標籤部分是繁體中文；模型寫的內容跟著對話語言走。
 
 | plugin | 用途 |
@@ -16,6 +14,8 @@
 
 ## sitrep
 
+![sitrep 摘錄：長回覆結束，haiku 只回行號，每個行號都對回回覆原句，結論框用這些原句組成](docs/assets/sitrep-excerpt.svg)
+
 ![sitrep：回覆結束，結論框把變更、驗證各收成一行，提示框上方那列選答](docs/assets/sitrep.gif)
 
 *Claude 改檔、跑一次，然後問一題。結論框把「變更」「驗證」各收成一行；`Ctrl+X Tab` 聚焦提示框上方那列，按 `a` 把答案填進提示框（不會送出）。*
@@ -23,6 +23,8 @@
 長回覆結束後，小模型（`haiku`）只挑編號，mod 用回覆原句組成結論框，框裡不會出現回覆沒說的話。細節見 [sitrep/README.zh-TW.md](sitrep/README.zh-TW.md)。
 
 ## ctx-relay
+
+![ctx-relay 循環：context 長到交接線，mod 寫交接檔、/clear，新對話接手](docs/assets/ctx-relay-loop.svg)
 
 ![ctx-relay band 在一輪結束時：小怪獸和膠囊進度條從 66% 綠變成 76% 黃，這輪新增的那格亮一下；右邊是 token、費用、快取倒數，和綠、黃兩色的每輪長條](docs/assets/bands.gif)
 
@@ -35,7 +37,7 @@
 截圖都來自一次性測試 repo 裡的真實 Claude Code session，做法見 [docs/demo/](docs/demo/)。
 
 ## 狀態
-- 個人實驗，在 Claude Code 2.1.289 到 2.1.295 測過。mods API 還在 early access，Claude Code 改版後可能要跟著改；不保證相容，也不保證回 issue。
+- 個人實驗，在 Claude Code 2.1.289 到 2.1.296 測過。mods API 還在 early access，Claude Code 改版後可能要跟著改；不保證相容，也不保證回 issue。
 - 裝之前請先讀程式碼：這些 mod 會跑 git 指令、寫檔；sitrep 會把每則長回覆送給 `haiku` 多一次請求；ctx-relay 會自動 /clear，並在新對話送出接續訊息。
 
 ## 安裝

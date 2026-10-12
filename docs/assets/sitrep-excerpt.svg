@@ -1,0 +1,126 @@
+<svg xmlns="http://www.w3.org/2000/svg" xml:space="preserve" width="900" height="380" viewBox="0 0 900 380" role="img" aria-label="sitrep excerpt: a long reply ends and is marked excerpting; haiku returns only line numbers for the outcome, the sections, the question and its options; every number must point at a real line; the box under the reply is built from those lines, and the question is answered from the row above the prompt. Loops every 10 seconds.">
+  <!-- 10 秒一輪：0–22% 回覆逐行出現、22–40% 摘錄中＋haiku 回行號、40–56% 行號對回原句、56–95% 結論框與選答、95–100% 淡出重來 -->
+  <style>
+    text { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .t { animation-duration: 10s; animation-iteration-count: infinite; animation-timing-function: linear; }
+    .dim { fill: #8b949e; font-size: 12px; }
+    .txt { fill: #c9d1d9; font-size: 13px; }
+    .head { fill: #e6edf3; font-size: 13px; font-weight: 700; }
+    .num { fill: #6e7681; font-size: 12px; }
+    .pick { fill: #58a6ff; font-size: 13px; font-weight: 700; }
+    .q { fill: #E6A23C; }
+
+    /* 回覆逐行出現；收成結論框時 3–9 行收起，1–2 行留著 */
+    .a1 { animation-name: a1; } @keyframes a1 { 0%,1% { opacity: 0 } 3%,95% { opacity: 1 } 99%,100% { opacity: 0 } }
+    .a2 { animation-name: a2; } @keyframes a2 { 0%,3% { opacity: 0 } 5%,95% { opacity: 1 } 99%,100% { opacity: 0 } }
+    .a3 { animation-name: a3; } @keyframes a3 { 0%,5% { opacity: 0 } 7%,55% { opacity: 1 } 57%,100% { opacity: 0 } }
+    .a4 { animation-name: a4; } @keyframes a4 { 0%,7% { opacity: 0 } 9%,55% { opacity: 1 } 57%,100% { opacity: 0 } }
+    .a5 { animation-name: a5; } @keyframes a5 { 0%,9% { opacity: 0 } 11%,55% { opacity: 1 } 57%,100% { opacity: 0 } }
+    .a6 { animation-name: a6; } @keyframes a6 { 0%,11% { opacity: 0 } 13%,55% { opacity: 1 } 57%,100% { opacity: 0 } }
+    .a7 { animation-name: a7; } @keyframes a7 { 0%,13% { opacity: 0 } 15%,55% { opacity: 1 } 57%,100% { opacity: 0 } }
+    .a8 { animation-name: a8; } @keyframes a8 { 0%,15% { opacity: 0 } 17%,55% { opacity: 1 } 57%,100% { opacity: 0 } }
+    .a9 { animation-name: a9; } @keyframes a9 { 0%,17% { opacity: 0 } 19%,55% { opacity: 1 } 57%,100% { opacity: 0 } }
+
+    /* 被挑中的行亮起來 */
+    .hl { animation-name: hl; } @keyframes hl { 0%,40% { opacity: 0 } 42%,54% { opacity: 1 } 56%,100% { opacity: 0 } }
+
+    /* haiku 卡片：一欄一欄回行號，接著檢查 */
+    .card { animation-name: card; } @keyframes card { 0%,25% { opacity: 0 } 27%,95% { opacity: 1 } 99%,100% { opacity: 0 } }
+    .k1 { animation-name: k1; } @keyframes k1 { 0%,28% { opacity: 0 } 30%,95% { opacity: 1 } 99%,100% { opacity: 0 } }
+    .k2 { animation-name: k2; } @keyframes k2 { 0%,31% { opacity: 0 } 33%,95% { opacity: 1 } 99%,100% { opacity: 0 } }
+    .k3 { animation-name: k3; } @keyframes k3 { 0%,34% { opacity: 0 } 36%,95% { opacity: 1 } 99%,100% { opacity: 0 } }
+    .k4 { animation-name: k4; } @keyframes k4 { 0%,37% { opacity: 0 } 39%,95% { opacity: 1 } 99%,100% { opacity: 0 } }
+    .ok { animation-name: ok; } @keyframes ok { 0%,43% { opacity: 0 } 45%,95% { opacity: 1 } 99%,100% { opacity: 0 } }
+
+    /* 結論框 */
+    .box { animation-name: box; } @keyframes box { 0%,56% { opacity: 0 } 58%,95% { opacity: 1 } 99%,100% { opacity: 0 } }
+
+    /* 提示框上方那一列：摘錄中 → 待決題目 → 選 a → 填進提示框 */
+    .s1 { animation-name: s1; } @keyframes s1 { 0%,21% { opacity: 0 } 22%,56% { opacity: 1 } 57%,100% { opacity: 0 } }
+    .s2 { animation-name: s2; } @keyframes s2 { 0%,61% { opacity: 0 } 63%,80% { opacity: 1 } 81%,100% { opacity: 0 } }
+    .sel { animation-name: sel; } @keyframes sel { 0%,71% { opacity: 0 } 72%,80% { opacity: 1 } 81%,100% { opacity: 0 } }
+    .s3 { animation-name: s3; } @keyframes s3 { 0%,80% { opacity: 0 } 81%,95% { opacity: 1 } 99%,100% { opacity: 0 } }
+
+    /* 底下的步驟說明 */
+    .c1 { animation-name: c1; } @keyframes c1 { 0%,22% { opacity: 1 } 23%,100% { opacity: 0 } }
+    .c2 { animation-name: c2; } @keyframes c2 { 0%,22% { opacity: 0 } 23%,40% { opacity: 1 } 41%,100% { opacity: 0 } }
+    .c3 { animation-name: c3; } @keyframes c3 { 0%,40% { opacity: 0 } 41%,56% { opacity: 1 } 57%,100% { opacity: 0 } }
+    .c4 { animation-name: c4; } @keyframes c4 { 0%,56% { opacity: 0 } 57%,100% { opacity: 1 } }
+
+    @media (prefers-reduced-motion: reduce) {
+      .t { animation: none; }
+      .a3, .a4, .a5, .a6, .a7, .a8, .a9, .hl, .s1, .sel, .s3, .c1, .c2, .c3 { opacity: 0; }
+    }
+  </style>
+
+  <rect x="0.5" y="0.5" width="899" height="379" rx="14" fill="#0d1117" stroke="#30363d"/>
+
+  <!-- 回覆 -->
+  <rect x="24" y="24" width="520" height="290" rx="8" fill="#161b22" stroke="#30363d"/>
+  <text x="40" y="46" class="dim">reply</text>
+
+  <g class="t hl" fill="#1f3a5f">
+    <rect x="36" y="77" width="500" height="19" rx="3"/>
+    <rect x="36" y="99" width="500" height="41" rx="3"/>
+    <rect x="36" y="143" width="500" height="41" rx="3"/>
+    <rect x="36" y="187" width="500" height="63" rx="3"/>
+  </g>
+
+  <g class="t a1"><text x="40" y="70" class="num">1</text><text x="62" y="70" class="head">## Result</text></g>
+  <g class="t a2"><text x="40" y="92" class="num">2</text><text x="62" y="92" class="txt">greet() takes name now; prints hello Mango.</text></g>
+  <g class="t a3"><text x="40" y="114" class="num">3</text><text x="62" y="114" class="head">## Changes</text></g>
+  <g class="t a4"><text x="40" y="136" class="num">4</text><text x="62" y="136" class="txt">- greet.py:1-2 adds a name parameter</text></g>
+  <g class="t a5"><text x="40" y="158" class="num">5</text><text x="62" y="158" class="head">## Checks</text></g>
+  <g class="t a6"><text x="40" y="180" class="num">6</text><text x="62" y="180" class="txt">- python3 greet.py → hello Mango</text></g>
+  <g class="t a7"><text x="40" y="202" class="num">7</text><text x="62" y="202" class="txt">Which one next?</text></g>
+  <g class="t a8"><text x="40" y="224" class="num">8</text><text x="62" y="224" class="txt">- pytest: checks the output (recommended)</text></g>
+  <g class="t a9"><text x="40" y="246" class="num">9</text><text x="62" y="246" class="txt">- mypy: type-checks name</text></g>
+
+  <!-- 結論框：每一行都是回覆原句 -->
+  <g class="t box">
+    <rect x="40" y="112" width="488" height="134" rx="6" fill="none" stroke="#E6A23C"/>
+    <rect x="52" y="104" width="210" height="16" fill="#161b22"/>
+    <text x="58" y="116" font-size="13" font-weight="700" class="q">? waiting on you</text>
+    <text x="196" y="116" class="dim">excerpt</text>
+    <text x="54" y="140" class="head">greet() takes name now; prints hello Mango.</text>
+    <text x="54" y="162" class="txt"><tspan fill="#8b949e">▸ Changes </tspan> greet.py:1-2 adds a name parameter</text>
+    <text x="54" y="182" class="txt"><tspan fill="#8b949e">▸ Checks  </tspan> python3 greet.py → hello Mango</text>
+    <text x="54" y="210" class="txt"><tspan class="q">? </tspan>Which one next?</text>
+    <text x="54" y="230" class="txt">  ●A pytest: checks the output <tspan class="q">rec</tspan>   B mypy…</text>
+  </g>
+
+  <!-- 提示框上方那一列 -->
+  <line x1="24" y1="262" x2="544" y2="262" stroke="#30363d"/>
+  <text class="t s1 dim" x="40" y="292" font-size="13">… excerpting</text>
+  <g class="t s2">
+    <text x="40" y="292" font-size="13" font-weight="700" class="q">? 1 pending</text>
+    <text x="154" y="292" class="txt">a: pytest</text>
+    <g class="t sel">
+      <rect x="150" y="279" width="76" height="18" rx="3" fill="#e6c07b"/>
+      <text x="154" y="292" font-size="13" fill="#0d1117">a: pytest</text>
+    </g>
+    <text x="250" y="292" class="txt">b: mypy</text>
+  </g>
+  <text class="t s3 txt" x="40" y="292">❯ A   <tspan fill="#8b949e">(in the prompt box, not sent)</tspan></text>
+
+  <!-- haiku 只回行號 -->
+  <g class="t card">
+    <rect x="570" y="24" width="306" height="290" rx="8" fill="#161b22" stroke="#30363d"/>
+    <text x="586" y="46" class="dim">haiku · line numbers only</text>
+  </g>
+  <g class="t k1"><text x="586" y="86" class="txt">outcome</text><text x="696" y="86" class="pick">2</text></g>
+  <g class="t k2"><text x="586" y="116" class="txt">sections</text><text x="696" y="116" class="pick">3→4  5→6</text></g>
+  <g class="t k3"><text x="586" y="146" class="txt">question</text><text x="696" y="146" class="pick">7</text></g>
+  <g class="t k4"><text x="586" y="176" class="txt">options</text><text x="696" y="176" class="pick">8  9</text><text x="760" y="176" class="dim">rec 8</text></g>
+  <g class="t ok">
+    <text x="586" y="226" class="txt" fill="#3fb950" style="fill:#3fb950">✓ every number is a real line</text>
+    <text x="586" y="246" class="dim">one miss → no box, just</text>
+    <text x="586" y="262" class="dim">"excerpt failed: reason"</text>
+  </g>
+
+  <!-- 步驟說明 -->
+  <text class="t c1 txt" x="24" y="350">1 · A long reply ends</text>
+  <text class="t c2 txt" x="24" y="350">2 · haiku returns line numbers only, never its own words</text>
+  <text class="t c3 txt" x="24" y="350">3 · Every number must point at a real line of the reply</text>
+  <text class="t c4 txt" x="24" y="350">4 · The box is built from those lines; answer from the row above the prompt</text>
+</svg>

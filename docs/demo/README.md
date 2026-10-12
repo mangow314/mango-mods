@@ -91,10 +91,10 @@ Extra requirement: `ffmpeg`.
    with focus mode off makes them unnecessary, but `/focus` toggles the
    setting for every session, so the script leaves it alone.
 
-## Concept animation (ctx-relay-loop.svg)
+## Concept animations (ctx-relay-loop.svg, sitrep-excerpt.svg)
 
-Hand-written SVG with CSS keyframes, a 10-second loop on a dark card so it
-reads on both GitHub themes; `aria-label` describes it and
+Hand-written SVGs with CSS keyframes, each a 10-second loop on a dark card so it
+reads on both GitHub themes; `aria-label` describes each and
 `prefers-reduced-motion` shows a still frame. To check a change, render it
 paused at a few points of the loop in headless Chrome: wrap the SVG in an HTML
 page with `.t { animation-play-state: paused; animation-delay: -<seconds>s }`

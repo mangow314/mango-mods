@@ -4,7 +4,7 @@
     "name": "Mango"
   },
   "metadata": {
-    "description": "個人用 Claude Code mods（function hooks plugin）。"
+    "description": "給長時間 session 用的 Claude Code mods：sitrep 把每則回覆的結論與待決題目收成一個框；ctx-relay 追蹤 context，滿之前自動交接。"
   },
   "plugins": [
     {
