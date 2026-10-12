@@ -43,6 +43,7 @@ mod 是用 JS/TS function hooks 寫成的 Claude Code plugin：可以在提示�
 ## 需求
 
 - Claude Code 2.1.289 以上，測到 2.1.296。mods API 還在 early access，Claude Code 改版後可能要跟著改。
+- 不用另外開旗標或改設定：mod 裝好就預設啟用。
 - PATH 上要有 `bash` 和 `git`。
 - ctx-relay 的圖示需要 Nerd Font（3.0 以上），例如把 Symbols Nerd Font 設成備用字型；沒有的話會顯示成方塊。
 

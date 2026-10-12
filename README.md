@@ -72,6 +72,7 @@ were made is in [docs/demo/](docs/demo/).
 
 - Claude Code 2.1.289 or later; tested up to 2.1.296. The mods API is in
   early access, so a Claude Code release may break these mods.
+- No flag or setting to turn on: an installed mod is enabled by default.
 - `bash` and `git` on PATH.
 - ctx-relay's icons need a Nerd Font (3.0 or later), for example Symbols Nerd
   Font as a fallback; without one they show as boxes.
