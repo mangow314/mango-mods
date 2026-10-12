@@ -1,24 +1,31 @@
 {
   "name": "ctx-relay",
-  "version": "0.11.0",
-  "description": "提示框上方顯示每輪花費與距交接線的剩餘空間；越過自動交接線時倒數 60 秒，用 fork 產生交接檔後 /clear 並在新對話接續；新對話開場列出還沒人接手的交接檔，按 1 接續",
-  "author": { "name": "Mango" },
+  "version": "0.11.1",
+  "description": "A band above the prompt with context size, per-turn cost and the prompt-cache countdown. Past the handoff line it counts down 60 s, writes a handoff file with a fork, runs /clear and resumes in the new conversation; a new conversation lists unclaimed handoff files, press 1 to resume.",
+  "author": {
+    "name": "Mango"
+  },
   "license": "MIT",
   "types": "./types/index.d.ts",
   "userConfig": {
     "handoffTokens": {
       "type": "number",
-      "title": "自動交接線（tokens）",
-      "description": "context 到這個 token 數就自動交接。0＝自動：Claude Code 壓縮點的 85%。設定值超過自動值時用自動值。",
+      "title": "Handoff line (tokens)",
+      "description": "Hand off automatically when the context reaches this many tokens. 0 = auto: 85% of Claude Code's auto-compact point. A value above the auto value uses the auto value.",
       "default": 0,
       "min": 0
     },
     "handoffFormat": {
       "type": "string",
-      "title": "交接檔格式",
-      "description": "lite：四欄（Goal／Files／Verified／Next），英文標題，內文照對話語言。full：八欄中文格式，含硬約束、協調契約與 progress INDEX。",
-      "options": ["lite", "full"],
+      "title": "Handoff file format",
+      "description": "lite: four sections (Goal, Files, Verified, Next) with English headings; the content follows the conversation's language. full: the author's own eight-section Chinese format (hard constraints, coordination contract, progress INDEX); most users want lite.",
+      "options": [
+        "lite",
+        "full"
+      ],
       "default": "lite"
     }
-  }
+  },
+  "homepage": "https://github.com/mangow314/mango-mods/tree/master/ctx-relay",
+  "repository": "https://github.com/mangow314/mango-mods"
 }

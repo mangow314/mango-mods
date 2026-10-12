@@ -18,5 +18,7 @@
       ],
       "default": "en"
     }
-  }
+  },
+  "homepage": "https://github.com/mangow314/mango-mods/tree/master/sitrep",
+  "repository": "https://github.com/mangow314/mango-mods"
 }

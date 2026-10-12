@@ -4,18 +4,18 @@
     "name": "Mango"
   },
   "metadata": {
-    "description": "給長時間 session 用的 Claude Code mods：sitrep 把每則回覆的結論與待決題目收成一個框；ctx-relay 追蹤 context，滿之前自動交接。"
+    "description": "Claude Code mods for long sessions: sitrep boxes each reply's outcome and open questions; ctx-relay tracks context and hands off before it fills up."
   },
   "plugins": [
     {
       "name": "ctx-relay",
       "source": "./ctx-relay",
-      "description": "每輪花費與剩餘空間；越過自動交接線時自動產生交接檔並 /clear 接續。"
+      "description": "A band with context size, per-turn cost and the prompt-cache countdown; past the handoff line it writes a handoff file, runs /clear and resumes in the new conversation."
     },
     {
       "name": "sitrep",
       "source": "./sitrep",
-      "description": "回覆戰況簡報：正文下方一個結論框（狀態、一句結論、可收合段落、待決題目），提示框上方一行待決列可鍵盤選答。"
+      "description": "A box under each long reply, built from the reply's own lines: status, outcome, what you have to do, collapsible sections, and questions you answer from the keyboard."
     }
   ]
 }
