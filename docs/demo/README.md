@@ -51,10 +51,11 @@ Extra requirement: `ffmpeg`.
 1. Record.
    - sitrep.gif (Claude Code 2.1.296, Sonnet 5.5): run
      [rec-sitrep.sh](rec-sitrep.sh). It makes the throwaway repo, starts the
-     session, answers the folder trust prompt, starts
-     [record.sh](record.sh) in the background, and sends the prompt: change
-     `greet()` to take a `name`, run it once, then ask whether to add pytest
-     or mypy. It waits for `… 摘錄中` to turn into the box, then sends `C-x`,
+     session with sitrep's `language` set to `en`, answers the folder trust
+     prompt, starts [record.sh](record.sh) in the background, and sends the
+     prompt (the first argument replaces it): change `greet()` to take a
+     `name`, run it once, then ask in the reply, as options A and B, whether
+     to add pytest or mypy. It waits for `… excerpting` to turn into the box, then sends `C-x`,
      `Tab` (focuses the row above the prompt) and `a`. It writes
      `sitrep-raw.mp4` and `events.log` (seconds of each step; video 0 s is
      about the `prompt` line) next to itself. Run it outside the Bash sandbox:
@@ -69,7 +70,7 @@ Extra requirement: `ffmpeg`.
      ending.
 2. Cut, crop and encode. The crop starts and ends on character rows (12 px
    padding + 20.3 px per row) and leaves out the status line. sitrep.gif
-   starts when the turn ends (the reply with `… 摘錄中` under it) and skips
+   starts when the turn ends (the reply with `… excerpting` under it) and skips
    the working part of the turn:
 
    ```bash

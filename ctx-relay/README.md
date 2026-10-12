@@ -16,11 +16,8 @@ When a new conversation starts and there is a handoff file nobody has picked
 up, the band gets a second line, Pending handoff; press 1 to send the resume
 prompt.
 
-Tested on: Claude Code 2.1.289 (0.5.0, loaded with `--plugin-dir`; tested the
-countdown, cancelling by button, cancelling by typing, a full automatic
-handoff, and running alongside blast-radius), and 2.1.294 (the current band
-and the cache countdown). The mods API is still in early access, so a Claude
-Code release may require changes.
+Tested on Claude Code 2.1.289 to 2.1.296. The mods API is still in early
+access, so a Claude Code release may require changes.
 
 ## What it does
 
@@ -41,8 +38,8 @@ In the `full` format, the mod appends the coordination contract verbatim, withou
 headings in a handoff file are the mod's own. A section whose key is mistyped
 (for example `=== VERIFED ===`): that field is marked `thin:`, and its body is
 kept, appended at the end of Next (`full`: 關鍵細節備忘, "key details") with a note. A
-` ```ui-summary ` block in the fork's output (the summary the sitrep mod asks
-the model to append to each reply) is removed.
+` ```ui-summary ` block in the fork's output (written by sitrep versions
+before 0.3.0) is removed.
 
 ## Thresholds
 
@@ -133,8 +130,7 @@ One line, left to right:
   reads `Cleared, but <reason>. Type: Read <path> and continue from it`. The
   part after "Type:" is what you paste into the conversation; with the `full`
   format it is in Chinese (`讀 <path> 並依其接續`).
-- When another mod also draws a band (for example blast-radius, which draws
-  Proceed / Cancel here in a narrow terminal), its content goes on top and the
+- When another mod also draws a band, its content goes on top and the
   ctx-relay line below. When there is not enough height, or the other mod does
   not give way, the ctx-relay line can be hidden; see "Known limits".
 - The icons, the snowflake, and the capsule (U+EE00–EE05, in Nerd Fonts 3.0
@@ -194,7 +190,7 @@ The `handoffFormat` setting picks one of two formats:
 | Format | Fields | Language |
 | --- | --- | --- |
 | `lite` (default) | Goal, Files, Verified, Next | English headings and instructions; the fork writes the body in the conversation's language |
-| `full` | The 8 fields of the author's own handoff skill (goal + latest instruction, files, verified vs gaps, unrelated dirty files, next step, key details, hard constraints as YAML, pointers), plus the source handoff file's coordination contract and the session's progress `INDEX.md` | Traditional Chinese |
+| `full` | Author-specific: the 8 fields of the author's own handoff format (goal + latest instruction, files, verified vs gaps, unrelated dirty files, next step, key details, hard constraints as YAML, pointers), plus the source handoff file's coordination contract and the session's progress `INDEX.md` | Traditional Chinese |
 
 `full` follows conventions from the author's own setup; most people want
 `lite`. The notes pane and the pickup line read either format, whatever the
@@ -206,8 +202,10 @@ echo '{"handoffFormat": "full"}' | claude plugin configure ctx-relay@mango-mods 
 
 ## Where handoff files go
 
-In a git repo: `<git-common-dir>/harness/handoff/`; outside git:
-`~/.claude/harness/<directory name>-<first 8 chars of sha256>/handoff/`.
+In a git repo: `<git-common-dir>/harness/handoff/` (inside `.git`, so never
+committed; delete the folder to clean up); outside git:
+`~/.claude/harness/<directory name>-<first 8 chars of sha256>/handoff/`. The
+folder above `handoff/` is called the harness root below.
 File name: `<timestamp>-<slug>-<first 8 chars of the source session id>-<batch number>.md`,
 so two batches in the same second, or two sessions sharing one
 git-common-dir, never overwrite each other.
@@ -235,8 +233,8 @@ follows.
 
 - "Picked up" is recorded as `<handoff folder>/.picked/<handoff file name>`
   (an empty file); the handoff file itself is not touched. Because the folder
-  name starts with a dot, the handoff skill's `ls -t` for the newest handoff
-  file does not see it.
+  name starts with a dot, a plain `ls -t` for the newest handoff file does
+  not see it.
 - A file is marked as picked up in three cases: you press resume; a message you
   send contains the full path of a handoff file (you pasted a resume prompt by
   hand); ctx-relay hands off automatically (marked before `/clear`, so the new
@@ -306,19 +304,13 @@ follows.
   main conversation stopped, plus the subagents running right now.
 - A subagent may appear in both Claude Code's background-work list and its
   subagent list, so the count in the deferral reason can be too high.
-- Tasks sent through agent-bridge and not yet answered are not detected:
-  check them yourself before `/clear`.
-- With blast-radius, when the terminal is narrow enough that it draws its
-  interception box where the band goes (it does at 80 columns; at 200 columns
-  it uses a side pane and is unaffected), the ctx-relay line may be hidden
-  during the interception. The buttons still work, and the band comes back
-  when the interception ends.
-  - The terminal needs at least 42 rows to fit both (measured on 2.1.289,
-    with 2 files listed in the box, 11 rows in total: at 41 rows or fewer it
-    shows "↓ 2 more"). The more files the box lists, the more rows it needs.
-  - When blast-radius draws first, it does not pass the slot on to the next
-    mod, so no height is enough. Which mod draws first depends on load order,
-    which the official docs do not specify.
+- Requests sent to other Claude sessions and not yet answered are not
+  detected: check them yourself before `/clear`.
+- Another mod that draws a tall box in the band's slot (seen with a
+  confirmation-box mod in an 80-column terminal) can hide the ctx-relay line
+  while its box is up; the buttons still work and the band comes back after.
+  If that mod draws first and does not pass the slot on, no terminal height
+  is enough; which mod draws first depends on load order.
 - Writing the handoff file costs about as much as one turn on a cold cache.
   The fork does not read the main conversation's cache: measured on 2.1.294,
   a fork sent 30 seconds after a turn hit 43% (only the shared system prompt
@@ -332,6 +324,5 @@ follows.
   (measured), so the mod cancels its timers before clearing.
 - Needs `bash` and `git` on PATH; outside git, also `realpath` (GNU, with
   `-m`) and `sha256sum` or `shasum`.
-- The handoff path algorithm is copied from mango's dotfiles
-  `hooks/_lib/harness-paths.sh`, so both put handoff files in the same place;
-  change one, change the other.
+- The handoff folder layout matches the author's own handoff tooling, so
+  both find the same files.

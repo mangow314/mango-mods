@@ -2,7 +2,9 @@
 
 > English: [README.md](README.md)
 
-在 Claude Code 提示框上方畫一條 band，即時顯示 `xv` 跨廠 job（xvendor skill 開的 `codex exec`／`agy -p` job）的狀態。
+在 Claude Code 提示框上方畫一條 band，即時顯示 `xv` 跨廠 job（xvendor 開的 `codex exec`／`agy -p` job）的狀態。
+
+Early access：要搭配作者的跨廠審查工具 xvendor 才有用，xvendor 尚未公開。
 
 ## 做什麼
 
@@ -23,7 +25,8 @@
 ## 試用
 
 ```bash
-claude --plugin-dir ~/projects/mango-mods/xv-band
+git clone https://github.com/mangow314/mango-mods
+claude --plugin-dir ./mango-mods/xv-band
 ```
 
 ## 已知限制

@@ -3,7 +3,11 @@
 > 繁體中文版：[README.zh-TW.md](README.zh-TW.md)
 
 A Claude Code mod that draws a band above the prompt with the live status of
-`xv` cross-vendor jobs (the xvendor skill's `codex exec` / `agy -p` jobs).
+`xv` cross-vendor jobs (xvendor's `codex exec` / `agy -p` jobs).
+
+Early access: useful only with xvendor, the author's cross-vendor review tool,
+which is not released yet. The band's activity words are in Traditional
+Chinese.
 
 ## What it does
 
@@ -43,7 +47,8 @@ A Claude Code mod that draws a band above the prompt with the live status of
 ## Try it
 
 ```bash
-claude --plugin-dir ~/projects/mango-mods/xv-band
+git clone https://github.com/mangow314/mango-mods
+claude --plugin-dir ./mango-mods/xv-band
 ```
 
 ## Known limits

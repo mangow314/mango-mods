@@ -8,7 +8,7 @@
 主對話越過自動交接線時，它會自動交接：產生交接檔，`/clear`，在新對話接續。
 新對話開場時，如果有還沒人接手的交接檔，band 多一行 Pending handoff（待接手），按 1 就送出接續指令。
 
-實機測試過的版本：Claude Code 2.1.289（0.5.0，用 `--plugin-dir` 載入；測過倒數、按鈕取消、打字取消、完整自動交接、與 blast-radius 共存）。2.1.294 另測過現行 band 與快取倒數。mods API 還在 early access，改版後可能要跟著調整。
+實機測過 Claude Code 2.1.289 到 2.1.296。mods API 還在 early access，改版後可能要跟著調整。
 
 ## 會做什麼
 | 什麼時候 | 會發生什麼 |
@@ -21,7 +21,7 @@
 | 倒數結束 | mod 收集 git 狀態 → `$.model.fork` 只填各欄內文，每欄用一行 `=== 鍵名 ===` 分段（3 分鐘沒回就放棄）→ mod 用自己寫死的 `## ` 標題組成交接檔，模型沒有機會把標題打錯 → 機器檢查（缺欄位就標 `thin:`；一個分段標記都沒有就記失敗）→ 寫檔並讀回確認 → 確認對話沒變動 → `/clear` → 在新對話送出交接檔路徑和接手規則 |
 | 任何一步在 `/clear` 之前失敗 | 留在原對話，band 顯示原因，不重試 |
 
-`full` 格式下，協調契約由 mod 原樣附上，不經模型：fork 寫的 `=== CONTRACT ===` 分段和內文裡的「## 協調契約」段一律丟掉。fork 內文裡其他 `## ` 行會降成 `### `，交接檔的二級標題只有 mod 寫的那幾個。鍵名打錯（例如 `=== VERIFED ===`）的分段：該欄記 `thin:`，內文不丟，附在 Next（`full` 是「關鍵細節備忘」）末尾並標明。fork 輸出裡的 ` ```ui-summary ` 區塊（sitrep mod 要模型每輪附的摘要）會被拿掉。
+`full` 格式下，協調契約由 mod 原樣附上，不經模型：fork 寫的 `=== CONTRACT ===` 分段和內文裡的「## 協調契約」段一律丟掉。fork 內文裡其他 `## ` 行會降成 `### `，交接檔的二級標題只有 mod 寫的那幾個。鍵名打錯（例如 `=== VERIFED ===`）的分段：該欄記 `thin:`，內文不丟，附在 Next（`full` 是「關鍵細節備忘」）末尾並標明。fork 輸出裡的 ` ```ui-summary ` 區塊（sitrep 0.3.0 以前的版本寫的）會被拿掉。
 
 ## 門檻
 - 壓縮點：Claude Code 自己回報的 auto-compact 觸發點（`$.session.usage({ breakdown })` 的 `autoCompactThreshold`）。auto-compact 關掉時改用模型窗。
@@ -68,7 +68,7 @@ echo '{"handoffTokens": "400000"}' | claude plugin configure ctx-relay@mango-mod
 - 倒數時整行換成 `󰚌 Handoff in 42s · at 400K · send a message to postpone`，旁邊是 `Cancel [1]` 按鈕。
 - 交接後（自動交接，或按待接手那行的 `Resume [1]`），狀態寫 `Resumed from <檔名> · next: <下一步欄的第一行> · /ctx-relay-notes`，自動交接還會跳一個 toast。你一打字，next 那段就收掉。
 - `/clear` 成功但接續訊息送不出去時，這行顯示 `Cleared, but <原因>. Type: Read <路徑> and continue from it`。「Type:」後面是要你貼進對話的接續指令；`full` 格式時是中文（`讀 <路徑> 並依其接續`）。
-- 別的 mod 也畫 band 時（例如 blast-radius 在窄終端機把 Proceed／Cancel 畫在這裡），它的內容在上、ctx-relay 這行在下。高度不夠或對方不讓位時，ctx-relay 這行會看不到，見「已知限制」。
+- 別的 mod 也畫 band 時，它的內容在上、ctx-relay 這行在下。高度不夠或對方不讓位時，ctx-relay 這行會看不到，見「已知限制」。
 - 圖示、雪花、膠囊（U+EE00–EE05，Nerd Fonts 3.0 起才有）都要 Nerd Font（例如 Symbols Nerd Font 補字），沒有的話會變成方框。
 - 在 tmux 裡，Claude Code 預設只用 256 色。tmux 有開 RGB 的話，設 `CLAUDE_CODE_TMUX_TRUECOLOR=1` 才會照原色畫。
 
@@ -95,7 +95,7 @@ prompt 快取讓下一次請求便宜地重讀對話。一段時間沒有請求�
 | 格式 | 欄位 | 語言 |
 | --- | --- | --- |
 | `lite`（預設） | Goal、Files、Verified、Next | 標題與 fork 指示是英文；內文照對話語言寫 |
-| `full` | 作者自己 handoff skill 的 8 欄（目標 + 最新指令、已改／將改檔、已驗證 vs 驗證缺口、dirty 無關項、下一步、關鍵細節備忘、硬約束 yaml、指標），加上來源交接檔的協調契約與 session 的 progress `INDEX.md` | 繁體中文 |
+| `full` | 作者專用：作者自己交接格式的 8 欄（目標 + 最新指令、已改／將改檔、已驗證 vs 驗證缺口、dirty 無關項、下一步、關鍵細節備忘、硬約束 yaml、指標），加上來源交接檔的協調契約與 session 的 progress `INDEX.md` | 繁體中文 |
 
 `full` 照作者自己環境的慣例，多數人用 `lite` 就好。notes pane 與待接手那行兩種格式都讀得懂，不看設定。
 
@@ -104,7 +104,7 @@ echo '{"handoffFormat": "full"}' | claude plugin configure ctx-relay@mango-mods 
 ```
 
 ## 交接檔放哪裡
-git repo：`<git-common-dir>/harness/handoff/`；非 git：`~/.claude/harness/<目錄名>-<sha256 前 8 碼>/handoff/`。
+git repo：`<git-common-dir>/harness/handoff/`（在 `.git` 裡，不會被 commit；刪掉資料夾即可清乾淨）；非 git：`~/.claude/harness/<目錄名>-<sha256 前 8 碼>/handoff/`。下文的 harness root 指 `handoff/` 上一層的資料夾。
 檔名：`<時間戳>-<slug>-<來源 session id 前 8 碼>-<批次號>.md`，同一秒的兩批或共用同一個 git-common-dir 的兩個 session 不會互相覆寫。
 
 檔頭記下交接當下的 HEAD（`git rev-parse --short HEAD`）。新對話的接續訊息會叫它跑 `git log --oneline <HEAD>..HEAD`，有輸出代表交接後又有新 commit，先回報交接檔可能過時。用 commit 比對，不比時間：別的 session 的 commit 可能記成 UTC，拿來和檔頭的本地時間比會漏判。
@@ -121,7 +121,7 @@ git repo：`<git-common-dir>/harness/handoff/`；非 git：`~/.claude/harness/<�
 | 提示框是空的時候按 1（或點按鈕） | 送出「Read <完整路徑> and continue from it; check the git state and the next step before acting.」，後面再接一句：檔頭有 head 行時，`git log --oneline <head>..HEAD` 有輸出就先回報交接檔可能過時（`full` 格式的檔案送中文版），這份記為已接手 |
 | 主對話開始新回合（你送出訊息、按接續、排程） | 這行收掉 |
 
-- 「已接手」記在 `<交接檔資料夾>/.picked/<交接檔檔名>`（空檔），交接檔本身不動。點開頭的資料夾，handoff skill 用 `ls -t` 找最新交接檔時看不到它。
+- 「已接手」記在 `<交接檔資料夾>/.picked/<交接檔檔名>`（空檔），交接檔本身不動。點開頭的資料夾，一般用 `ls -t` 找最新交接檔時看不到它。
 - 這三種情況會記已接手：按接續；你送出的訊息含某份交接檔的完整路徑（手動貼上接續指令）；ctx-relay 自動交接（在 `/clear` 之前就記，新對話開場不會列它）。
 - 第一次啟用時，ctx-relay 把當下時間記在自己的 store（`pickupSince`）：修改時間早於它的交接檔一律當作已接手，不會一裝好就列出一堆舊檔。
 - 「多久前」依檔案的修改時間；「來自」取交接檔內文第一個 `session \`<id>\`` 的前 8 碼，讀不到就不顯示。
@@ -142,13 +142,11 @@ git repo：`<git-common-dir>/harness/handoff/`；非 git：`~/.claude/harness/<�
 - 背景工作不會逾時作廢：常駐 server 會讓交接延後到上限才強制倒數；要早點交接就用 `/ctx-relay-now yes`。
 - 指令看到的背景工作是上一次主對話停下時的清單，加上當下在跑的子代理。
 - 子代理可能同時出現在 Claude Code 的背景工作清單和子代理清單，延後原因的數字會多算。
-- agent-bridge 送出、還沒回覆的任務偵測不到：`/clear` 前請自己確認。
-- 跟 blast-radius 一起用、終端機窄到它把攔截框畫在 band 位置時（實測 80 欄會；200 欄它改用側邊窗格，不受影響），攔截期間 ctx-relay 這行可能看不到。按鈕照常可按，攔截結束 band 就回來。
-  - 終端機高度至少 42 行才放得下兩者（2.1.289 實測，攔截框列 2 個檔案、共 11 行：41 行以下顯示「↓ 2 more」）。框裡列的檔案越多，需要的行數越多。
-  - blast-radius 先畫時，它不把位置交給下一個 mod，多高都看不到。哪個 mod 先畫由載入順序決定，官方文件沒寫。
+- 送給其他 Claude session、還沒回覆的請求偵測不到：`/clear` 前請自己確認。
+- 別的 mod 在 band 的位置畫高的框時（實測一個確認框 mod 在 80 欄終端機會這樣），框開著的期間 ctx-relay 這行可能看不到；按鈕照常可按，框關掉 band 就回來。那個 mod 先畫又不讓位時，終端機多高都看不到；哪個 mod 先畫由載入順序決定。
 - 寫交接檔的花費約等於一輪冷快取。fork 讀不到主對話的快取：2.1.294 實測，回合結束 30 秒後送的 fork 命中 43%（只有共用的系統提示和工具定義），同時主對話下一輪命中 100%。
 - 壓縮之後，band 上的 token 數仍是壓縮前的讀數，要到下一輪結束才更新。
 - 交接內容由 fork 產生，機器檢查只看欄位有沒有空，不保證內容正確。新對話會被要求先用 git 核對。
 - `/clear` 之後 `$.state` 會歸零；模組變數和計時器會保留（實測），所以 mod 在 clear 前會先取消計時器。
 - 需要 PATH 上有 `bash` 和 `git`；非 git 目錄還要 `realpath`（GNU，支援 `-m`），以及 `sha256sum` 或 `shasum`。
-- 交接檔路徑的演算法照抄 mango 的 dotfiles `hooks/_lib/harness-paths.sh`，讓兩邊的 handoff 檔放在同一處；改一邊要改另一邊。
+- 交接檔資料夾的位置和作者自己的交接工具一致，兩邊找得到同一批檔案。
