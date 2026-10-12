@@ -3,8 +3,9 @@
 # 同時用 record.sh 錄影。剪接與轉 GIF 見 README.md「GIFs」一節。
 # 產出（本檔同目錄）：sitrep-raw.mp4、events.log（各動作在第幾秒，影片 0 秒約等於 prompt）、final.txt（結束畫面）
 set -euo pipefail
-# 第一個參數可換掉送出的提示。要求在回覆裡列選項：模型改用提問工具時沒有長回覆，不會摘錄
-prompt=${1:-把 greet() 改成接收 name 參數，跑一次確認輸出，最後在回覆裡用 A、B 兩個選項問我要加 pytest 還是 mypy（不要用提問工具）。}
+# 第一個參數可換掉送出的提示。要求在回覆裡列選項：模型改用提問工具時沒有長回覆，不會摘錄。
+# 不載入使用者設定（output style、hooks、狀態列），回覆才會是英文、畫面也乾淨
+prompt=${1:-Change greet() to take a name parameter and run it once. Then report under the headings Result, Changes and Checks, and end by asking me, as options A and B in the reply (not the question tool), whether to add pytest or mypy next, saying which you recommend.}
 here=$(cd "$(dirname "$0")" && pwd)
 M=$(cd "$here/../.." && pwd)
 repo=$(mktemp -d)/greet-demo
@@ -22,10 +23,11 @@ git -C "$repo" add greet.py
 git -C "$repo" -c user.name=demo -c user.email=demo@example.com commit -qm init
 
 tmux -L shot -f /dev/null new-session -d -s s -x 120 -y 34 -c "$repo" \
-  "env CLAUDE_CODE_TMUX_TRUECOLOR=1 STOP_CLAIM_AUDIT_LOG=/nonexistent claude --model claude-sonnet-5-5 \
+  "env LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 CLAUDE_CODE_TMUX_TRUECOLOR=1 STOP_CLAIM_AUDIT_LOG=/nonexistent claude --model claude-sonnet-5-5 \
     --plugin-dir $M/sitrep --plugin-dir $M/ctx-relay \
     --settings '{\"enabledPlugins\":{\"filetree@claude-code-filetree\":false,\"ctx-relay@mango-mods\":false,\"sitrep@mango-mods\":false},\"pluginConfigs\":{\"sitrep\":{\"options\":{\"language\":\"en\"}}}}' \
-    --allowedTools 'Bash(python3 greet.py)' 'Bash(python greet.py)' Edit; echo CLAUDE-EXIT=\$?; sleep 600"
+    --setting-sources project,local --append-system-prompt 'This is a demo recording: write every reply in English.' \
+    --permission-mode acceptEdits --allowedTools 'Bash(python3:*)' 'Bash(python:*)' 'Bash(git diff:*)' Edit; echo CLAUDE-EXIT=\$?; sleep 600"
 tmux -L shot set -g status off
 tmux -L shot set -g window-size manual
 tmux -L shot set -g focus-events on

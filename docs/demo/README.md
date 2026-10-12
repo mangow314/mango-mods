@@ -51,11 +51,13 @@ Extra requirement: `ffmpeg`.
 1. Record.
    - sitrep.gif (Claude Code 2.1.296, Sonnet 5.5): run
      [rec-sitrep.sh](rec-sitrep.sh). It makes the throwaway repo, starts the
-     session with sitrep's `language` set to `en`, answers the folder trust
-     prompt, starts [record.sh](record.sh) in the background, and sends the
+     session with sitrep's `language` set to `en`, an English locale, and
+     only project and local settings (`--setting-sources project,local`, so
+     your output style, hooks and status line stay out and the reply is in
+     English), answers the folder trust prompt, starts [record.sh](record.sh) in the background, and sends the
      prompt (the first argument replaces it): change `greet()` to take a
-     `name`, run it once, then ask in the reply, as options A and B, whether
-     to add pytest or mypy. It waits for `… excerpting` to turn into the box, then sends `C-x`,
+     `name`, run it once, report under Result, Changes and Checks, then ask
+     in the reply, as options A and B, whether to add pytest or mypy. It waits for `… excerpting` to turn into the box, then sends `C-x`,
      `Tab` (focuses the row above the prompt) and `a`. It writes
      `sitrep-raw.mp4` and `events.log` (seconds of each step; video 0 s is
      about the `prompt` line) next to itself. Run it outside the Bash sandbox:
@@ -75,9 +77,7 @@ Extra requirement: `ffmpeg`.
 
    ```bash
    ffmpeg -i sitrep-raw.mp4 -filter_complex "[0:v]\
-   drawbox=x=318:y=498:w=360:h=23:color=0x1a1a1a:t=fill:enable='between(t,14.7,17.37)+gte(t,22.74)',\
-   drawbox=x=318:y=477:w=360:h=23:color=0x1a1a1a:t=fill:enable='between(t,17.37,22.74)',\
-   trim=14.75:27.5,setpts=PTS-STARTPTS,crop=1130:488:0:113,fps=12,\
+   trim=9.2:21,setpts=PTS-STARTPTS,crop=1130:614:0:32,fps=12,\
    scale=800:-1:flags=lanczos,split[x][y];[x]palettegen=max_colors=96:stats_mode=diff[p];\
    [y][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle" sitrep.gif
    ffmpeg -ss 12.5 -t 4.5 -i band-raw.mp4 -filter_complex "crop=860:22:0:522,fps=8,split[x][y];\
@@ -85,12 +85,10 @@ Extra requirement: `ffmpeg`.
    ```
 
    The times depend on the take; read them off a few frames
-   (`ffmpeg -ss <t> -i raw.mp4 -frames:v 1 t.png`). The two `drawbox` filters
-   paint over "· 5 messages hidden (/focus to show)", which focus mode adds to
-   the turn-end line: that line is one row higher while the row above the
-   prompt is showing (from the box appearing until `a` is sent). Recording
-   with focus mode off makes them unnecessary, but `/focus` toggles the
-   setting for every session, so the script leaves it alone.
+   (`ffmpeg -ss <t> -i raw.mp4 -frames:v 1 t.png`). The sitrep crop runs
+   from the first row to the prompt row; after `a` is sent the row above the
+   prompt goes away and the status line moves up, so the crop stops above
+   it.
 
 ## Concept animations (ctx-relay-loop.svg, sitrep-excerpt.svg)
 
