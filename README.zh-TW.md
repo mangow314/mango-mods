@@ -20,7 +20,7 @@
 
 *Claude 改檔、跑一次，然後問一題。結論框把「變更」「驗證」各收成一行；`Ctrl+X Tab` 聚焦提示框上方那列，按 `a` 把答案填進提示框（不會送出）。*
 
-mod 在系統提示裡請模型在回覆末尾附一個小小的 ` ```ui-summary ` 區塊，畫面上把它藏起來，改畫成結論框。細節見 [sitrep/README.zh-TW.md](sitrep/README.zh-TW.md)。
+長回覆結束後，小模型（`haiku`）只挑編號，mod 用回覆原句組成結論框，框裡不會出現回覆沒說的話。細節見 [sitrep/README.zh-TW.md](sitrep/README.zh-TW.md)。
 
 ## ctx-relay
 
@@ -36,7 +36,7 @@ mod 在系統提示裡請模型在回覆末尾附一個小小的 ` ```ui-summary
 
 ## 狀態
 - 個人實驗，在 Claude Code 2.1.289 到 2.1.295 測過。mods API 還在 early access，Claude Code 改版後可能要跟著改；不保證相容，也不保證回 issue。
-- 裝之前請先讀程式碼：這些 mod 會跑 git 指令、寫檔；sitrep 會在系統提示加一段；ctx-relay 會自動 /clear，並在新對話送出接續訊息。
+- 裝之前請先讀程式碼：這些 mod 會跑 git 指令、寫檔；sitrep 會把每則長回覆送給 `haiku` 多一次請求；ctx-relay 會自動 /clear，並在新對話送出接續訊息。
 
 ## 安裝
 ```

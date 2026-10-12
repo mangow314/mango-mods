@@ -29,8 +29,9 @@ one directory per plugin.
 and 驗證 (checks) into one line each; `Ctrl+X Tab` focuses the row above the
 prompt and `a` puts the answer in the prompt box (nothing is sent).*
 
-Each reply ends with a small ` ```ui-summary ` block the mod asks for in the
-system prompt; the mod hides it and draws the box from it. Details:
+After a long reply, a small model (`haiku`) picks line numbers only; the mod
+builds the box from the reply's own lines, so it cannot say what the reply
+does not. Details:
 [sitrep/README.md](sitrep/README.md).
 
 ## ctx-relay
@@ -59,7 +60,7 @@ were made is in [docs/demo/](docs/demo/).
   API is still in early access, so a Claude Code release may break these
   mods. No compatibility guarantee, and issues may go unanswered.
 - Read the code before installing: these mods run git commands and write
-  files; sitrep adds a section to the system prompt; ctx-relay runs `/clear`
+  files; sitrep sends each long reply to `haiku` for one extra request; ctx-relay runs `/clear`
   on its own and sends a resume prompt in the new conversation.
 
 ## Install

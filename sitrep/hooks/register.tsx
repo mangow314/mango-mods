@@ -1,14 +1,16 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderElement, Timer } from 'claude-code'
 
-import type { AgentNote, ChangeNote, Evidence, Facet, Item, Summary, SummaryTask, TaskNote, TurnNote } from '../types'
+import type { AgentNote, ChangeNote, Evidence, Excerpt, Facet, Item, Option, Summary, TaskNote, TurnNote } from '../types'
 
 // sitrep：
-// 1. 在系統提示尾端加一段（prompt.compose），請模型在交還給使用者的最後一則回覆末尾附 ```ui-summary 區塊（一行 JSON）。
-// 2. 畫回覆時（AssistantMessage）把區塊藏起來，正文下面畫一個圓角結論框：標題（狀態＋耗時）疊在上框線，
-//    框裡是粗體結論、facets 指到的段落（從正文拿掉，一行摘要；展開時放回正文原位）、待你決定的題目（按選項把「題號. key」填進提示框，不送出）。
-//    存下來的訊息不變；但 AssistantMessage 沒有 isExpanded，分不出 ctrl+o 畫面，那裡一樣畫成結論框。
-// 3. 沒附區塊的回合，回合結束那列（TurnDuration，「Baked for 3s」）換成「– 本輪結束（無摘要）」，不假裝沒事；
+// 1. 主對話回覆夠長時，回合結束後（turn.complete）把回覆切成編號行，請小模型（$.model.complete）只回編號：
+//    哪行是結論、哪些是待決題目與選項、你要做的事、之後我做的事、哪幾段是可收合的細節。mod 檢查編號、用回覆原句組成結論框，
+//    模型寫不出回覆裡沒有的字；編號對不上、逾時、API 錯都在框的位置寫「摘錄失敗：原因」。不改系統提示。
+// 2. 畫回覆時（AssistantMessage）用正文雜湊找摘錄，正文下面畫一個圓角結論框：標題（狀態＋耗時）疊在上框線，
+//    框裡是粗體結論、細節段落（從正文拿掉，一行摘要；展開時放回正文原位）、待你決定的題目（按選項把「題號. key」填進提示框，不送出）。
+//    AssistantMessage 沒有 isExpanded，分不出 ctrl+o 畫面，那裡一樣畫成結論框。
+// 3. 沒摘錄的回合（短回覆、摘錄作廢），回合結束那列（TurnDuration，「Baked for 3s」）換成「– 本輪結束（無摘錄）」，不假裝沒事；
 //    那列沒有輪次編號，用耗時對回 turn.complete。
 // 4. 子代理回報那列（UserMessage，收合時「Message from @…」）換成它回報的第一句，ctrl+o 照原樣展開。
 // 5. 還有沒答的題目時，prompt 上方（AbovePrompt）一行「? N 項等你決定」，聚焦後按選項字母選答（一樣只填提示框）。
@@ -19,8 +21,6 @@ import type { AgentNote, ChangeNote, Evidence, Facet, Item, Summary, SummaryTask
 //    沒地方放 pane 時改用文字回；子代理在跑、pane 沒畫出來時，prompt 上方多一行「子代理 N 個進行中」。
 
 const TAG = 'sitrep'
-// 圍欄要在行首：正文裡行內提到 ` ```ui-summary ` 不算（實機：行內那個被當成開頭，把真的區塊吃掉，結論框讀不懂）
-const FENCE_RE = /^```ui-summary[^\n]*\n([\s\S]*?)\n?^```[^\n]*\n?/gm
 const KEEP_TURNS = 50
 const KEEP_AGENTS = 50
 const PANE = 'sitrep'
@@ -58,22 +58,33 @@ const BOX_MAX = 88
 // TurnDuration 的耗時和 turn.complete 的不一定分毫不差（實測 13s 對得上、42s 對不上）：取差距最小、在這範圍內的那筆
 const MATCH_MS = 3000
 
-const SECTION = [
-  'sitrep: when you end your turn and hand control back to the user, end that reply with a ```ui-summary code block holding one line of JSON:',
-  '{"status":"done|blocked|partial","outcome":"one-sentence result","items":[...],"facets":[...],"tasks":[...]}',
-  '- Write every text field in the language of your reply. Widths are in terminal columns, a CJK character counting as 2: outcome at most 80, option label 24, facet summary 60, task text 40.',
-  '- Each item is {"kind":"decision|user-next|agent-next","text":"…","options":[{"key":"A","label":"…"}],"recommended":"A"}. Use decision, with options, only when the user really has to choose; user-next is something the user must do by hand; agent-next is what you will do next. Use an empty array when there are none.',
-  '- A decision from an earlier reply that the user has not answered (they asked about something else instead, without picking an option or answering it in words) is listed again in this reply\'s items with its original question and options, as long as it still applies; never settle it with a default on your own. If it no longer applies, say so in one sentence in the body and drop it.',
-  '- Each facet is {"label":"…","summary":"…","heading":"the exact heading of that section in your reply"}. Add one for each section of your reply that holds details the user can expand when needed, such as changes, checks or verification, and remaining risks (label: a short name in your reply\'s language, e.g. 變更 or Changes). Only sections that really exist in the reply.',
-  '- tasks only for multi-step work (otherwise omit it): the steps of the whole job in order, each {"text":"…","done":true|false}, at most 7, finished ones marked done.',
-  '- The block is read by the interface only; the user never sees it. Write the body in full as usual and do not mention the block in it. Do not add it to messages between tool calls.',
-  '- Do not add it either when asked to write a recap, a session summary, or any other text that is not a reply to the user.',
+// 摘錄：回覆（不算程式碼區塊）至少這麼長，或有這麼多個標題才摘（分段的短完工報告也要框；實測 310 則回覆裡 16% 是這種）；
+// 挑編號用的模型與時限
+const EXCERPT_MIN = 800
+const EXCERPT_HEADINGS = 2
+const EXCERPT_MODEL = 'haiku'
+const EXCERPT_TIMEOUT_MS = 20_000
+const KEEP_EXCERPTS = 50
+// 主對話每開始一輪 +1：摘錄回來時已經換輪就作廢，待決題目不能蓋掉新一輪的
+let turnGen = 0
+
+// 給挑編號模型的規則：只回編號，文字一律由 mod 從回覆原句取
+const PICK_RULES = [
+  'You index an assistant reply for a terminal UI. The reply is given as numbered lines "[n] text". Return ONLY one line of JSON, no prose:',
+  '{"status":"done|blocked|partial","outcome":n,"decisions":[{"question":n,"options":[n,n],"recommended":n}],"todo":[n],"next":[n],"sections":[{"heading":n,"summary":n}]}',
+  '- Every value except status is a line number from the reply. Never write text of your own.',
+  '- outcome: the one line that best states the result or answer.',
+  '- status: done when the work or answer is complete; blocked when it waits on the user or an obstacle; partial when only part is done.',
+  '- decisions: only choices the reply explicitly asks the user to make. question is the line asking; options are the lines of each choice (2 or more); recommended is the option line the reply recommends, or omit it.',
+  '- todo: lines naming something the user must do by hand. next: lines naming what the assistant will do next. Use [] when there are none.',
+  '- sections: for each heading line ("#" lines) whose section holds details the user can expand later (changes, verification, risks, evidence), the heading line and the one line inside that section that best summarizes it. Skip the section holding the main result.',
 ].join('\n')
 
 const answersAtom = atom({ plugin: 'sitrep', key: 'answers' } as const, {} as Record<string, Record<number, string>>)
 const openAtom = atom({ plugin: 'sitrep', key: 'open' } as const, {} as Record<string, boolean>)
 const turnsAtom = atom({ plugin: 'sitrep', key: 'turns' } as const, [] as TurnNote[])
 const agentsAtom = atom({ plugin: 'sitrep', key: 'agents' } as const, [] as AgentNote[])
+const excerptsAtom = atom({ plugin: 'sitrep', key: 'excerpts' } as const, {} as Record<string, Excerpt>)
 const lastAtom = atom({ plugin: 'sitrep', key: 'last' } as const, null as { id: string; summary: Summary } | null)
 const evidenceAtom = atom({ plugin: 'sitrep', key: 'evidence' } as const, null as Evidence | null)
 const backgroundAtom = atom({ plugin: 'sitrep', key: 'background' } as const, [] as string[])
@@ -84,9 +95,9 @@ const paneOpenAtom = atom({ plugin: 'sitrep', key: 'paneOpen' } as const, false)
 const pendingAtom = atom({ plugin: 'sitrep', key: 'pending' } as const, null as { id: string; decisions: Item[]; todo: string[] } | null)
 
 export const register: Register = on => {
-  on('prompt.compose', async ($, e, next) => {
-    const result = await next(e)
-    return { sections: [...result.sections, { id: `${TAG}:summary`, text: SECTION, scope: 'session' as const }] }
+  on('turn.start', async ($, e, next) => {
+    turnGen++
+    return next(e)
   })
 
   on('session.start', async ($, e, next) => {
@@ -214,33 +225,21 @@ export const register: Register = on => {
       await update($, agentsAtom, list => list.map(a => (a.id === id ? { ...a, status: e.isAborted ? 'killed' : 'completed', durationMs: e.durationMs } : a)))
       return result
     }
-    const found = findSummary(e.answer)
-    await trackAgents($, found?.id)
+    const lines = numberLines(e.answer)
+    const isLong = lines.join('').length >= EXCERPT_MIN || lines.filter(l => HEADING_RE.test(l)).length >= EXCERPT_HEADINGS
+    const id = isLong ? keyOf(e.answer) : undefined
+    await trackAgents($, id)
     // 有子代理在跑時每 250ms 重畫一次：轉圈字形和已跑時間證明它還活著（使用者 2026-10-08 選轉圈）；都跑完就停
     if ((await read($, agentsAtom)).some(a => !(a.status in TASK_MARKS))) startTick($)
-    const note: TurnNote = found?.summary
-      ? { id: found.id, durationMs: e.durationMs, glyph: glyphOf(found.summary), outcome: found.summary.outcome }
-      : { durationMs: e.durationMs, glyph: '–', outcome: '本輪結束（無摘要）' }
+    const note: TurnNote = id
+      ? { id, durationMs: e.durationMs, glyph: '…', outcome: '摘錄中' }
+      : { durationMs: e.durationMs, glyph: '–', outcome: '本輪結束（無摘錄）' }
     await update($, turnsAtom, list => [...list, note].slice(-KEEP_TURNS))
-    // 新的結論框沒有題目＝之前的題目已經處理過（例如使用者自己打字回答），那列跟著消失
-    const summary = found?.summary
-    if (found && summary) {
-      // 完工回覆附的「你要做」多半是建議（例如手動再測一次），不在 prompt 上方催；卡住、做到一半才提示
-      const todo = summary.status === 'done' ? [] : summary.items.filter(i => i.kind === 'user-next').map(i => i.text)
-      await update($, pendingAtom, () => ({ id: found.id, decisions: decisionsOf(summary.items), todo }))
-      await update($, lastAtom, () => ({ id: found.id, summary }))
-      // 證據：沿用最近一輪有「驗證」段的結果，直到下一次驗證蓋過去（問題輪通常沒有驗證段，pane 卻正好開著）
-      const verify = summary.facets.map((f, i) => ({ f, i })).filter(({ f }) => f.label.includes('驗證'))
-      if (verify.length > 0) {
-        // 細節：回覆裡「驗證」那段的前幾行（跑過的指令與結果），pane 的證據段畫在小標籤下面
-        const { sections } = cutSections(found.rest, summary.facets, () => false)
-        const chips = verify.flatMap(({ f }) => f.summary.split(/\s*[·、,，]\s*/)).filter(c => c !== '')
-        const proof = verify.flatMap(({ i }) => (sections[i] ?? '').split('\n'))
-          .map(l => l.replace(/^\s*[-*]\s+|`/g, '').trim()).filter(l => l !== '' && !l.startsWith('```'))
-        await update($, evidenceAtom, () => ({ chips, proof, age: 0 }))
-      } else {
-        await update($, evidenceAtom, ev => (ev ? { ...ev, age: ev.age + 1 } : null))
-      }
+    if (id) {
+      // 不在這裡等模型：回合結束不能被摘錄拖住，回來後再補畫
+      await update($, excerptsAtom, all => keepLast({ ...all, [id]: { state: 'pending' } }))
+      const gen = turnGen
+      $.clock.after(0, () => void excerpt($, id, e.answer, lines, gen))
     }
     // pane 的「變更」段：這一輪結束時還沒 commit 的改動（git diff --numstat，路徑換成絕對路徑好跟 touched 比）；不在 git repo 就清空
     const top = await $.process.run(['git', 'rev-parse', '--show-toplevel'], { timeoutMs: 5000 }).catch(() => null)
@@ -359,13 +358,21 @@ export const register: Register = on => {
       }
       return <Box flexDirection="column">{out}</Box>
     }
-    const found = findSummary(e.props.text)
-    if (found === null) {
-      // 串流中區塊還沒收尾：先藏起來，不然 JSON 會先畫成程式碼、收尾時才被結論框換掉（實機看到會閃）
-      return draw(cutOpenFence(e.props.text) ?? e.props.text)
+    const id = keyOf(e.props.text)
+    const ex = (await read($, excerptsAtom))[id]
+    if (ex === undefined) return draw(e.props.text)
+    if (ex.state !== 'ready') {
+      const { Box, Text } = $.ui.resolve(e)
+      return (
+        <Box flexDirection="column">
+          {await draw(e.props.text)}
+          <Text key="excerpt-note" color={DIM}>{ex.state === 'pending' ? '  … 摘錄中' : `  – 摘錄失敗：${ex.reason}`}</Text>
+        </Box>
+      )
     }
+    const found = { id, summary: ex.summary, rest: e.props.text }
     // pane 開著＝駕駛艙模式：不畫安靜版的結論框，正文完整照畫，底下只留一行「✓ 結論  耗時」；需要你、證據、變更都在 pane
-    if (found.summary !== null && (await read($, paneOpenAtom))) {
+    if (await read($, paneOpenAtom)) {
       const { Box, Text } = $.ui.resolve(e)
       const glyph = glyphOf(found.summary)
       const frame = FRAMES[glyph] ?? DONE_FRAME
@@ -386,14 +393,6 @@ export const register: Register = on => {
     const { shown, sections } = cutSections(found.rest, facets, i => open[`${found.id}:${i}`] === true)
     const body = await draw(shown)
     const { Box, Text } = $.ui.resolve(e)
-    if (found.summary === null) {
-      return (
-        <Box flexDirection="column">
-          {body}
-          <Text color={DIM}>{'  ? ui-summary 讀不懂，沒畫結論框'}</Text>
-        </Box>
-      )
-    }
     // 結論框畫在帶區塊的那一段下面，不靠 TurnDuration：短回合、子代理回報觸發的回合，引擎不一定畫那列（實測 3s 那輪沒有）
     const glyph = glyphOf(found.summary)
     const frame = FRAMES[glyph] ?? DONE_FRAME
@@ -442,6 +441,7 @@ export const register: Register = on => {
           <Box key="title" position="absolute" top={0} left={2} flexDirection="row">
             {isOld ? <Button key="box-close" plain label="▾" onPress={toggleBox} /> : null}
             <Text color={frame.title} bold>{` ${glyph} ${frame.word} `}</Text>
+            <Text color={DIM}>{'摘錄 '}</Text>
           </Box>
           {turn ? <Box key="time" position="absolute" top={0} right={2}><Text color={DIM}>{` ${duration(turn.durationMs)} `}</Text></Box> : null}
         </Box>
@@ -478,7 +478,7 @@ export const register: Register = on => {
     // 子代理回報開頭那段給模型看的框架說明（[Subagent hand-back] … The report follows:）不畫，只留回報本文；存下來的訊息不動
     const report = stripHandback(e.props.text)
     if (e.props.isExpanded) return report === e.props.text ? next(e) : next({ ...e, props: { ...e.props, text: report } })
-    const first = firstSentence(stripSummary(report))
+    const first = firstSentence(report)
     if (first === '') return next(e)
     const { Text } = $.ui.resolve(e)
     return (
@@ -490,6 +490,54 @@ export const register: Register = on => {
       </Text>
     )
   })
+}
+
+// 請小模型挑編號、組成結論框。換輪了就作廢（待決題目不能蓋掉新一輪的）；失敗照實記下原因，框的位置會寫出來
+async function excerpt($: EngineInterface, id: string, answer: string, lines: string[], gen: number) {
+  const prompt = lines.map((l, i) => `[${i + 1}] ${l}`).join('\n')
+  const r = await $.model.complete({ model: EXCERPT_MODEL, system: PICK_RULES, prompt, effort: 'low', maxTokens: 600, timeoutMs: EXCERPT_TIMEOUT_MS })
+    .catch((err: unknown) => ({ isAnswered: false as const, reason: String(err) }))
+  let result: Excerpt
+  if (!r.isAnswered) result = { state: 'failed', reason: r.reason === 'aborted' ? `逾時或中止（${EXCERPT_TIMEOUT_MS / 1000}s）` : r.reason }
+  else {
+    const summary = buildSummary(lines, r.text)
+    result = summary ? { state: 'ready', summary } : { state: 'failed', reason: '回傳的編號對不上原文' }
+  }
+  if (gen !== turnGen) {
+    await update($, excerptsAtom, all => {
+      const { [id]: _, ...rest } = all
+      return rest
+    })
+    await update($, turnsAtom, list => list.map(t => (t.id === id ? { durationMs: t.durationMs, glyph: '–', outcome: '本輪結束（新一輪已開始，摘錄作廢）' } : t)))
+    $.ui.invalidate('ui.render')
+    return
+  }
+  await update($, excerptsAtom, all => keepLast({ ...all, [id]: result }))
+  if (result.state === 'failed') {
+    await update($, turnsAtom, list => list.map(t => (t.id === id ? { ...t, glyph: '–', outcome: `摘錄失敗：${result.reason}` } : t)))
+    $.ui.invalidate('ui.render')
+    return
+  }
+  const summary = result.summary
+  await update($, turnsAtom, list => list.map(t => (t.id === id ? { ...t, glyph: glyphOf(summary), outcome: summary.outcome } : t)))
+  // 新的結論框沒有題目＝之前的題目已經處理過（例如使用者自己打字回答），那列跟著消失
+  // 完工回覆的「你要做」多半是建議（例如手動再測一次），不在 prompt 上方催；卡住、做到一半才提示
+  const todo = summary.status === 'done' ? [] : summary.items.filter(i => i.kind === 'user-next').map(i => i.text)
+  await update($, pendingAtom, () => ({ id, decisions: decisionsOf(summary.items), todo }))
+  await update($, lastAtom, () => ({ id, summary }))
+  // 證據：沿用最近一輪有「驗證」段的結果，直到下一次驗證蓋過去（問題輪通常沒有驗證段，pane 卻正好開著）
+  const verify = summary.facets.map((f, i) => ({ f, i })).filter(({ f }) => f.label.includes('驗證'))
+  if (verify.length > 0) {
+    // 細節：回覆裡「驗證」那段的前幾行（跑過的指令與結果），pane 的證據段畫在小標籤下面
+    const { sections } = cutSections(answer, summary.facets, () => false)
+    const chips = verify.flatMap(({ f }) => f.summary.split(/\s*[·、,，]\s*/)).filter(c => c !== '')
+    const proof = verify.flatMap(({ i }) => (sections[i] ?? '').split('\n'))
+      .map(l => l.replace(/^\s*[-*]\s+|`/g, '').trim()).filter(l => l !== '' && !l.startsWith('```'))
+    await update($, evidenceAtom, () => ({ chips, proof, age: 0 }))
+  } else {
+    await update($, evidenceAtom, ev => (ev ? { ...ev, age: ev.age + 1 } : null))
+  }
+  $.ui.invalidate('ui.render')
 }
 
 // 開 pane；真的畫出來（isPlaced）才把題目從 prompt 上方那列移過去，太窄等著時題目留在原處
@@ -566,9 +614,8 @@ async function drawPane($: EngineInterface, e: RenderEvent, width: number) {
   })
 
   // 任務 完成數/總數：✓ 完成（灰）、▸ 下一項（亮）、○ 還沒做（灰）。
-  // 來源：最近一張結論框的 tasks（使用者環境沒有任務工具）；沒有才用引擎的 TaskCreated／TaskCompleted
-  const fromSummary = (last?.summary.tasks ?? []).map((t, i) => ({ id: `s${i}`, subject: t.text, done: t.done }))
-  const tasks = fromSummary.length > 0 ? fromSummary : await read($, tasksAtom)
+  // 來源：引擎的 TaskCreated／TaskCompleted（摘錄只取回覆原句，沒有步驟清單）
+  const tasks = await read($, tasksAtom)
   const current = tasks.findIndex(t => !t.done)
   sections.push({
     title: `任務 ${tasks.filter(t => t.done).length}/${tasks.length}`,
@@ -854,32 +901,20 @@ function matchTurn(turns: TurnNote[], durationMs: number): TurnNote | undefined 
   return best
 }
 
-// 回覆裡最後一個 ui-summary 區塊；沒有回 null。JSON 讀不懂時 summary 為 null（照樣把區塊藏起來）
-function findSummary(text: string): { id: string; summary: Summary | null; rest: string } | null {
-  const blocks = [...text.matchAll(FENCE_RE)]
-  const last = blocks.at(-1)
-  if (!last) return null
-  const raw = (last[1] ?? '').trim()
-  return { id: hash(raw), summary: parseSummary(raw), rest: text.replace(FENCE_RE, '').replace(/\s+$/, '') }
-}
-
-// 最後一個 ```ui-summary 後面還沒有收尾的 ```：回傳開頭之前的正文；沒有這種區塊回 null
-function cutOpenFence(text: string): string | null {
-  const at = [...text.matchAll(/^```ui-summary/gm)].at(-1)?.index ?? -1
-  if (at >= 0 && text.indexOf('```', at + 3) < 0) return text.slice(0, at).replace(/\s+$/, '')
-  // 開頭那行還沒傳完（```、```ui-sum）也藏：只在它是開新區塊時（前面的 ``` 行成對），收尾的 ``` 不動
-  const nl = text.lastIndexOf('\n')
-  const tail = text.slice(nl + 1)
-  const before = text.slice(0, nl + 1)
-  if (tail.length >= 3 && '```ui-summary'.startsWith(tail) && (before.match(/^```/gm)?.length ?? 0) % 2 === 0) return before.replace(/\s+$/, '')
-  return null
-}
-
 // ASCII 圖：沒標語言（或 text）的程式碼區塊，內含框線字元或箭頭
 // ```dot（或 graphviz）區塊也當成圖，標籤另附節點與邊數
 const FIG_FENCE_RE = /^```([A-Za-z]*)[ \t]*\n([\s\S]*?)\n```[ \t]*$/gm
 // 純 ASCII 圖（output style 規定回覆裡的圖用 +--+、|--、`--）也要認得
 const FIG_MARK_RE = /[─│┌┐└┘├┤┬┴┼╭╮╯╰═║]|[→←↑↓]|-->|<--|\+--|--\+|\|--|`--/
+// 文字行：中文句讀或 Markdown 清單開頭。交接草稿這類文字常寫「A → B」，箭頭出現在句子裡不算圖（實機：整份草稿被畫成灰底圖）
+const PROSE_RE = /[，。；！？]|^\s*(?:[-*]|\d+\.)\s/
+
+// 至少 2 行帶圖記號、且占非空白行三成以上才算圖；文字行裡的記號不算
+function isFigure(body: string): boolean {
+  const lines = body.split('\n').filter(l => l.trim() !== '')
+  const marked = lines.filter(l => FIG_MARK_RE.test(l) && !PROSE_RE.test(l)).length
+  return marked >= 2 && marked * 10 >= lines.length * 3
+}
 
 type Part = { kind: 'text' | 'figure' | 'dot'; text: string }
 
@@ -890,7 +925,7 @@ function splitFigures(text: string): Part[] {
   for (const m of text.matchAll(FIG_FENCE_RE)) {
     const lang = (m[1] ?? '').toLowerCase()
     const body = m[2] ?? ''
-    const kind = lang === 'dot' || lang === 'graphviz' ? 'dot' : ['', 'text', 'txt'].includes(lang) && FIG_MARK_RE.test(body) ? 'figure' : null
+    const kind = lang === 'dot' || lang === 'graphviz' ? 'dot' : ['', 'text', 'txt'].includes(lang) && isFigure(body) ? 'figure' : null
     if (kind === null) continue
     const before = text.slice(at, m.index).trim()
     if (before !== '') parts.push({ kind: 'text', text: before })
@@ -920,39 +955,101 @@ function stripHandback(text: string): string {
   return lines.map(l => l.slice(Number.isFinite(indent) ? indent : 0)).join('\n').trim()
 }
 
-function stripSummary(text: string): string {
-  return text.replace(FENCE_RE, '').trim()
+// 摘錄的候選行：程式碼區塊外的非空白行（去掉前後空白），編號從 1 起
+function numberLines(text: string): string[] {
+  const out: string[] = []
+  let inFence = false
+  for (const raw of text.split('\n')) {
+    const l = raw.trim()
+    if (l.startsWith('```')) {
+      inFence = !inFence
+      continue
+    }
+    if (!inFence && l !== '') out.push(l)
+  }
+  return out
 }
 
-function parseSummary(raw: string): Summary | null {
-  let data: unknown
+// 一則回覆的 key：正文去掉前後空白後的雜湊（turn.complete 的 answer 與 AssistantMessage 的 text 對得上）
+function keyOf(text: string): string {
+  return hash(text.trim())
+}
+
+function keepLast(all: Record<string, Excerpt>): Record<string, Excerpt> {
+  return Object.fromEntries(Object.entries(all).slice(-KEEP_EXCERPTS))
+}
+
+const HEADING_RE = /^(#{1,6})\s+(.+?)\s*#*$/
+
+// 顯示用：拿掉清單符號、粗體、行內程式碼的反引號
+function cleanLine(l: string): string {
+  return l.replace(/^(?:[-*>]|\d+\.)\s+/, '').replace(/\*\*|`/g, '').trim()
+}
+
+// 選項行：「選項 A：…」「A. …」「**A**）…」→ key＋標籤；認不出字母就照順序給 A、B…
+function optionOf(line: string, n: number): Option {
+  const text = cleanLine(line)
+  const m = /^(?:選項\s*)?([A-Za-z])\s*[.)）:：、]\s*(.+)$/.exec(text)
+  return m ? { key: (m[1] ?? '').toUpperCase(), label: clip(m[2] ?? '', 24) } : { key: String.fromCharCode(65 + n), label: clip(text, 24) }
+}
+
+// 模型回的編號 → 結論框。任何編號超出範圍、指錯種類的行（例如結論指到標題）就整份不收，回 null
+function buildSummary(lines: string[], raw: string): Summary | null {
+  let d: Record<string, unknown>
   try {
-    data = JSON.parse(raw)
+    const json = /\{[\s\S]*\}/.exec(raw)?.[0] ?? ''
+    d = JSON.parse(json) as Record<string, unknown>
   } catch {
     return null
   }
-  if (typeof data !== 'object' || data === null) return null
-  const d = data as Record<string, unknown>
-  if (typeof d.outcome !== 'string') return null
-  const items = Array.isArray(d.items) ? d.items.filter(isItem) : []
-  const facets = Array.isArray(d.facets) ? d.facets.filter(isFacet) : []
+  const at = (n: unknown): string | null => (typeof n === 'number' && Number.isInteger(n) && n >= 1 && n <= lines.length ? lines[n - 1] ?? null : null)
+  const isHeading = (n: unknown) => HEADING_RE.test(at(n) ?? '')
+  const list = (x: unknown): unknown[] | null => (x === undefined ? [] : Array.isArray(x) ? x : null)
+  const outcome = at(d.outcome)
+  if (outcome === null || isHeading(d.outcome)) return null
   const status = d.status === 'blocked' || d.status === 'partial' || d.status === 'done' ? d.status : undefined
-  const tasks = Array.isArray(d.tasks) ? d.tasks.filter((t): t is SummaryTask => typeof t?.text === 'string' && typeof t?.done === 'boolean') : []
-  return { ...(status ? { status } : {}), outcome: d.outcome, items, facets, ...(tasks.length > 0 ? { tasks } : {}) }
-}
-
-function isItem(x: unknown): x is Item {
-  if (typeof x !== 'object' || x === null) return false
-  const i = x as Record<string, unknown>
-  const kinds = ['decision', 'user-next', 'agent-next']
-  const options = i.options === undefined || (Array.isArray(i.options) && i.options.every(o => typeof o?.key === 'string' && typeof o?.label === 'string'))
-  return kinds.includes(String(i.kind)) && typeof i.text === 'string' && options
-}
-
-function isFacet(x: unknown): x is Facet {
-  if (typeof x !== 'object' || x === null) return false
-  const f = x as Record<string, unknown>
-  return typeof f.label === 'string' && typeof f.summary === 'string' && (f.heading === undefined || typeof f.heading === 'string')
+  const items: Item[] = []
+  const decisions = list(d.decisions)
+  if (decisions === null) return null
+  for (const x of decisions) {
+    const q = x as Record<string, unknown>
+    const question = at(q?.question)
+    const opts = list(q?.options)
+    if (question === null || opts === null || opts.length < 2 || opts.some(o => at(o) === null)) return null
+    const options = opts.map((o, i) => optionOf(at(o) ?? '', i))
+    const rec = q.recommended === undefined ? undefined : opts.indexOf(q.recommended)
+    if (rec === -1) return null
+    items.push({ kind: 'decision', text: cleanLine(question), options, ...(rec !== undefined ? { recommended: options[rec]?.key } : {}) })
+  }
+  for (const [field, kind] of [['todo', 'user-next'], ['next', 'agent-next']] as const) {
+    const picks = list(d[field])
+    if (picks === null || picks.some(n => at(n) === null)) return null
+    for (const n of picks) items.push({ kind, text: cleanLine(at(n) ?? '') })
+  }
+  const sections = list(d.sections)
+  if (sections === null) return null
+  const facets: Facet[] = []
+  for (const x of sections) {
+    const sec = x as Record<string, unknown>
+    const h = typeof sec?.heading === 'number' ? sec.heading : -1
+    const m = HEADING_RE.exec(at(h) ?? '')
+    if (!m) return null
+    // 摘要行要在這段裡：標題之後、下一個同級或更高的標題之前，本身不是標題
+    const level = m[1]?.length ?? 1
+    let end = lines.length
+    for (let i = h; i < lines.length; i++) {
+      const next = HEADING_RE.exec(lines[i] ?? '')
+      if (next && (next[1]?.length ?? 7) <= level) {
+        end = i
+        break
+      }
+    }
+    const s = sec.summary
+    if (typeof s !== 'number' || s <= h || s > end || isHeading(s)) return null
+    const heading = m[2] ?? ''
+    facets.push({ label: clip(norm(heading), 16), summary: clip(cleanLine(at(s) ?? ''), 60), heading })
+  }
+  return { ...(status ? { status } : {}), outcome: clip(cleanLine(outcome), 80), items, facets }
 }
 
 // 要使用者選的題目（有選項的 decision）；題號就是在這個陣列裡的位置

@@ -2,13 +2,21 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-// 測試裡的引擎：記下引擎拿到的回覆正文（mod 改寫後）與填進提示框的字
-type World = { bodies: string[]; fills: string[] }
+// 測試裡的引擎：記下引擎拿到的回覆正文（mod 改寫後）、填進提示框的字、挑編號模型收到的請求
+// pick＝挑編號模型這次的回答：字串照回、{ fail } 回失敗原因
+// hold＝設了就讓模型卡住，直到測試放行（模擬模型回答要幾秒）
+type World = { bodies: string[]; fills: string[]; asks: { model: string; prompt: string }[]; pick: string | { fail: string }; hold: Promise<void> | null }
 
 function world(on: On): World {
-  const w: World = { bodies: [], fills: [] }
-  on('prompt.compose', () => ({ sections: [{ id: 'intro', text: 'base', scope: 'shared' as const }] }))
+  const w: World = { bodies: [], fills: [], asks: [], pick: '{}', hold: null }
   on('turn.complete', (_$, e) => ({ text: e.answer }))
+  on('turn.start', (_$, e) => ({ turnId: e.turnId }))
+  on('model.complete', async (_$, e) => {
+    w.asks.push({ model: e.model, prompt: e.prompt })
+    if (w.hold) await w.hold
+    const usage = { input_tokens: 10, output_tokens: 20, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
+    return { value: typeof w.pick === 'string' ? { isAnswered: true as const, text: w.pick, usage } : { isAnswered: false as const, reason: w.pick.fail as 'empty-reply', usage } }
+  })
   // 引擎自己的畫法：回覆畫正文、其餘畫一行「engine」，看得出 mod 有沒有換掉
   on('ui.render', { component: 'AssistantMessage' }, ($$, e) => {
     w.bodies.push(e.props.text)
@@ -24,18 +32,66 @@ function world(on: On): World {
   return w
 }
 
-const SUMMARY = {
-  status: 'done',
-  outcome: '照 A 改好，測試全過',
-  items: [
-    { kind: 'decision', text: 'mod 放哪？', options: [{ key: 'A', label: '開新 mod' }, { key: 'B', label: '併進 your-turn' }], recommended: 'A' },
-    { kind: 'decision', text: 'band 再精簡？', options: [{ key: 'A', label: '拿掉' }, { key: 'B', label: '保留' }] },
-    { kind: 'user-next', text: '明天實機看 5 處' },
-  ],
-  facets: [{ label: '驗證', summary: '51 pass · tsc ✓', heading: '驗證' }],
+// 夠長才摘錄：每則測試回覆最後補一行 800 字
+const PAD = '補'.repeat(800)
+const long = (...lines: string[]) => [...lines, '', PAD].join('\n')
+
+// 挑編號模型的回答用原句寫，這裡換成編號（同 mod 的編法：程式碼區塊外的非空白行，從 1 起）
+type Picks = {
+  status?: string
+  outcome: string
+  decisions?: { question: string; options: string[]; recommended?: string }[]
+  todo?: string[]
+  next?: string[]
+  sections?: { heading: string; summary: string }[]
+}
+function picks(reply: string, p: Picks): string {
+  const lines: string[] = []
+  let inFence = false
+  for (const raw of reply.split('\n')) {
+    const l = raw.trim()
+    if (l.startsWith('```')) inFence = !inFence
+    else if (!inFence && l !== '') lines.push(l)
+  }
+  const n = (line: string) => {
+    const at = lines.indexOf(line)
+    if (at < 0) throw new Error(`回覆裡沒有這行：${line}`)
+    return at + 1
+  }
+  return JSON.stringify({
+    status: p.status ?? 'done',
+    outcome: n(p.outcome),
+    decisions: (p.decisions ?? []).map(d => ({ question: n(d.question), options: d.options.map(n), ...(d.recommended ? { recommended: n(d.recommended) } : {}) })),
+    todo: (p.todo ?? []).map(n),
+    next: (p.next ?? []).map(n),
+    sections: (p.sections ?? []).map(s => ({ heading: n(s.heading), summary: n(s.summary) })),
+  })
 }
 
-const REPLY = ['## 結果', '照 A 改好。', '', '## 驗證', '- claude plugin test .：51 pass', '', '## 待你決定', '兩題。', '', '```ui-summary', JSON.stringify(SUMMARY), '```'].join('\n')
+const REPLY = long(
+  '## 結果', '照 A 改好，測試全過。',
+  '## 驗證', '- 51 pass · tsc ✓', '- claude plugin test .：51 pass',
+  '## 待你決定', '1. mod 放哪？', '- 選項 A：開新 mod', '- 選項 B：併進 your-turn', '2. band 再精簡？', '- 選項 A：拿掉', '- 選項 B：保留', '- 明天實機看 5 處',
+)
+const PICKS = picks(REPLY, {
+  outcome: '照 A 改好，測試全過。',
+  decisions: [
+    { question: '1. mod 放哪？', options: ['- 選項 A：開新 mod', '- 選項 B：併進 your-turn'], recommended: '- 選項 A：開新 mod' },
+    { question: '2. band 再精簡？', options: ['- 選項 A：拿掉', '- 選項 B：保留'] },
+  ],
+  todo: ['- 明天實機看 5 處'],
+  sections: [{ heading: '## 驗證', summary: '- 51 pass · tsc ✓' }],
+})
+
+type Clock = ReturnType<typeof mock.clock>
+
+// 主對話一輪結束、挑編號模型照 pick 回答，等摘錄寫回
+async function say($: Engine, clock: Clock, w: World, answer: string, pick: World['pick'], durationMs = 10_000) {
+  w.pick = pick
+  await $.turn.complete({ answer, durationMs, isAborted: false, turnId: 't', reason: 'answer' })
+  await clock.advance(0)
+  await clock.settle()
+}
 
 async function message($: Engine, text: string) {
   return $.ui.mount({ plugin: 'sitrep', surface: 'terminal', component: 'AssistantMessage', props: { text, isFirstOfReply: true } })
@@ -45,23 +101,100 @@ async function texts(ui: { findAll: Awaited<ReturnType<typeof message>>['findAll
   return (await ui.findAll({ type: 'Text' })).map(t => t.text).join(' ')
 }
 
-test('系統提示尾端加上 ui-summary 的說明（session 那側）', async ($, on) => {
+test('不改系統提示：沒有 prompt.compose 的段落', async ($, on) => {
   world(on)
+  on('prompt.compose', () => ({ sections: [{ id: 'intro', text: 'base', scope: 'shared' as const }] }))
   const { sections } = await $.prompt.compose({ model: 'claude-opus-5-5', promptModel: 'claude-opus-5-5', surfaces: ['terminal'], tools: [], outputStyle: null, traits: [] })
-  expect(sections.map(s => s.id)).toEqual(['intro', 'sitrep:summary'])
-  expect(sections[1]?.scope).toBe('session')
-  expect(sections[1]?.text).toContain('```ui-summary')
-  // 使用者改問別的事時，沒答的題目要模型重列：送出訊息會清空待決列，mod 自己分不出是不是回答了
-  expect(sections[1]?.text).toContain('that the user has not answered')
-  // 提示是英文，但結論框的文字要跟回覆同語言
-  expect(sections[1]?.text).toContain('in the language of your reply')
+  expect(sections.map(s => s.id)).toEqual(['intro'])
 })
 
-test('回覆：區塊藏起來、驗證段落收成一行、兩題畫進等你決定的框', async ($, on) => {
+test('長回覆：回合結束後請 haiku 挑編號（程式碼區塊不編號），框裡的字全是回覆原句', async ($, on) => {
+  const clock = mock.clock(on)
   const w = world(on)
+  const reply = long('## 結果', '照 A 改好。', '```', 'code 不編號', '```')
+  await $.turn.complete({ answer: reply, durationMs: 5_000, isAborted: false, turnId: 't', reason: 'answer' })
+  // 模型還沒回：框的位置寫摘錄中
+  expect(await texts(await message($, reply))).toContain('摘錄中')
+  w.pick = picks(reply, { outcome: '照 A 改好。' })
+  await clock.advance(0)
+  await clock.settle()
+  expect(w.asks.map(a => a.model)).toEqual(['haiku'])
+  expect(w.asks[0]?.prompt).toContain('[2] 照 A 改好。')
+  expect(w.asks[0]?.prompt).not.toContain('code 不編號')
+  const text = await texts(await message($, reply))
+  expect(text).toContain('✓ 完成')
+  expect(text).toContain('摘錄')
+  expect(text).toContain('照 A 改好。')
+})
+
+test('短回覆不呼叫模型，回合結束那列寫無摘錄', async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+  await say($, clock, w, '好，改了。', '{}', 12_000)
+  expect(w.asks).toHaveLength(0)
+  const ui = await $.ui.mount({ plugin: 'sitrep', surface: 'terminal', component: 'TurnDuration', props: { word: 'Baked', durationMs: 12_000 } })
+  expect(await texts(ui)).toContain('– 本輪結束（無摘錄）')
+  expect(w.bodies.length).toBe(0)
+  await message($, '好，改了。')
+  expect(w.bodies.at(-1)).toBe('好，改了。')
+})
+
+test('短回覆但有 2 個以上標題（分段的完工報告）一樣摘錄', async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+  const reply = '## 結果\n改好了。\n\n## 驗證\n- 3 pass'
+  await say($, clock, w, reply, picks(reply, { outcome: '改好了。', sections: [{ heading: '## 驗證', summary: '- 3 pass' }] }))
+  expect(w.asks).toHaveLength(1)
+  expect(await texts(await message($, reply))).toContain('✓ 完成')
+})
+
+test('編號超出範圍或結論指到標題：整份不收，框的位置寫摘錄失敗', async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+  await say($, clock, w, REPLY, JSON.stringify({ status: 'done', outcome: 999 }))
+  expect(await texts(await message($, REPLY))).toContain('摘錄失敗：回傳的編號對不上原文')
+  await say($, clock, w, REPLY, JSON.stringify({ status: 'done', outcome: 1 }))
+  expect(await texts(await message($, REPLY))).toContain('摘錄失敗：回傳的編號對不上原文')
+  // 選項不在原文、推薦不在選項裡也不收
+  const bad = JSON.parse(PICKS) as { decisions: { recommended?: number }[] }
+  bad.decisions[0] = { ...bad.decisions[0], recommended: 2 }
+  await say($, clock, w, REPLY, JSON.stringify(bad))
+  expect(await texts(await message($, REPLY))).toContain('摘錄失敗')
+})
+
+test('模型沒回答：框的位置照實寫原因，回合結束那列也是', async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+  await say($, clock, w, REPLY, { fail: 'api-error' }, 20_000)
+  expect(await texts(await message($, REPLY))).toContain('摘錄失敗：api-error')
+  const ui = await $.ui.mount({ plugin: 'sitrep', surface: 'terminal', component: 'TurnDuration', props: { word: 'Baked', durationMs: 20_000 } })
+  expect(await texts(ui)).toContain('摘錄失敗：api-error')
+})
+
+test('摘錄回來前新一輪已開始：作廢，不畫框、不動待決題目', async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+  w.pick = PICKS
+  let release = () => {}
+  w.hold = new Promise(r => (release = r))
+  await $.turn.complete({ answer: REPLY, durationMs: 5_000, isAborted: false, turnId: 't1', reason: 'answer' })
+  await clock.advance(0)
+  expect(w.asks).toHaveLength(1)
+  await $.turn.start({ text: '下一題', turnId: 't2' })
+  release()
+  await clock.settle()
+  const text = await texts(await message($, REPLY))
+  expect(text).not.toContain('等你決定')
+  expect(text).not.toContain('摘錄中')
+  expect(await texts(await above($))).not.toContain('題待決')
+})
+
+test('回覆：驗證段落收成一行、兩題畫進等你決定的框', async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+  await say($, clock, w, REPLY, PICKS)
   const ui = await message($, REPLY)
   const body = w.bodies.at(-1) ?? ''
-  expect(body).not.toContain('ui-summary')
   expect(body).not.toContain('51 pass')
   // 有題目時「待你決定」段也收進框（列成利弊），題目不在正文再寫一次
   expect(body).not.toContain('## 待你決定')
@@ -74,11 +207,12 @@ test('回覆：區塊藏起來、驗證段落收成一行、兩題畫進等你�
   expect(text).toContain('開新 mod')
   expect(text).toContain('建議')
   expect(text).toContain('你要做  明天實機看 5 處')
-  expect(text).not.toContain('點選項只填入提示框')
 })
 
 test('按選項：依題號把已選的答案填進提示框，不送出', async ($, on) => {
+  const clock = mock.clock(on)
   const w = world(on)
+  await say($, clock, w, REPLY, PICKS)
   const ui = await message($, REPLY)
   await ui.press({ key: 'pick-1-B' })
   await ui.press({ key: 'pick-0-A' })
@@ -86,98 +220,73 @@ test('按選項：依題號把已選的答案填進提示框，不送出', async
 })
 
 test('收合的段落按 ▸ 放回正文原位（不畫在框裡），再按收回；利弊段一樣', async ($, on) => {
+  const clock = mock.clock(on)
   const w = world(on)
+  await say($, clock, w, REPLY, PICKS)
   const ui = await message($, REPLY)
   expect(w.bodies.at(-1)).not.toContain('claude plugin test')
   await ui.press({ key: 'toggle-0' })
-  expect(w.bodies.at(-1)).toContain('## 驗證\n- claude plugin test .：51 pass')
+  expect(w.bodies.at(-1)).toContain('## 驗證\n- 51 pass · tsc ✓\n- claude plugin test .：51 pass')
   expect(await ui.findAll({ type: 'Markdown' })).toHaveLength(0)
   expect(await texts(ui)).toContain('已放回正文')
   await ui.press({ key: 'toggle-0' })
   expect(w.bodies.at(-1)).not.toContain('claude plugin test')
   await ui.press({ key: 'toggle-1' })
-  expect(w.bodies.at(-1)).toContain('## 待你決定\n兩題。')
+  expect(w.bodies.at(-1)).toContain('## 待你決定\n1. mod 放哪？')
 })
 
 test('收合列的標籤補到同寬，摘要排成一直欄（中文字算 2 欄）', async ($, on) => {
-  world(on)
-  const facets = [{ label: '變更', summary: '改 README' }, { label: '殘留風險', summary: '巢狀清單' }]
-  const ui = await message($, '好\n\n```ui-summary\n' + JSON.stringify({ status: 'done', outcome: '好', items: [], facets }) + '\n```')
-  const labels = (await ui.findAll({ type: 'Text' })).map(t => t.text).filter(t => /變更|殘留風險/.test(t))
+  const clock = mock.clock(on)
+  const w = world(on)
+  const reply = long('好。', '## 變更', '改 README', '## 殘留風險', '巢狀清單')
+  await say($, clock, w, reply, picks(reply, { outcome: '好。', sections: [{ heading: '## 變更', summary: '改 README' }, { heading: '## 殘留風險', summary: '巢狀清單' }] }))
+  const labels = (await (await message($, reply)).findAll({ type: 'Text' })).map(t => t.text).filter(t => /變更|殘留風險/.test(t))
   expect(labels).toEqual([' 變更      ', ' 殘留風險  '])
 })
 
-test('正文行內提到 ```ui-summary 不當成區塊：照樣讀到尾端那個、行內文字保留', async ($, on) => {
-  const w = world(on)
-  const reply = '## 結果\nrecap 露出 ` ```ui-summary ` 原文，已修好。\n\n## 驗證\n- 32 pass\n\n```ui-summary\n' +
-    JSON.stringify({ status: 'done', outcome: '修好了', items: [], facets: [] }) + '\n```'
-  const text = await texts(await message($, reply))
-  expect(text).toContain('✓ 完成')
-  expect(text).not.toContain('讀不懂')
-  expect(w.bodies.at(-1)).toContain('recap 露出 ` ```ui-summary ` 原文')
-  expect(w.bodies.at(-1)).not.toContain('"status"')
-})
-
-test('沒有區塊的回覆照原樣交給引擎', async ($, on) => {
+test('沒有摘錄的回覆照原樣交給引擎', async ($, on) => {
   const w = world(on)
   await message($, '## 結果\n普通回覆')
   expect(w.bodies.at(-1)).toBe('## 結果\n普通回覆')
 })
 
-test('串流中區塊還沒收尾：先藏起來，不畫結論框', async ($, on) => {
+test('結論條畫在回覆裡：狀態標籤＋結論＋耗時；框寬固定、標題疊在上框線', async ($, on) => {
+  const clock = mock.clock(on)
   const w = world(on)
-  const ui = await message($, '## 結果\n照 A 改好。\n\n```ui-summary\n{"status":"do')
-  expect(w.bodies.at(-1)).toBe('## 結果\n照 A 改好。')
-  expect((await ui.findAll({ type: 'Box' })).filter(b => b.props.borderStyle !== undefined)).toHaveLength(0)
-  // 開頭那行只傳到一半也藏；一般程式碼區塊收尾的 ``` 不動
-  await message($, '照 A 改好。\n\n```ui-sum')
-  expect(w.bodies.at(-1)).toBe('照 A 改好。')
-  await message($, '```py\nprint(1)\n```')
-  expect(w.bodies.at(-1)).toBe('```py\nprint(1)\n```')
-})
-
-test('區塊讀不懂：照樣藏起來，提示沒畫結論框', async ($, on) => {
-  const w = world(on)
-  const ui = await message($, '回覆\n\n```ui-summary\n{壞掉\n```')
-  expect(w.bodies.at(-1)).toBe('回覆')
-  expect(await texts(ui)).toContain('ui-summary 讀不懂')
-})
-
-test('結論條畫在回覆裡：狀態標籤＋結論；回合結束後補上耗時', async ($, on) => {
-  world(on)
+  await say($, clock, w, REPLY, PICKS, 161_000)
   const ui = await message($, REPLY)
   expect(await texts(ui)).toContain('等你決定')
   expect(await texts(ui)).toContain('照 A 改好，測試全過')
-  expect(await texts(ui)).not.toContain('2m 41s')
+  expect(await texts(ui)).toContain('2m 41s')
   // 框寬固定：終端寬減 4、最寬 88；標題疊在上框線（框的後一個兄弟，absolute）
   const boxes = await ui.findAll({ type: 'Box' })
   expect(boxes.filter(b => b.props.width !== undefined).map(b => b.props.width)).toEqual([88])
   expect(boxes.some(b => b.props.position === 'absolute' && b.props.top === 0)).toBe(true)
-  await $.turn.complete({ answer: REPLY, durationMs: 161_000, isAborted: false, turnId: 't1', reason: 'answer' })
-  await ui.redraw()
-  expect(await texts(ui)).toContain('2m 41s')
 })
 
-test('回合結束那列：有摘要的交給引擎原樣畫；沒附區塊的換成灰色提示；子代理的不算', async ($, on) => {
-  world(on)
-  await $.turn.complete({ answer: REPLY, durationMs: 161_000, isAborted: false, turnId: 't1', reason: 'answer' })
+test('回合結束那列：有摘錄的交給引擎原樣畫；沒摘錄的換成灰色提示；子代理的不算', async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+  await say($, clock, w, REPLY, PICKS, 161_000)
   await $.turn.complete({ answer: '子代理的回報', durationMs: 5_000, isAborted: false, turnId: 't2', reason: 'answer', agentId: 'a1' })
-  await $.turn.complete({ answer: '沒附區塊', durationMs: 12_000, isAborted: false, turnId: 't3', reason: 'answer' })
+  await say($, clock, w, '短回覆', '{}', 12_000)
   const row = async (durationMs: number) => {
     const ui = await $.ui.mount({ plugin: 'sitrep', surface: 'terminal', component: 'TurnDuration', props: { word: 'Baked', durationMs } })
     return texts(ui)
   }
   expect(await row(161_000)).toContain('engine Baked')
-  expect(await row(12_000)).toContain('– 本輪結束（無摘要）')
+  expect(await row(12_000)).toContain('– 本輪結束（無摘錄）')
   // 耗時差幾百毫秒也對得回去
   expect(await row(12_600)).toContain('本輪結束')
   expect(await row(5_000)).toContain('engine Baked')
 })
 
 test('沒有題目但有你要做的事：框標成等你動手，你要做排在結論下面，之後我排最後', async ($, on) => {
-  world(on)
-  const only = { status: 'partial', outcome: '子代理在跑', items: [{ kind: 'agent-next', text: '等子代理回報' }, { kind: 'user-next', text: '重開終端' }], facets: [] }
-  const ui = await message($, '已派子代理。\n\n```ui-summary\n' + JSON.stringify(only) + '\n```')
+  const clock = mock.clock(on)
+  const w = world(on)
+  const reply = long('子代理在跑。', '- 等子代理回報', '- 重開終端')
+  await say($, clock, w, reply, picks(reply, { status: 'partial', outcome: '子代理在跑。', next: ['- 等子代理回報'], todo: ['- 重開終端'] }))
+  const ui = await message($, reply)
   const boxes = await ui.findAll({ type: 'Box' })
   expect(boxes.filter(b => b.props.borderStyle !== undefined)).toHaveLength(1)
   const text = await texts(ui)
@@ -186,9 +295,9 @@ test('沒有題目但有你要做的事：框標成等你動手，你要做排�
   expect(text.indexOf('你要做  重開終端')).toBeGreaterThan(text.indexOf('子代理在跑'))
   expect(text.indexOf('之後我  等子代理回報')).toBeGreaterThan(text.indexOf('你要做  重開終端'))
   // 只有之後我、沒有你要做的才是進行中
-  const later = { ...only, items: [{ kind: 'agent-next', text: '等子代理回報' }] }
-  expect(await texts(await message($, '已派。\n\n```ui-summary\n' + JSON.stringify(later) + '\n```'))).toContain('~ 進行中')
-  expect(text).not.toContain('待你決定')
+  const later = long('已派。', '- 等回報')
+  await say($, clock, w, later, picks(later, { status: 'partial', outcome: '已派。', next: ['- 等回報'] }))
+  expect(await texts(await message($, later))).toContain('~ 進行中')
 })
 
 test('子代理回報那列：收合時換成第一句，展開時照原樣', async ($, on) => {
@@ -239,6 +348,17 @@ test('純 ASCII 圖（+--+ 方框、|-- 樹，沒有箭頭）也畫成灰底圖'
   expect(await texts(tree)).toContain('圖')
 })
 
+test('交接草稿這類文字區塊：句子裡有箭頭、清單有樹記號也不當成圖', async ($, on) => {
+  const w = world(on)
+  const draft = '# 修 sitrep 誤判\nphase: 2\n- 現狀：原本 → 收緊後\n- 下一步：跑測試 → 收尾\n- |-- 的樹在清單裡\n硬約束：不改 ctx-relay。'
+  const ui = await message($, `交接：\n\n\`\`\`\n${draft}\n\`\`\``)
+  expect(w.bodies.at(-1)).toContain('# 修 sitrep 誤判')
+  expect(await texts(ui)).not.toContain('圖')
+  // 只有一行帶記號的短區塊也不是圖
+  await message($, '```\nA --> B\n```')
+  expect(w.bodies.at(-1)).toBe('```\nA --> B\n```')
+})
+
 const DOT = 'digraph { a -> b; b -> c [label="x"]; a -> c }'
 
 test('dot 區塊：跟 ASCII 圖一樣畫灰底原文，標籤附粗算的節點與邊數；不跑任何指令', async ($, on) => {
@@ -257,10 +377,10 @@ test('dot 區塊：跟 ASCII 圖一樣畫灰底原文，標籤附粗算的節點
 
 test('結論框：這一輪派出的背景子代理列在框裡，跑的時候轉圈＋已跑時間，跑完換成 ✓ 和耗時', async ($, on) => {
   const clock = mock.clock(on)
-  world(on)
+  const w = world(on)
   const agent = { id: 'a1', description: '摘要 ctx-relay README', type: 'Explore', status: 'running' as const }
   on('agent.list', () => ({ value: [agent] }))
-  await $.turn.complete({ answer: REPLY, durationMs: 6_000, isAborted: false, turnId: 't1', reason: 'answer' })
+  await say($, clock, w, REPLY, PICKS, 6_000)
   const ui = await message($, REPLY)
   const row = async () => (await texts(ui)).match(/([⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏])  Explore   摘要 ctx-relay README   執行中 (\d+s)/)
   const first = await row()
@@ -314,25 +434,13 @@ async function pane($: Engine) {
 
 const sitrepPane = ($: Engine) => $.command.run({ command: 'sitrep-pane', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 160 } })
 
-test('pane 任務段：照結論框的 tasks 畫 ✓／▸／○ 與 完成數/總數', async ($, on) => {
-  world(on)
-  paneWorld(on)
-  const withTasks = { ...SUMMARY, tasks: [{ text: '研究痛點', done: true }, { text: '版面定案', done: false }, { text: '實測 6 項', done: false }] }
-  await $.turn.complete({ answer: '好\n\n```ui-summary\n' + JSON.stringify(withTasks) + '\n```', durationMs: 5_000, isAborted: false, turnId: 't', reason: 'answer' })
-  const text = await texts(await pane($))
-  expect(text).toContain('任務 1/3')
-  expect(text).toContain('✓ ')
-  expect(text).toContain('▸ ')
-  expect(text).toContain('版面定案')
-  expect(text).toContain('○ ')
-})
-
 test('pane 證據段：沒有驗證段的回合沿用上一次的證據，標題註明幾輪前', async ($, on) => {
-  world(on)
+  const clock = mock.clock(on)
+  const w = world(on)
   paneWorld(on)
-  await $.turn.complete({ answer: REPLY, durationMs: 5_000, isAborted: false, turnId: 't1', reason: 'answer' })
-  const noVerify = { ...SUMMARY, facets: [] }
-  await $.turn.complete({ answer: '問兩題\n\n```ui-summary\n' + JSON.stringify(noVerify) + '\n```', durationMs: 5_000, isAborted: false, turnId: 't2', reason: 'answer' })
+  await say($, clock, w, REPLY, PICKS)
+  const ask = long('問兩題。')
+  await say($, clock, w, ask, picks(ask, { outcome: '問兩題。' }))
   const text = await texts(await pane($))
   expect(text).toContain('證據 · 1 輪前')
   expect(text).toContain('✓ 51 pass')
@@ -340,9 +448,10 @@ test('pane 證據段：沒有驗證段的回合沿用上一次的證據，標題
 })
 
 test('pane 選項：照引擎問卷樣式「a: 標籤」，不包鍵帽底色；選過的打 ●、其他選項變暗', async ($, on) => {
-  world(on)
+  const clock = mock.clock(on)
+  const w = world(on)
   paneWorld(on)
-  await $.turn.complete({ answer: REPLY, durationMs: 5_000, isAborted: false, turnId: 't', reason: 'answer' })
+  await say($, clock, w, REPLY, PICKS)
   const ui = await pane($)
   expect((await ui.findAll({ type: 'Box' })).some(b => b.props.backgroundColor === '#5e5622')).toBe(false)
   // 第二題沒有熱鍵：字母自己寫進標籤，長相跟有熱鍵的一樣
@@ -354,16 +463,17 @@ test('pane 選項：照引擎問卷樣式「a: 標籤」，不包鍵帽底色；
 })
 
 test('pane 開著：prompt 上方那列不畫、不畫結論框，正文完整、底下只留一行結論', async ($, on) => {
-  world(on)
+  const clock = mock.clock(on)
+  const w = world(on)
   paneWorld(on)
   await sitrepPane($)
-  await $.turn.complete({ answer: REPLY, durationMs: 5_000, isAborted: false, turnId: 't', reason: 'answer' })
+  await say($, clock, w, REPLY, PICKS)
   expect(await texts(await above($))).not.toContain('等你決定')
   const msg = await message($, REPLY)
   const text = await texts(msg)
   expect(text).toContain('照 A 改好，測試全過')
   expect(text).not.toContain('等你決定')
-  expect(text).not.toContain('開新 mod')
+  expect(text).not.toContain('建議')
   expect((await msg.findAll({ type: 'Box' })).some(b => b.props.borderStyle === 'round')).toBe(false)
 })
 
@@ -375,9 +485,10 @@ test('子代理回報：展開時拿掉 [Subagent hand-back] 框架說明，只�
 })
 
 test('回合結束那列：這一輪派了背景子代理（引擎寫 Waiting for…）就不畫', async ($, on) => {
-  world(on)
+  const clock = mock.clock(on)
+  const w = world(on)
   on('agent.list', () => ({ value: [{ id: 'a1', description: '讀 README', type: 'Explore', status: 'running' as const }] }))
-  await $.turn.complete({ answer: REPLY, durationMs: 7_000, isAborted: false, turnId: 't1', reason: 'answer' })
+  await say($, clock, w, REPLY, PICKS, 7_000)
   const ui = await $.ui.mount({ plugin: 'sitrep', surface: 'terminal', component: 'TurnDuration', props: { word: 'Baked', durationMs: 7_000 } })
   expect(await texts(ui)).toBe('')
 })
@@ -392,18 +503,20 @@ test('/sitrep-pane：關著就開、開著就關', async ($, on) => {
 })
 
 test('pane 不自動開：有兩題要選、fullscreen 也不開，只能 /sitrep-pane 手動開', async ($, on) => {
-  world(on)
+  const clock = mock.clock(on)
+  const w = world(on)
   const p = paneWorld(on)
   on('settings.read', () => ({ value: { tui: 'fullscreen' } }))
-  await $.turn.complete({ answer: REPLY, durationMs: 5_000, isAborted: false, turnId: 't1', reason: 'answer' })
+  await say($, clock, w, REPLY, PICKS)
   expect(p.opens).toEqual([])
 })
 
 test('pane 內容：需要你（題目＋選項）、你要做的事、變更；按選項一樣填進提示框', async ($, on) => {
+  const clock = mock.clock(on)
   const w = world(on)
   paneWorld(on, { tmux: true })
   await $.tool.call({ tool: 'Edit', tool_use_id: 'u1', file_path: '/repo/sitrep/a.ts', old_string: 'a', new_string: 'b' } as never)
-  await $.turn.complete({ answer: REPLY, durationMs: 5_000, isAborted: false, turnId: 't', reason: 'answer' })
+  await say($, clock, w, REPLY, PICKS)
   const ui = await pane($)
   const text = await texts(ui)
   expect(text).toContain('需要你 · 3')
@@ -432,13 +545,16 @@ async function above($: Engine, hasSurvey = false) {
   })
 }
 
-async function finish($: Engine, answer: string) {
-  await $.turn.complete({ answer, durationMs: 10_000, isAborted: false, turnId: 't', reason: 'answer' })
+// 只有你要做的事、沒有題目的一則回覆
+function chore(status: string, outcome: string, todo: string) {
+  const reply = long(outcome, `- ${todo}`)
+  return { reply, pick: picks(reply, { status, outcome, todo: [`- ${todo}`] }) }
 }
 
 test('prompt 上方：一行「? 2 題待決」＋第一題選項（題號代替題幹），疊在其他 mod 的列下面', async ($, on) => {
-  world(on)
-  await finish($, REPLY)
+  const clock = mock.clock(on)
+  const w = world(on)
+  await say($, clock, w, REPLY, PICKS)
   const text = await texts(await above($))
   expect(text).toContain('engine')
   expect(text).toContain('? 2 題待決')
@@ -448,8 +564,9 @@ test('prompt 上方：一行「? 2 題待決」＋第一題選項（題號代替
 })
 
 test('prompt 上方：按選項填進提示框；只有第一題沒答的有字母熱鍵', async ($, on) => {
+  const clock = mock.clock(on)
   const w = world(on)
-  await finish($, REPLY)
+  await say($, clock, w, REPLY, PICKS)
   const ui = await above($)
   const buttons = await ui.findAll({ type: 'Button' })
   expect(buttons.map(b => [b.props.key, b.props.hotkey])).toEqual([['above-pick-0-A', 'a'], ['above-pick-0-B', 'b']])
@@ -462,10 +579,11 @@ test('prompt 上方：按選項填進提示框；只有第一題沒答的有字�
 })
 
 test('舊回合的結論框收成一行，按 ▸ 畫回完整框；最新那張照畫完整框', async ($, on) => {
-  world(on)
-  await finish($, REPLY)
-  const newer = '好\n\n```ui-summary\n' + JSON.stringify({ status: 'done', outcome: '下一輪', items: [], facets: [] }) + '\n```'
-  await finish($, newer)
+  const clock = mock.clock(on)
+  const w = world(on)
+  await say($, clock, w, REPLY, PICKS)
+  const newer = long('下一輪。')
+  await say($, clock, w, newer, picks(newer, { outcome: '下一輪。' }))
   const old = await message($, REPLY)
   expect((await old.findAll({ type: 'Box' })).some(b => b.props.borderStyle === 'round')).toBe(false)
   expect(await texts(old)).toContain('照 A 改好，測試全過')
@@ -477,29 +595,35 @@ test('舊回合的結論框收成一行，按 ▸ 畫回完整框；最新那張
 })
 
 test('狀態照模型標的走：完成、卡住附了你要做也不變黃；完成的你要做不在 prompt 上方催', async ($, on) => {
-  world(on)
-  const card = (status: string) => '```ui-summary\n' + JSON.stringify({ status, outcome: `狀態 ${status}`, items: [{ kind: 'user-next', text: '更新憑證' }], facets: [] }) + '\n```'
-  const done = await texts(await message($, card('done')))
-  expect(done).toContain('✓ 完成')
-  expect(done).toContain('你要做  更新憑證')
-  expect(await texts(await message($, card('blocked')))).toContain('! 卡住')
-  await finish($, card('done'))
+  const clock = mock.clock(on)
+  const w = world(on)
+  const done = chore('done', '狀態完成。', '更新憑證')
+  await say($, clock, w, done.reply, done.pick)
+  const text = await texts(await message($, done.reply))
+  expect(text).toContain('✓ 完成')
+  expect(text).toContain('你要做  更新憑證')
   expect(await texts(await above($))).not.toContain('等你動手')
-  await finish($, card('blocked'))
+  const blocked = chore('blocked', '狀態卡住。', '更新憑證')
+  await say($, clock, w, blocked.reply, blocked.pick)
+  expect(await texts(await message($, blocked.reply))).toContain('! 卡住')
   expect(await texts(await above($))).toContain('等你動手：')
 })
 
 test('prompt 上方：沒題目但有你要做的事時畫「等你動手：…」', async ($, on) => {
-  world(on)
-  await finish($, '```ui-summary\n' + JSON.stringify({ status: 'partial', outcome: '後端好了', items: [{ kind: 'user-next', text: '瀏覽器實機登入' }], facets: [] }) + '\n```')
+  const clock = mock.clock(on)
+  const w = world(on)
+  const c = chore('partial', '後端好了。', '瀏覽器實機登入')
+  await say($, clock, w, c.reply, c.pick)
   expect(await texts(await above($))).toContain('等你動手：')
   expect(await texts(await above($))).toContain('瀏覽器實機登入')
 })
 
 test('prompt 上方：你送出訊息後那列馬上消失，不等這一輪結束', async ($, on) => {
-  world(on)
+  const clock = mock.clock(on)
+  const w = world(on)
   on('prompt.submit', (_$, e) => ({ text: e.text }))
-  await finish($, '```ui-summary\n' + JSON.stringify({ status: 'blocked', outcome: '等核准', items: [{ kind: 'user-next', text: '看 spec 說核准' }], facets: [] }) + '\n```')
+  const c = chore('blocked', '等核准。', '看 spec 說核准')
+  await say($, clock, w, c.reply, c.pick)
   expect(await texts(await above($))).toContain('等你動手：')
   // 背景通知送進來的不算你回應
   await $.prompt.submit({ text: '子代理回報', wait: false, origin: { kind: 'task-notification' } as never })
@@ -509,14 +633,16 @@ test('prompt 上方：你送出訊息後那列馬上消失，不等這一輪結�
 })
 
 test('prompt 上方：有 survey 時讓位', async ($, on) => {
-  world(on)
-  await finish($, REPLY)
+  const clock = mock.clock(on)
+  const w = world(on)
+  await say($, clock, w, REPLY, PICKS)
   expect(await texts(await above($, true))).not.toContain('等你決定')
 })
 
 test('prompt 上方：全部答完、或新的結論框沒有題目時，那列消失', async ($, on) => {
-  world(on)
-  await finish($, REPLY)
+  const clock = mock.clock(on)
+  const w = world(on)
+  await say($, clock, w, REPLY, PICKS)
   const ui = await above($)
   await ui.press({ key: 'above-pick-0-A' })
   await ui.redraw()
@@ -524,10 +650,12 @@ test('prompt 上方：全部答完、或新的結論框沒有題目時，那列�
   await ui.redraw()
   expect(await texts(ui)).not.toContain('等你決定')
   // 換一張有題目的新卡（id 不同）再來一張沒題目的：使用者自己打字回答的情形
-  await finish($, '```ui-summary\n' + JSON.stringify({ ...SUMMARY, outcome: '另一輪' }) + '\n```')
+  const again = `${REPLY}\n另一輪`
+  await say($, clock, w, again, PICKS)
   expect(await texts(await above($))).toContain('? 2 題待決')
-  await finish($, '改好了\n\n```ui-summary\n' + JSON.stringify({ status: 'done', outcome: '好', items: [], facets: [] }) + '\n```')
-  await finish($, '沒附區塊的回合')
+  const plain = long('改好了。')
+  await say($, clock, w, plain, picks(plain, { outcome: '改好了。' }))
+  await say($, clock, w, '短回覆', '{}')
   expect(await texts(await above($))).not.toContain('等你決定')
 })
 
@@ -645,12 +773,12 @@ test('子代理 pane 很窄：中文描述按欄寬截斷，右邊耗時不被�
 })
 
 test('agent.spawn 先記下的子代理，這一輪結束時一樣掛到結論框', async ($, on) => {
-  mock.clock(on)
-  world(on)
+  const clock = mock.clock(on)
+  const w = world(on)
   agentWorld(on)
   on('agent.list', () => ({ value: [{ id: 'a1', description: '讀 README', type: 'Explore', status: 'running' as const }] }))
   await $.agent.spawn(SPAWN)
-  await $.turn.complete({ answer: REPLY, durationMs: 6_000, isAborted: false, turnId: 't1', reason: 'answer' })
+  await say($, clock, w, REPLY, PICKS, 6_000)
   const ui = await message($, REPLY)
   expect(await texts(ui)).toMatch(/Explore   讀 README   執行中/)
 })

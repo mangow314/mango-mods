@@ -11,20 +11,23 @@ install it from the marketplace with `claude plugin install sitrep@mango-mods`.
 
 ## What it does
 
-- Appends a section to the system prompt asking the model to end the reply
-  that hands control back to you with a ` ```ui-summary ` block: one line of
-  JSON with a one-sentence outcome, the decisions waiting on you with their
-  options, and the sections that can be collapsed. A decision from an earlier
-  reply that you left unanswered (you asked about something else instead) is
-  listed again while it still applies; the model may not settle it with a
-  default on its own. The section is in English and asks for the block's
-  text in the language of the reply.
-- Hides that block when the reply is drawn and puts a rounded outcome box
-  under the body:
+- Leaves the system prompt alone. When a main-thread reply is long (800+
+  characters outside code blocks) or has 2+ headings, after the turn ends it numbers the reply's
+  lines and asks a small model (`haiku`, low effort, 20 s limit) for line
+  numbers only: the outcome line, the decisions with their option lines, what
+  you have to do, what comes next, and the sections that can be collapsed.
+  The mod checks every number and builds the box from the reply's own lines,
+  so the model cannot put words in it that the reply does not have. Any
+  number out of range or pointing at the wrong kind of line rejects the whole
+  answer. While it waits the reply shows `… 摘錄中` ("excerpting"); a failure
+  shows `– 摘錄失敗：reason` in place of the box. If a new turn starts before
+  the answer arrives, the excerpt is dropped.
+- Puts a rounded outcome box under the body, titled with a dim `摘錄`
+  ("excerpt"):
   - The title sits on the top border: the status (`? 等你決定` decisions waiting,
     `> 等你動手` something for you to do by hand, `! 卡住` blocked,
     `~ 進行中` in progress, `✓ 完成` done) with the duration at the right.
-    The status follows the one the model gave: a done or blocked reply stays
+    The status follows the one the small model picked: a done or blocked reply stays
     green or red even with a `你要做` line; only a reply that stopped halfway
     to wait for you is `等你動手`. The border is a darker shade of the status color; only the two "waiting
     on you" states are yellow. All of sitrep's colors are Claude Code theme
@@ -33,7 +36,7 @@ install it from the marketplace with `claude plugin install sitrep@mango-mods`.
     minus 4, at most 88 columns).
   - Then the one-sentence outcome in bold, and right under it `你要做`
     (what you have to do) in yellow.
-  - The sections the model names (for example 變更 changes, 驗證 checks) are
+  - The sections the small model picks (for example 變更 changes, 驗證 checks) are
     taken out of the body and become one summary line each inside the box
     (label a step lighter and bold, summary in bright text; `之後我` stays
     the dimmest);
@@ -52,8 +55,9 @@ install it from the marketplace with `claude plugin install sitrep@mango-mods`.
   the same way. With no questions but something for you to do, it reads
   `等你動手：…` (suggestions in a done reply do not count). The row steps aside for a survey, stacks under other mods'
   rows (ctx-relay), and goes away once a newer reply has neither.
-- For a turn without a block, the line that closes the turn (`Baked for 3s`)
-  becomes a dim `– 本輪結束（無摘要）` ("turn ended, no summary").
+- For a turn without an excerpt (a short reply, a failed or dropped one), the
+  line that closes the turn (`Baked for 3s`) becomes a dim
+  `– 本輪結束（無摘錄）` ("turn ended, no excerpt") or the failure reason.
 - Replaces a collapsed subagent report row (`Message from @…`) with the
   report's first sentence.
 - A background task's notification row (subagent, background shell…) starts
@@ -65,8 +69,7 @@ install it from the marketplace with `claude plugin install sitrep@mango-mods`.
 - A status pane (experimental, being redesigned): `/sitrep-pane` opens or
   closes it; it never opens by itself. Top to bottom: needs you (one tinted block
   per question; focus the pane and press an option's letter), running
-  (subagents and background jobs with their run time), tasks (the step list the model adds to the summary block
-  for multi-step work, ✓／▸／○),
+  (subagents and background jobs with their run time), tasks (the engine's task list, ✓／▸／○),
   evidence (the latest verify summary as small tags, kept until the next one),
   changes (files this session edited with +/−; the rest folded into "not
   changed this time, N files"). While the pane is open, questions are
@@ -89,17 +92,18 @@ install it from the marketplace with `claude plugin install sitrep@mango-mods`.
   prompt adds `⠋ 子代理 2 個進行中 · 輸出 12k`, so in tmux (not fullscreen by
   default) you need not keep the pane open above the prompt.
 - An ASCII figure in a reply (a code block with no language, or `text`,
-  holding box-drawing characters, arrows, or plain-ASCII `+--` / `|--`)
+  where at least 2 lines, and at least 30% of its non-blank lines, carry
+  box-drawing characters, arrows, or plain-ASCII `+--` / `|--`; a line with
+  Chinese sentence punctuation or starting like a Markdown list item does not
+  count, so a handoff draft writing `A → B` stays a plain code block)
   is drawn on a gray background under a dim `圖` ("figure") label, so it stands out from the text around it.
 - A ```dot block is drawn like an ASCII figure, its label adding rough node
   and edge counts. It is not rendered as a picture: Claude Code turns
   pictures off inside tmux, where this mod is used.
-- While a reply is still streaming, an unfinished ui-summary block is hidden
-  too, so its JSON does not flash on screen.
 - Drawing only: the stored messages are unchanged.
 
 Glyphs: `?` yellow = waiting on you, `>` yellow = for you to do, `!` red = blocked, `~` partly done,
-`✓` done, `–` no summary.
+`✓` done, `–` no excerpt.
 
 ## Try it
 
@@ -109,19 +113,25 @@ claude --plugin-dir ~/projects/mango-mods/sitrep
 
 ## Known limits
 
-- The turn-closing line carries no turn id, so the "no summary" note is
+- The turn-closing line carries no turn id, so the "no excerpt" note is
   matched to `turn.complete` by duration (±3 s); two turns with close
   durations may swap. The engine may skip that line on short turns, which is
   why the outcome bar is drawn inside the reply.
-- When tool calls split a reply into several blocks, the box is drawn under
-  the block that holds the summary (usually the last one).
+- The box is matched to the reply by a hash of its text: `turn.complete`'s
+  answer is the turn's final text, so when tool calls split a reply into
+  several blocks the box sits under the last one. A reply too short for an
+  excerpt gets no box, so subagents it dispatched show only in the line
+  above the prompt and `/agents-info`.
+- The excerpt only picks lines: an outcome the reply never states in one line
+  cannot appear, and a decision the reply does not spell out as a question
+  with option lines is not offered as buttons. An unanswered decision from
+  an earlier reply is not carried over unless the new reply repeats it.
+- Each long reply costs one extra `haiku` request.
 - ctrl+o does not show the original reply: an assistant row does not say
   whether it is drawn in the ctrl+o transcript, so the box is drawn there too.
   Use `▸` to put a collapsed section back.
-- When the summary arrives at the end of a reply, the collapsed sections leave
-  the body at once, so the body still shifts up once.
-- The system-prompt section may also reach subagents; a block inside a
-  subagent report is removed from its collapsed row.
+- When the excerpt arrives, a few seconds after the reply, the collapsed
+  sections leave the body at once, so the body still shifts up once.
 - `/agents-info` records a subagent when `agent.spawn` returns an id; a
   workflow's remote agent has none and is not listed. A subagent whose
   `turn.complete` never arrives keeps spinning until the session ends.
