@@ -75,7 +75,7 @@ const PICK_RULES = [
   '- Every value except status is a line number from the reply. Never write text of your own.',
   '- outcome: the one line that best states the result or answer.',
   '- status: done when the work or answer is complete; blocked when it waits on the user or an obstacle; partial when only part is done.',
-  '- decisions: only choices the reply explicitly asks the user to make. question is the line asking; options are the lines of each choice (2 or more); recommended is the option line the reply recommends, or omit it.',
+  '- decisions: only questions the reply explicitly asks the user. question is the line asking; options are the lines of each listed choice (2 or more, never the question line itself), or [] when the reply lists no choices; recommended is the option line the reply recommends, or omit it.',
   '- todo: lines naming something the user must do by hand. next: lines naming what the assistant will do next. Use [] when there are none.',
   '- sections: for each heading line ("#" lines) whose section holds details the user can expand later (changes, verification, risks, evidence), the heading line and the one line inside that section that best summarizes it. Skip the section holding the main result.',
 ].join('\n')
@@ -295,7 +295,7 @@ export const register: Register = on => {
             const hotkey = /^[a-z]$/i.test(o.key) ? o.key.toLowerCase() : undefined
             return (
               <Box key={`above-opt-${o.key}`} flexDirection="row" marginLeft={2}>
-                <Button key={`above-pick-${n}-${o.key}`} plain label={hotkey ? o.label : `${o.key} ${o.label}`} {...(hotkey ? { hotkey } : {})} onPress={() => pick($, pending.id, n, o.key, total)} />
+                <Button key={`above-pick-${n}-${o.key}`} plain label={clip(hotkey ? o.label : `${o.key} ${o.label}`, 24)} {...(hotkey ? { hotkey } : {})} onPress={() => pick($, pending.id, n, o.key, total)} />
                 {d.recommended === o.key ? <Text color={YELLOW}>{' 建議'}</Text> : null}
               </Box>
             )
@@ -576,7 +576,7 @@ async function drawPane($: EngineInterface, e: RenderEvent, width: number) {
                 // 有熱鍵時引擎自己畫「a: 標籤」（字母用強調色）；沒熱鍵的照同一個樣子把「a: 」寫進標籤
                 <Box key={`pane-opt-${n}-${o.key}`} flexDirection="row" marginRight={3}>
                   {picked === o.key ? <Text color={BRIGHT} bold>{'● '}</Text> : null}
-                  <Button key={`pane-pick-${n}-${o.key}`} plain label={hotkey ? o.label : `${letter}: ${o.label}`} {...(hotkey ? { hotkey } : {})} {...(picked !== undefined && picked !== o.key ? { dimColor: true } : {})} onPress={() => pick($, pending.id, n, o.key, total)} />
+                  <Button key={`pane-pick-${n}-${o.key}`} plain label={clip(hotkey ? o.label : `${letter}: ${o.label}`, 24)} {...(hotkey ? { hotkey } : {})} {...(picked !== undefined && picked !== o.key ? { dimColor: true } : {})} onPress={() => pick($, pending.id, n, o.key, total)} />
                   {d.recommended === o.key && picked === undefined ? <Text color={YELLOW}>{' 建議'}</Text> : null}
                 </Box>
               )
@@ -955,7 +955,10 @@ function stripHandback(text: string): string {
   return lines.map(l => l.slice(Number.isFinite(indent) ? indent : 0)).join('\n').trim()
 }
 
-// 摘錄的候選行：程式碼區塊外的非空白行（去掉前後空白），編號從 1 起
+// 表格的分隔列（|---|:--:|）：不是內容，不編號
+const TABLE_RULE_RE = /^\|?\s*:?-{2,}:?\s*(?:\|\s*:?-{2,}:?\s*)*\|?$/
+
+// 摘錄的候選行：程式碼區塊外的非空白行（去掉前後空白），編號從 1 起；表格分隔列不算
 function numberLines(text: string): string[] {
   const out: string[] = []
   let inFence = false
@@ -965,7 +968,7 @@ function numberLines(text: string): string[] {
       inFence = !inFence
       continue
     }
-    if (!inFence && l !== '') out.push(l)
+    if (!inFence && l !== '' && !TABLE_RULE_RE.test(l)) out.push(l)
   }
   return out
 }
@@ -981,16 +984,18 @@ function keepLast(all: Record<string, Excerpt>): Record<string, Excerpt> {
 
 const HEADING_RE = /^(#{1,6})\s+(.+?)\s*#*$/
 
-// 顯示用：拿掉清單符號、粗體、行內程式碼的反引號
+// 顯示用：拿掉清單符號、粗體、行內程式碼的反引號；表格列（| a | b |）的格子用 · 接起來，不留直線（實機：框裡出現整列 | 1 | … |）
 function cleanLine(l: string): string {
-  return l.replace(/^(?:[-*>]|\d+\.)\s+/, '').replace(/\*\*|`/g, '').trim()
+  const row = /^\|(.*)\|$/.exec(l)
+  const text = row ? (row[1] ?? '').split('|').map(c => c.trim()).filter(c => c !== '').join(' · ') : l
+  return text.replace(/^(?:[-*>]|\d+\.)\s+/, '').replace(/\*\*|`/g, '').trim()
 }
 
 // 選項行：「選項 A：…」「A. …」「**A**）…」→ key＋標籤；認不出字母就照順序給 A、B…
 function optionOf(line: string, n: number): Option {
   const text = cleanLine(line)
   const m = /^(?:選項\s*)?([A-Za-z])\s*[.)）:：、]\s*(.+)$/.exec(text)
-  return m ? { key: (m[1] ?? '').toUpperCase(), label: clip(m[2] ?? '', 24) } : { key: String.fromCharCode(65 + n), label: clip(text, 24) }
+  return m ? { key: (m[1] ?? '').toUpperCase(), label: m[2] ?? '' } : { key: String.fromCharCode(65 + n), label: text }
 }
 
 // 模型回的編號 → 結論框。任何編號超出範圍、指錯種類的行（例如結論指到標題）就整份不收，回 null
@@ -1015,16 +1020,22 @@ function buildSummary(lines: string[], raw: string): Summary | null {
     const q = x as Record<string, unknown>
     const question = at(q?.question)
     const opts = list(q?.options)
-    if (question === null || opts === null || opts.length < 2 || opts.some(o => at(o) === null)) return null
-    const options = opts.map((o, i) => optionOf(at(o) ?? '', i))
-    const rec = q.recommended === undefined ? undefined : opts.indexOf(q.recommended)
+    if (question === null || opts === null || opts.some(o => at(o) === null)) return null
+    // 選項指回題目那行、重複、或只有一個：當成沒列選項的開放題，只畫題目（實機：兩個選項都是題目那行，框裡 A、B 一模一樣）
+    const choices = opts.length >= 2 && new Set(opts).size === opts.length && !opts.includes(q.question) ? opts : []
+    const options = choices.map((o, i) => optionOf(at(o) ?? '', i))
+    const rec = q.recommended === undefined || choices.length === 0 ? undefined : choices.indexOf(q.recommended)
     if (rec === -1) return null
     items.push({ kind: 'decision', text: cleanLine(question), options, ...(rec !== undefined ? { recommended: options[rec]?.key } : {}) })
   }
   for (const [field, kind] of [['todo', 'user-next'], ['next', 'agent-next']] as const) {
     const picks = list(d[field])
     if (picks === null || picks.some(n => at(n) === null)) return null
-    for (const n of picks) items.push({ kind, text: cleanLine(at(n) ?? '') })
+    // 跟結論或前面的項目同一句就不再列（實機：之後我把結論那句又列一次）
+    for (const n of picks) {
+      const text = cleanLine(at(n) ?? '')
+      if (text !== cleanLine(outcome) && !items.some(i => i.text === text)) items.push({ kind, text })
+    }
   }
   const sections = list(d.sections)
   if (sections === null) return null
@@ -1060,7 +1071,7 @@ function decisionsOf(items: Item[]): Item[] {
 // 等你決定＞卡住＞等你動手＞部分完成＞完成。照模型標的狀態走：完成、卡住不因附了「你要做」變黃（使用者實機：幾乎每個框都黃）；
 // 只有做到一半停下來等你才是等你動手（實機 s3 原本標成進行中，兩個評審都誤判成還在跑）
 function glyphOf(s: Summary): string {
-  if (decisionsOf(s.items).length > 0) return '?'
+  if (s.items.some(i => i.kind === 'decision')) return '?'
   if (s.status === 'blocked') return '!'
   if (s.status !== 'done' && s.items.some(i => i.kind === 'user-next')) return '>'
   if (s.status === 'partial') return '~'
@@ -1137,27 +1148,42 @@ async function itemRows($: EngineInterface, e: RenderEvent, id: string, items: I
   const answers = (await read($, answersAtom))[id] ?? {}
   const { Box, Button, Text } = $.ui.resolve(e)
   const decisions = decisionsOf(items)
-  const others = items.filter(i => !decisions.includes(i))
+  const asks = items.filter(i => i.kind === 'decision' && !decisions.includes(i))
+  const others = items.filter(i => i.kind !== 'decision')
   const questions = decisions.map((d, n) => (
     <Box key={`q-${n}`} flexDirection="column" marginTop={n === 0 ? 1 : 0}>
       <Text>
         <Text color={YELLOW} bold>{'? '}</Text>
         <Text color={BRIGHT}>{decisions.length > 1 ? `${n + 1}. ${d.text}` : d.text}</Text>
       </Text>
-      <Box flexDirection="row" marginLeft={2}>
+      {/* 一個選項一行、標籤不截斷，長的照框寬換行（實機：並排時每個選項只剩十來個字） */}
+      <Box flexDirection="column" marginLeft={2}>
         {(d.options ?? []).map(o => {
           const picked = answers[n] === o.key
           return (
-            <Box key={`opt-${n}-${o.key}`} flexDirection="row" marginRight={3}>
+            <Box key={`opt-${n}-${o.key}`} flexDirection="row">
               <Button key={`pick-${n}-${o.key}`} plain label={`${picked ? '●' : ' '}${o.key}`} onPress={() => pick($, id, n, o.key, decisions.length)} />
-              <Text>{` ${o.label}`}</Text>
-              {d.recommended === o.key ? <Text color={YELLOW}>{' 建議'}</Text> : null}
+              <Text>
+                {` ${o.label}`}
+                {d.recommended === o.key ? <Text color={YELLOW}>{' 建議'}</Text> : null}
+              </Text>
             </Box>
           )
         })}
       </Box>
     </Box>
   ))
+  // 沒列選項的開放題：只畫題目，回答直接打字
+  for (const [i, a] of asks.entries()) {
+    questions.push(
+      <Box key={`ask-${i}`} marginTop={questions.length === 0 ? 1 : 0}>
+        <Text>
+          <Text color={YELLOW} bold>{'? '}</Text>
+          <Text color={BRIGHT}>{a.text}</Text>
+        </Text>
+      </Box>,
+    )
+  }
   // 符號換成字（評審：> 和 ~ 第一次看不懂）；你要做的排在結論下第一行，之後我排最後
   const todo = others.filter(o => o.kind === 'user-next').map((o, i) => (
     <Text key={`todo-${i}`}>

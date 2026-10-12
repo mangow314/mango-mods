@@ -51,7 +51,7 @@ function picks(reply: string, p: Picks): string {
   for (const raw of reply.split('\n')) {
     const l = raw.trim()
     if (l.startsWith('```')) inFence = !inFence
-    else if (!inFence && l !== '') lines.push(l)
+    else if (!inFence && l !== '' && !/^\|?\s*:?-{2,}:?\s*(?:\|\s*:?-{2,}:?\s*)*\|?$/.test(l)) lines.push(l)
   }
   const n = (line: string) => {
     const at = lines.indexOf(line)
@@ -207,6 +207,45 @@ test('回覆：驗證段落收成一行、兩題畫進等你決定的框', async
   expect(text).toContain('開新 mod')
   expect(text).toContain('建議')
   expect(text).toContain('你要做  明天實機看 5 處')
+})
+
+test('選項指回題目那行或重複：當成開放題，只畫題目、沒有選項按鈕，框一樣標等你決定', async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+  const reply = long('計畫如上。', 'mods 現在怎麼啟用？要開旗標還是直接能載入？', '確認後我就開始做。')
+  await say($, clock, w, reply, JSON.stringify({ status: 'blocked', outcome: 1, decisions: [{ question: 2, options: [2, 2] }], todo: [], next: [] }))
+  const ui = await message($, reply)
+  const text = await texts(ui)
+  expect(text).toContain('? 等你決定')
+  expect(text).toContain('? mods 現在怎麼啟用？')
+  expect(text).not.toContain('之後我')
+  expect((await ui.findAll({ type: 'Button' })).filter(b => String(b.props.label).includes('mods'))).toHaveLength(0)
+  expect(await texts(await above($))).not.toContain('題待決')
+})
+
+test('表格列：分隔列不編號，挑到的表格列去掉直線、格子用 · 接起來；跟結論同一句的不再列', async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+  const reply = long('## 計畫', '| 階段 | 內容 |', '|---|---|', '| 5 收尾 | push 由你做 |', '## 結果', '確認後開始。')
+  await say($, clock, w, reply, picks(reply, { status: 'blocked', outcome: '確認後開始。', todo: ['| 5 收尾 | push 由你做 |'], next: ['確認後開始。'], sections: [{ heading: '## 計畫', summary: '| 階段 | 內容 |' }] }))
+  const text = await texts(await message($, reply))
+  expect(text).toContain('你要做  5 收尾 · push 由你做')
+  expect(text).toContain('階段 · 內容')
+  expect(text).not.toContain('|')
+  expect(text).not.toContain('之後我')
+})
+
+test('選項一行一個、標籤不截斷；prompt 上方那列照舊截短', async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+  const a = '- 選項 A：加 language 設定，預設英文，GIF 也用英文重錄'
+  const reply = long('二選一。', '標籤怎麼處理？', a, '- 選項 B：維持中文，README 放對照表')
+  await say($, clock, w, reply, picks(reply, { status: 'blocked', outcome: '二選一。', decisions: [{ question: '標籤怎麼處理？', options: [a, '- 選項 B：維持中文，README 放對照表'] }] }))
+  // 正文本來就有這句，所以要找框裡選項那格的字
+  const cells = (await (await message($, reply)).findAll({ type: 'Text' })).map(t => t.text)
+  expect(cells).toContain(' 加 language 設定，預設英文，GIF 也用英文重錄')
+  const labels = (await (await above($)).findAll({ type: 'Button' })).map(b => String(b.props.label))
+  expect(labels.some(l => l.endsWith('…'))).toBe(true)
 })
 
 test('按選項：依題號把已選的答案填進提示框，不送出', async ($, on) => {

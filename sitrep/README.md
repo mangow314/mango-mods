@@ -44,8 +44,11 @@ install it from the marketplace with `claude plugin install sitrep@mango-mods`.
     decisions, a body section whose heading contains 決定 (for example
     `## 待你決定`) is folded the same way as `利弊` (pros and cons), so the
     questions are not written twice.
-  - Decisions are listed inside the box. Clicking an option only fills
-    "question. option" into the prompt box; nothing is sent. `之後我` (what
+  - Decisions are listed inside the box, one option per line and not cut
+    short. Clicking an option only fills "question. option" into the prompt
+    box; nothing is sent. A question the reply asks without listing choices
+    shows as the question alone (answer by typing). Table rows the box picks
+    are shown with their cells joined by ` · `. `之後我` (what
     the model does next) comes last, dim.
   - Once a newer reply has its own box, an older box folds to one line
     (`▸ ✓ outcome  8s`); `▸` draws the full box again.

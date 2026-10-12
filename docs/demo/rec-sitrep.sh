@@ -3,6 +3,8 @@
 # 同時用 record.sh 錄影。剪接與轉 GIF 見 README.md「GIFs」一節。
 # 產出（本檔同目錄）：sitrep-raw.mp4、events.log（各動作在第幾秒，影片 0 秒約等於 prompt）、final.txt（結束畫面）
 set -euo pipefail
+# 第一個參數可換掉送出的提示。要求在回覆裡列選項：模型改用提問工具時沒有長回覆，不會摘錄
+prompt=${1:-把 greet() 改成接收 name 參數，跑一次確認輸出，最後在回覆裡用 A、B 兩個選項問我要加 pytest 還是 mypy（不要用提問工具）。}
 here=$(cd "$(dirname "$0")" && pwd)
 M=$(cd "$here/../.." && pwd)
 repo=$(mktemp -d)/greet-demo
@@ -62,7 +64,7 @@ mark() { printf '%6.1f %s\n' "$(echo "$(date +%s.%N) - $start" | bc)" "$1" | tee
 rec=$!
 sleep 4
 mark prompt
-tmux -L shot send-keys -t s -l '把 greet() 改成接收 name 參數，跑一次確認輸出，最後問我要加 pytest 還是 mypy。'
+tmux -L shot send-keys -t s -l "$prompt"
 tmux -L shot send-keys -t s Enter
 
 wait_for '摘錄中' 85 present && mark excerpt-pending
