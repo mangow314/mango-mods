@@ -158,6 +158,17 @@ test('預設英文標籤：狀態、選項、你要做、待答列；英文的 D
   expect(await texts(await above($))).toContain('? 1 open')
 })
 
+test('推薦標記：選項最後一行放不下就換到下一行，不讓引擎折行', async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+  const full = 'x'.repeat(79)
+  const reply = long('Pick one.', 'Which?', `- Option A: ${full}`, '- Option B: short')
+  await say($, clock, w, reply, picks(reply, { status: 'blocked', outcome: 'Pick one.', decisions: [{ question: 'Which?', options: [`- Option A: ${full}`, '- Option B: short'], recommended: `- Option A: ${full}` }] }))
+  const cells = (await (await message($, reply)).findAll({ type: 'Text' })).map(t => t.text)
+  expect(cells).toContain(` ${full}`)
+  expect(cells).toContain('  recommended')
+})
+
 test('預設英文標籤：短回覆寫 no excerpt，編號對不上寫 excerpt failed', async ($, on) => {
   const clock = mock.clock(on)
   const w = world(on)

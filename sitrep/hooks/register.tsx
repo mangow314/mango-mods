@@ -67,6 +67,7 @@ const ZH = {
   nothing: '目前沒有需要你或進行中的事',
   more: (n: number) => `…還有 ${n} 項`,
   noAgents: '這個 session 還沒派過子代理',
+  noAgentsText: `${TAG}：這個 session 還沒派過子代理`,
   finished: '已結束',
   moreAgents: (n: number) => `…還有 ${n} 個`,
   agentsHeader: (all: number, running: number, out: string) => `共 ${all} 個 · 進行中 ${running} · 輸出 ${out}`,
@@ -130,6 +131,7 @@ const EN: Texts = {
   nothing: 'Nothing needs you and nothing is running',
   more: n => `…${n} more`,
   noAgents: 'No subagents in this session yet',
+  noAgentsText: `${TAG}: no subagents in this session yet`,
   finished: 'Finished',
   moreAgents: n => `…${n} more`,
   agentsHeader: (all, running, out) => `${all} total · ${running} running · output ${out}`,
@@ -974,7 +976,7 @@ async function runningAgents($: EngineInterface): Promise<AgentNote[]> {
 // 沒地方放 pane 時 /agents-info 回的文字：跟 pane 同樣的內容，每個子代理一行
 async function agentsText($: EngineInterface): Promise<string> {
   const list = await read($, agentsAtom)
-  if (list.length === 0) return `${TAG}: ${T.noAgents}`
+  if (list.length === 0) return T.noAgentsText
   const now = await $.clock.now().catch(() => null)
   const { running, ended } = splitAgents(list)
   const lines = [...running, ...ended.slice(0, 10)].map(a => {
@@ -1127,7 +1129,7 @@ function cleanLine(l: string): string {
 // 選項行：「選項 A：…」「A. …」「**A**）…」→ key＋標籤；認不出字母就照順序給 A、B…
 function optionOf(line: string, n: number): Option {
   const text = cleanLine(line)
-  const m = /^(?:(?:選項|option)\s*)?([A-Za-z])\s*[.)）:：、]\s*(.+)$/i.exec(text)
+  const m = /^(?:選項\s*|option\s+)?([A-Za-z])\s*[.)）:：、]\s*(.+)$/i.exec(text)
   return m ? { key: (m[1] ?? '').toUpperCase(), label: m[2] ?? '' } : { key: String.fromCharCode(65 + n), label: text }
 }
 
@@ -1298,7 +1300,10 @@ async function itemRows($: EngineInterface, e: RenderEvent, id: string, items: I
               <Button key={`pick-${n}-${o.key}`} plain label={`${picked ? '●' : ' '}${o.key}`} onPress={() => pick($, id, n, o.key, decisions.length)} />
               {/* 自己按欄寬斷行：引擎只在空白處換行，中文長句會整段跳到下一行（實機） */}
               <Box flexDirection="column">
-                {wrapCols(o.label, room).map((l, i, all) => (
+                {wrapCols(o.label, room).flatMap((l, i, all) =>
+                  // 推薦標記接在最後一行；那行放不下就自己換一行
+                  d.recommended === o.key && i === all.length - 1 && cols(l) + cols(T.recommended) > room ? [l, ''] : [l],
+                ).map((l, i, all) => (
                   <Text key={`opt-${n}-${o.key}-${i}`}>
                     {` ${l}`}
                     {d.recommended === o.key && i === all.length - 1 ? <Text color={YELLOW}>{T.recommended}</Text> : null}
@@ -1379,7 +1384,6 @@ function cols(s: string): number {
   return n
 }
 
-// 超過 width 欄才截斷，最後一欄換成 …；剛好放得下的照原樣
 // 按顯示欄寬（中文算 2）切成多行，不管空白在哪
 function wrapCols(s: string, width: number): string[] {
   const lines: string[] = []
@@ -1398,6 +1402,7 @@ function wrapCols(s: string, width: number): string[] {
   return [...lines, line]
 }
 
+// 超過 width 欄才截斷，最後一欄換成 …；剛好放得下的照原樣
 function clip(s: string, width: number): string {
   if (cols(s) <= width) return s
   let out = ''
