@@ -207,11 +207,21 @@ test('編號超出範圍或結論指到標題：整份不收，框的位置寫�
   expect(await texts(await message($, REPLY))).toContain('摘錄失敗：回傳的編號對不上原文')
   await say($, clock, w, REPLY, JSON.stringify({ status: 'done', outcome: 1 }))
   expect(await texts(await message($, REPLY))).toContain('摘錄失敗：回傳的編號對不上原文')
-  // 選項不在原文、推薦不在選項裡也不收
-  const bad = JSON.parse(PICKS) as { decisions: { recommended?: number }[] }
-  bad.decisions[0] = { ...bad.decisions[0], recommended: 2 }
-  await say($, clock, w, REPLY, JSON.stringify(bad))
-  expect(await texts(await message($, REPLY))).toContain('摘錄失敗')
+})
+
+test('推薦指到選項後面那句「I\'d pick A」：取那句第一個選項字母；認不出字母就不標推薦，框照畫', async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+  const reply = long('Pick one.', 'Which?', '- Option A: pytest', '- Option B: mypy', "- I'd pick A: faster now, add B later.")
+  await say($, clock, w, reply, picks(reply, { status: 'blocked', outcome: 'Pick one.', decisions: [{ question: 'Which?', options: ['- Option A: pytest', '- Option B: mypy'], recommended: "- I'd pick A: faster now, add B later." }] }))
+  const text = await texts(await message($, reply))
+  expect(text).toContain('? Your call')
+  expect(text).toMatch(/pytest.*recommended.*mypy/)
+  const plain = long('Pick one.', 'Which?', '- Option A: pytest', '- Option B: mypy', '- Either works.')
+  await say($, clock, w, plain, picks(plain, { status: 'blocked', outcome: 'Pick one.', decisions: [{ question: 'Which?', options: ['- Option A: pytest', '- Option B: mypy'], recommended: '- Either works.' }] }))
+  const none = await texts(await message($, plain))
+  expect(none).toContain('? Your call')
+  expect(none).not.toContain('recommended')
 })
 
 test('模型沒回答：框的位置照實寫原因，回合結束那列也是', ZH, async ($, on) => {

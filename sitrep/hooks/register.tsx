@@ -1159,9 +1159,17 @@ function buildSummary(lines: string[], raw: string): Summary | null {
     // 選項指回題目那行、重複、或只有一個：當成沒列選項的開放題，只畫題目（實機：兩個選項都是題目那行，框裡 A、B 一模一樣）
     const choices = opts.length >= 2 && new Set(opts).size === opts.length && !opts.includes(q.question) ? opts : []
     const options = choices.map((o, i) => optionOf(at(o) ?? '', i))
-    const rec = q.recommended === undefined || choices.length === 0 ? undefined : choices.indexOf(q.recommended)
-    if (rec === -1) return null
-    items.push({ kind: 'decision', text: cleanLine(question), options, ...(rec !== undefined ? { recommended: options[rec]?.key } : {}) })
+    // 推薦常指到選項後面那句「我建議 A：…」（實測 haiku 約三成）：取那句第一個提到的選項字母；指到別行又認不出就不標推薦，不整份作廢
+    let recommended: string | undefined
+    if (q.recommended !== undefined && choices.length > 0) {
+      const rec = choices.indexOf(q.recommended)
+      if (rec >= 0) recommended = options[rec]?.key
+      else {
+        const keys = new Set(options.map(o => o.key))
+        recommended = [...cleanLine(at(q.recommended) ?? '').matchAll(/(?<![A-Za-z])([A-Z])(?![A-Za-z])/g)].map(m => m[1] ?? '').find(k => keys.has(k))
+      }
+    }
+    items.push({ kind: 'decision', text: cleanLine(question), options, ...(recommended !== undefined ? { recommended } : {}) })
   }
   for (const [field, kind] of [['todo', 'user-next'], ['next', 'agent-next']] as const) {
     const picks = list(d[field])
