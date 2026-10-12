@@ -41,46 +41,55 @@ TC and Symbols Nerd Font.
 
 ## GIFs (sitrep.gif, bands.gif)
 
-Recorded on Claude Code 2.1.295 with sitrep and ctx-relay loaded by
-`--plugin-dir`, in a throwaway repo holding a two-line `greet.py`. Same tmux
-setup as above, but 120x34 and `--plugin-dir $M/sitrep --plugin-dir $M/ctx-relay`.
+Recorded with sitrep and ctx-relay loaded by `--plugin-dir`, in a throwaway
+repo holding a two-line `greet.py`. Same tmux setup as above, but 120x34 and
+`--plugin-dir $M/sitrep --plugin-dir $M/ctx-relay`, started with
+`--settings '{"enabledPlugins":{"filetree@claude-code-filetree":false,"ctx-relay@mango-mods":false,"sitrep@mango-mods":false}}'`
+so no dock pane narrows the screen and the installed copies stay out.
 Extra requirement: `ffmpeg`.
 
-1. Start [record.sh](record.sh) in the background (`./record.sh sitrep-raw 70 &`),
-   then drive the session with `tmux -L shot send-keys` while it records. A
-   single `send-keys -l` puts the whole prompt in at once.
-   - sitrep.gif (Sonnet 5.5): ask Claude to change `greet()` to take a `name`,
-     run it once, then ask whether to add pytest or mypy. When the turn ends,
-     send `C-x`, `Tab` (focuses the row above the prompt), then `a`.
+1. Record.
+   - sitrep.gif (Claude Code 2.1.296, Sonnet 5.5): run
+     [rec-sitrep.sh](rec-sitrep.sh). It makes the throwaway repo, starts the
+     session, answers the folder trust prompt, starts
+     [record.sh](record.sh) in the background, and sends the prompt: change
+     `greet()` to take a `name`, run it once, then ask whether to add pytest
+     or mypy. It waits for `… 摘錄中` to turn into the box, then sends `C-x`,
+     `Tab` (focuses the row above the prompt) and `a`. It writes
+     `sitrep-raw.mp4` and `events.log` (seconds of each step; video 0 s is
+     about the `prompt` line) next to itself. Run it outside the Bash sandbox:
+     it needs the tmux socket, the network and `~/.claude`.
    - bands.gif (Claude Code 2.1.296, Haiku 4.5, so the handoff line is 142K):
-     add four ~74 KB filler text files to the repo and have Claude read them
-     over several turns (whole files or `offset`/`limit` slices) to about 66%,
-     so the bars on the right go green. Start `./record.sh band-raw 50`, then
+     start the session by hand and drive it with `tmux -L shot send-keys`
+     (a single `send-keys -l` puts the whole prompt in at once). Add four
+     ~74 KB filler text files to the repo and have Claude read them over
+     several turns (whole files or `offset`/`limit` slices) to about 66%, so
+     the bars on the right go green. Start `./record.sh band-raw 50 &`, then
      send one more read that ends near 76% (yellow): the clip is that turn
-     ending. Start Claude with
-     `--settings '{"enabledPlugins":{"filetree@claude-code-filetree":false,"ctx-relay@mango-mods":false,"sitrep@mango-mods":false}}'`
-     so no dock pane narrows the band and the installed copies stay out.
+     ending.
 2. Cut, crop and encode. The crop starts and ends on character rows (12 px
-   padding + 20.3 px per row) and leaves out the status line. The model's
-   thinking time is played at 4×:
+   padding + 20.3 px per row) and leaves out the status line. sitrep.gif
+   starts when the turn ends (the reply with `… 摘錄中` under it) and skips
+   the working part of the turn:
 
    ```bash
-   ffmpeg -i sitrep-raw.mp4 -filter_complex "[0:v]crop=1130:488:0:113,split=3[a][b][c];\
-   [a]trim=2.5:5.5,setpts=PTS-STARTPTS[a1];[b]trim=5.5:17.5,setpts=(PTS-STARTPTS)/4[b1];\
-   [c]trim=17.5:26.5,setpts=PTS-STARTPTS[c1];[a1][b1][c1]concat=n=3:v=1,fps=12,\
+   ffmpeg -i sitrep-raw.mp4 -filter_complex "[0:v]\
+   drawbox=x=318:y=498:w=360:h=23:color=0x1a1a1a:t=fill:enable='between(t,14.7,17.37)+gte(t,22.74)',\
+   drawbox=x=318:y=477:w=360:h=23:color=0x1a1a1a:t=fill:enable='between(t,17.37,22.74)',\
+   trim=14.75:27.5,setpts=PTS-STARTPTS,crop=1130:488:0:113,fps=12,\
    scale=800:-1:flags=lanczos,split[x][y];[x]palettegen=max_colors=96:stats_mode=diff[p];\
    [y][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle" sitrep.gif
    ffmpeg -ss 12.5 -t 4.5 -i band-raw.mp4 -filter_complex "crop=860:22:0:522,fps=8,split[x][y];\
    [x]palettegen=max_colors=64[p];[y][p]paletteuse=dither=none" bands.gif
    ```
 
-   The trim points depend on when the turn ended; read them off a few frames
-   (`ffmpeg -ss <t> -i raw.mp4 -frames:v 1 t.png`). The committed sitrep.gif
-   starts at 4.0 s (after the prompt is sent) and paints over the
-   "· 4 messages hidden (/focus to show)" text that focus mode adds to the
-   turn-end line, with `drawbox=x=312:y=480:w=340:h=21:color=0x1a1a1a:t=fill`
-   (and `y=501:h=23` once the row above the prompt goes away), each enabled
-   only for its time range; turn focus mode off before recording to skip this.
+   The times depend on the take; read them off a few frames
+   (`ffmpeg -ss <t> -i raw.mp4 -frames:v 1 t.png`). The two `drawbox` filters
+   paint over "· 5 messages hidden (/focus to show)", which focus mode adds to
+   the turn-end line: that line is one row higher while the row above the
+   prompt is showing (from the box appearing until `a` is sent). Recording
+   with focus mode off makes them unnecessary, but `/focus` toggles the
+   setting for every session, so the script leaves it alone.
 
 ## Concept animation (ctx-relay-loop.svg)
 
