@@ -23,7 +23,7 @@ access, so a Claude Code release may require changes.
 
 | When | What happens |
 | --- | --- |
-| The main conversation stops (Stop) with context ≥ the handoff line | If Claude Code reports background work (shells, subagents, monitors, workflows, …) or a one-shot scheduled task, the handoff is deferred and the band shows why; recurring schedules do not block it. Otherwise a 60-second countdown starts |
+| A main-conversation turn ends (not interrupted) with context ≥ the handoff line | If Claude Code reports background work (shells, subagents, monitors, workflows, …) or a one-shot scheduled task, the handoff is deferred and the band shows why; recurring schedules do not block it. Otherwise a 60-second countdown starts. Signed in with a Team or Enterprise plan, Claude Code's built-in guard keeps the Stop report from user mods, so only running subagents defer it |
 | While deferred, context reaches the cap (halfway between the handoff line and the compaction point) | The countdown runs anyway; the handoff file header lists the work still running (its completion notice may never arrive) |
 | Another Stop hook blocks the stop (the turn has not really ended) | No decision; wait for the stop that really ends the turn |
 | During the countdown | Press Cancel (hotkey 1) to cancel; for the rest of this conversation it only reminds you. Sending any message only postpones it: if you are still past the line when that turn ends, the countdown starts again |

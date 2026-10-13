@@ -42,6 +42,8 @@ type World = {
   crons: { id: string; recurring: boolean; prompt: string }[]
   // 設了就讓 settings 的 Stop hook 擋下（回合其實沒結束）
   stopBlock: string | null
+  // Team／Enterprise 登入：內建守門 mod 讓 classic.* 跳過使用者裝的 mod，classic.Stop 不會送到本 mod
+  guarded: boolean
   messages: { role: 'user' | 'assistant'; text: string }[]
   submitted: string[]
   failSubmit: boolean
@@ -78,6 +80,7 @@ function world($: Engine, on: On, patch: Partial<World> = {}): World {
     background: [],
     crons: [],
     stopBlock: null,
+    guarded: false,
     messages: [],
     submitted: [],
     failSubmit: false,
@@ -193,6 +196,16 @@ async function start($: Engine) {
 async function turn($: Engine, w: World, tokens: number, extra: { answer?: string; agentId?: string; aborted?: boolean; cacheRead?: number } = {}) {
   w.tokens = tokens
   w.cost += 0.5
+  // 照實測順序：主對話正常結束先跑 Stop、結束後才 turn.complete（子代理是 SubagentStop；中斷不跑 Stop）。
+  // Stop 被擋下＝回合繼續，這次沒有 turn.complete
+  if (!extra.agentId && !extra.aborted && !w.guarded) {
+    const stop = await $.classic.Stop({
+      stop_hook_active: false,
+      background_tasks: w.background.map(t => ({ ...t, status: 'running' })),
+      session_crons: w.crons.map(c => ({ ...c, schedule: '0 9 * * *' })),
+    })
+    if (stop.block !== undefined) return
+  }
   await $.turn.complete({
     answer: extra.answer ?? 'done',
     durationMs: 12_000,
@@ -201,13 +214,6 @@ async function turn($: Engine, w: World, tokens: number, extra: { answer?: strin
     reason: extra.aborted ? 'aborted' : 'answer',
     usage: { input_tokens: 10, output_tokens: 100, cache_read_input_tokens: extra.cacheRead ?? 9_000, cache_creation_input_tokens: 9_990 - (extra.cacheRead ?? 9_000), model: 'claude-opus-5-5' },
     ...(extra.agentId ? { agentId: extra.agentId } : {}),
-  })
-  // 主對話正常結束才有 Stop（子代理是 SubagentStop；中斷不跑 Stop）
-  if (extra.agentId || extra.aborted) return
-  await $.classic.Stop({
-    stop_hook_active: false,
-    background_tasks: w.background.map(t => ({ ...t, status: 'running' })),
-    session_crons: w.crons.map(c => ({ ...c, schedule: '0 9 * * *' })),
   })
 }
 
@@ -941,6 +947,19 @@ test('有子代理在跑：延後交接', async ($, on) => {
   await start($)
   await turn($, w, 450_000)
   expect((await band($)).text).toContain('Handoff deferred')
+})
+
+test('Team 帳號（收不到 classic.Stop）：越過交接線照樣倒數；子代理在跑仍延後', async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world($, on, { guarded: true, agents: [{ id: 'ag1', description: 'Explore 搜尋', status: 'running' }] })
+  await start($)
+  await turn($, w, 450_000)
+  expect((await band($)).text).toContain('Handoff deferred')
+  w.agents = []
+  await turn($, w, 455_000)
+  expect((await band($)).text).toContain('Handoff in')
+  await clock.advance(61_000)
+  expect(w.cleared).toBe(1)
 })
 
 test('/ctx-relay-now：有背景工作時要 yes；加 yes 就不倒數直接交接；fork 指示、檔頭、接續訊息寫手動交接，不寫越過交接線', { options: { handoffFormat: 'full' } }, async ($, on) => {

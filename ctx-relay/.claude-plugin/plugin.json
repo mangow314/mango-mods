@@ -1,6 +1,6 @@
 {
   "name": "ctx-relay",
-  "version": "0.11.1",
+  "version": "0.11.2",
   "description": "A band above the prompt with context size, per-turn cost and the prompt-cache countdown. Past the handoff line it counts down 60 s, writes a handoff file with a fork, runs /clear and resumes in the new conversation; a new conversation lists unclaimed handoff files, press 1 to resume.",
   "author": {
     "name": "Mango"

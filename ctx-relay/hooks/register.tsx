@@ -4,7 +4,7 @@ import type { EngineInterface, Register, RenderElement, RenderInput, SessionCont
 import type { Auto, Cache, Limits, Pickup, Reading, Receipt } from '../types'
 
 // ctx-relay：提示框上方一行，顯示每輪花費與距交接線的剩餘空間；
-// 主對話停下（classic.Stop）時 context 越過自動交接線 → 引擎回報沒有背景工作就倒數 60 秒 →
+// 主對話回合結束（turn.complete）時 context 越過自動交接線 → 沒有背景工作就倒數 60 秒 →
 // mod 自己收集 git／INDEX、用 $.model.fork 產生交接檔、機器檢查後寫檔 → /clear → 在新對話送出交接檔路徑。
 // 倒數或準備中有新回合開始（排程、通知、你送訊息）就作廢這次切換。
 // 壓縮點取自 Claude Code 自己回報的 autoCompactThreshold，本檔不寫窗口數字；
@@ -242,14 +242,18 @@ export const register: Register = (on, options) => {
     }
     mainTurns += 1
     await takeReading($, e)
+    // 要不要交接在這裡判斷：Team／Enterprise 登入時內建守門 mod（sec-default）讓 classic.* 跳過使用者裝的 mod，
+    // classic.Stop 永遠不會到這裡；中斷的回合（Esc）不判斷
+    if (!e.isAborted) await afterStop($)
     $.ui.invalidate('ui.render')
     return result
   })
 
-  // 主對話停下：要不要交接在這裡判斷，因為引擎在這裡回報背景工作與排程（shell、子代理、monitor、workflow…）
+  // 主對話停下時引擎回報的背景工作與排程（shell、monitor、workflow…），給上面的判斷用。
+  // 實測（2.1.296 -p）：classic.Stop 在 turn.complete 之前結束；被別的 Stop hook 擋下時回合繼續，真正停下才有 turn.complete。
+  // Team 帳號收不到這個事件，只剩 $.agent.list() 的子代理擋交接
   on('classic.Stop', async ($, e, next) => {
     const result = await next(e)
-    // 別的 Stop hook 擋下＝回合其實沒結束，等真正停下的那次再判斷
     if (result.block !== undefined) {
       return result
     }
@@ -258,8 +262,6 @@ export const register: Register = (on, options) => {
       // 一次性排程會再叫醒這個 session；循環排程每次都會醒，不擋交接
       ...(e.session_crons ?? []).filter(c => !c.recurring).map(c => `one-shot schedule ${c.prompt}`.slice(0, 80)),
     ]
-    await afterStop($)
-    $.ui.invalidate('ui.render')
     return result
   })
 
@@ -645,7 +647,7 @@ async function afterStop($: EngineInterface) {
   if ((auto.phase !== 'idle' && auto.phase !== 'deferred') || limits === null) {
     return
   }
-  // 讀當下的 token 數：Stop 和 turn.complete 誰先發沒有文件保證（不要 breakdown，免費）
+  // 讀當下的 token 數（不要 breakdown，免費）
   const tokens = (await $.session.usage()).context.tokens ?? 0
   if (tokens < limits.handoff) {
     return
