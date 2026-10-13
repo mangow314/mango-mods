@@ -764,12 +764,12 @@ test('pane 內容：需要你（題目＋選項）、你要做的事、變更；
   expect(w.fills).toEqual(['2. B'])
 })
 
-async function above($: Engine, hasSurvey = false) {
+async function above($: Engine, hasSurvey = false, isWorking = false) {
   return $.ui.mount({
     plugin: 'sitrep',
     surface: 'terminal',
     component: 'AbovePrompt',
-    props: { hasSurvey, isWorking: false, maxRows: 5, bodyColumns: 160, scroll: { offset: 0, bodyRows: 5 }, view: {} },
+    props: { hasSurvey, isWorking, maxRows: 5, bodyColumns: 160, scroll: { offset: 0, bodyRows: 5 }, view: {} },
   })
 }
 
@@ -858,6 +858,20 @@ test('prompt 上方：你送出訊息後那列馬上消失，不等這一輪結�
   expect(await texts(await above($))).toContain('等你動手：')
   await $.prompt.submit({ text: '核准', wait: false, origin: { kind: 'composer' } })
   expect(await texts(await above($))).not.toContain('等你動手')
+})
+
+test('prompt 上方：回合進行中一行「第 N 個工具 · 最近 …」，只算主對話；停下或新一輪歸零', ZH, async ($, on) => {
+  world(on)
+  on('tool.call', () => ({ result: {} }) as never)
+  await $.turn.start({ turnId: 't1' } as never)
+  await $.tool.call({ tool: 'Read', tool_use_id: 'u1', file_path: '/repo/a.ts' } as never)
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'u2', command: 'npm test\nnpm run lint' } as never)
+  await $.tool.call({ tool: 'Grep', tool_use_id: 'u3', pattern: 'x', agentId: 'a1' } as never)
+  expect(await texts(await above($, false, true))).toContain('第 2 個工具 · 最近 Bash npm test')
+  expect(await texts(await above($, false, true))).not.toContain('npm run lint')
+  expect(await texts(await above($))).not.toContain('個工具')
+  await $.turn.start({ turnId: 't2' } as never)
+  expect(await texts(await above($, false, true))).not.toContain('個工具')
 })
 
 test('prompt 上方：有 survey 時讓位', ZH, async ($, on) => {

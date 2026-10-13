@@ -47,6 +47,8 @@ declare module 'claude-code' {
       touched: string[]
       // pane 現在有畫出來：題目移到 pane，prompt 上方那列不畫
       paneOpen: boolean
+      // 這一輪主對話呼叫了幾個工具、最近一個（工具名＋參數第一行），回合進行中 prompt 上方那列用
+      progress: { count: number; last: string }
     }
   }
 }

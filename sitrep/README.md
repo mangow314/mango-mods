@@ -79,6 +79,10 @@ language of your conversation.
   do, it reads `Your move: …` (suggestions in a done reply do not count). It
   steps aside for a survey, stacks under other mods' rows (ctx-relay), and
   goes away once a newer reply has neither.
+  While a turn runs and nothing waits on you, the same row is one dim line,
+  `tool N · last <tool> <argument>` (for example `tool 4 · last Bash npm
+  test`): main-conversation tool calls only, counted from 0 each turn. Elapsed
+  time is left to Claude Code's own spinner line; tool rows are not hidden.
 - **No silent turns.** For a turn without an excerpt (a short reply, a failed
   or dropped one), the line that closes the turn (`Baked for 3s`) becomes a
   dim `– turn ended (no excerpt)` or the failure reason.

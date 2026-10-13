@@ -14,6 +14,7 @@ import type { AgentNote, ChangeNote, Evidence, Excerpt, Facet, Item, Option, Sum
 //    那列沒有輪次編號，用耗時對回 turn.complete。
 // 4. 子代理回報那列（UserMessage，收合時「Message from @…」）換成它回報的第一句，ctrl+o 照原樣展開。
 // 5. 還有沒答的題目時，prompt 上方（AbovePrompt）一行「? N 項等你決定」，聚焦後按選項字母選答（一樣只填提示框）。
+//    回合進行中、沒事等你時，同一列改成一行「第 N 個工具 · 最近 <工具> <參數>」（只算主對話，不隱藏工具列）。
 // 6. 背景工作結束的通知列開頭換成狀態符號（✓ 完成、! 失敗、– 中止）；那一輪派出的背景子代理也列在結論框裡，跑完自動更新。
 // 7. 回覆裡的 ASCII 圖（含框線字元或箭頭的程式碼區塊）畫在灰底區塊、上方一行灰字「圖」，不被大量文字蓋過。
 // 8. 回覆裡的 ```dot 區塊照 7 畫原文，標籤附粗算的節點與邊數。
@@ -66,6 +67,7 @@ const ZH = {
   youDo: '你要做  ',
   thenI: '之後我  ',
   notFilled: (why: string | undefined) => `${TAG}：沒填進提示框（${why ?? '原因不明'}）`,
+  progress: (n: number, last: string) => `第 ${n} 個工具 · 最近 ${last}`,
 }
 type Texts = typeof ZH
 const EN: Texts = {
@@ -113,6 +115,7 @@ const EN: Texts = {
   youDo: 'You do  ',
   thenI: 'Then I  ',
   notFilled: why => `${TAG}: could not fill the prompt (${why ?? 'unknown reason'})`,
+  progress: (n, last) => `tool ${n} · last ${last}`,
 }
 let T: Texts = EN
 const KEEP_TURNS = 50
@@ -189,11 +192,14 @@ const changesAtom = atom({ plugin: 'sitrep', key: 'changes' } as const, [] as Ch
 const touchedAtom = atom({ plugin: 'sitrep', key: 'touched' } as const, [] as string[])
 const paneOpenAtom = atom({ plugin: 'sitrep', key: 'paneOpen' } as const, false)
 const pendingAtom = atom({ plugin: 'sitrep', key: 'pending' } as const, null as { id: string; decisions: Item[]; todo: string[] } | null)
+// 這一輪主對話呼叫了幾個工具、最近一個是什麼（turn.start 歸零）：回合進行中 prompt 上方那列用
+const progressAtom = atom({ plugin: 'sitrep', key: 'progress' } as const, { count: 0, last: '' })
 
 export const register: Register = (on, options) => {
   T = options.language === 'zh-TW' ? ZH : EN
   on('turn.start', async ($, e, next) => {
     turnGen++
+    await update($, progressAtom, () => ({ count: 0, last: '' }))
     return next(e)
   })
 
@@ -249,6 +255,11 @@ export const register: Register = (on, options) => {
       const input = e as unknown as { file_path?: unknown; notebook_path?: unknown }
       const path = input.file_path ?? input.notebook_path
       if (typeof path === 'string') await update($, touchedAtom, list => (list.includes(path) ? list : [...list, path].slice(-200)))
+    }
+    // 回合進行中那列只算主對話：子代理引擎已在 status line 下方列出；workflow、引擎 fork 的 agentId 也不一定是子代理
+    if (e.agentId === undefined) {
+      await update($, progressAtom, p => ({ count: p.count + 1, last: toolLabel(e as unknown as Record<string, unknown>) }))
+      $.ui.invalidate('ui.render')
     }
     return next(e)
   })
@@ -330,8 +341,21 @@ export const register: Register = (on, options) => {
     const first = open[0]
     const todo = pending?.todo[0]
     // pane 開著時題目在 pane 裡選：這列不畫，alt+n（ctrl+x tab）才會直接跳到 pane
-    const hasAsk = !!pending && (!!first || todo !== undefined) && !(await read($, paneOpenAtom))
-    if (!hasAsk) return next(e)
+    const paneOpen = await read($, paneOpenAtom)
+    const hasAsk = !!pending && (!!first || todo !== undefined) && !paneOpen
+    if (!hasAsk) {
+      // 回合進行中：一行「第 N 個工具 · 最近 <工具> <參數>」，字都是工具呼叫的原文。經過時間引擎的轉圈列已有，不重複
+      const progress = e.props.isWorking && !paneOpen ? await read($, progressAtom) : null
+      if (!progress || progress.count === 0) return next(e)
+      const below = await next(e)
+      const { Box, Text } = $.ui.resolve(e)
+      return (
+        <Box flexDirection="column">
+          {below}
+          <Text key="above-progress" color={DIM} wrap="truncate-end">{T.progress(progress.count, progress.last)}</Text>
+        </Box>
+      )
+    }
     // band 只有一個：先讓排在下面的 mod 畫（例如 ctx-relay 的交接列），自己這列疊在它下面
     const below = await next(e)
     const { Box, Button, Text } = $.ui.resolve(e)
@@ -1308,6 +1332,13 @@ function wrapCols(s: string, width: number): string[] {
     used += w
   }
   return [...lines, line]
+}
+
+// 回合進行中那列的「最近」：工具名＋它最能認出這次在做什麼的參數（第一行），沒有就只寫工具名
+function toolLabel(e: Record<string, unknown>): string {
+  const tool = String(e.tool)
+  const arg = [e.command, e.file_path, e.notebook_path, e.pattern, e.description, e.url, e.query].find(v => typeof v === 'string' && v !== '')
+  return typeof arg === 'string' ? `${tool} ${arg.split('\n')[0]}` : tool
 }
 
 // 超過 width 欄才截斷，最後一欄換成 …；剛好放得下的照原樣
