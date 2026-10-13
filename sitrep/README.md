@@ -32,8 +32,10 @@ language of your conversation.
   the reply's lines and asks `haiku` (low effort, 20 s limit) for line numbers
   only: the outcome line, questions with their option lines, what you have to
   do, what Claude does next, and the sections that can be collapsed. The mod
-  checks every number and builds the box from those lines. Any number out of
-  range or pointing at the wrong kind of line rejects the whole answer. The
+  checks every number and builds the box from those lines. An outcome or a
+  question that is out of range or points at the wrong kind of line rejects
+  the whole answer; a bad option, recommendation, `You do`, `Then I` or
+  section number drops only that item. The
   system prompt is left alone.
   - Headings the mod recognizes override the model's numbers: the first line
     under a `Result`/`Summary`/`## 結果` heading is the outcome, consecutive
@@ -149,6 +151,10 @@ claude --plugin-dir ./mango-mods/sitrep
   `turn.complete` never arrives keeps spinning until the session ends.
 - In focus mode (`/focus`) the engine hides background-task notification
   rows, so their status glyph is not shown there.
+- Under a Team/Enterprise sign-in, Claude Code's built-in guard mod keeps
+  `classic.*` events from user-installed mods, so the status pane has no
+  source for background shells or the task list; its Running section says
+  so in one line instead. Subagents are unaffected.
 
 ## Development
 

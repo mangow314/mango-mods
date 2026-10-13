@@ -40,6 +40,8 @@ declare module 'claude-code' {
       evidence: Evidence | null
       background: string[]
       tasks: TaskNote[]
+      // classic.* 收不收得到：guarded＝主對話結束了卻沒看到 classic.Stop（Team／Enterprise 登入）
+      classic: 'unknown' | 'seen' | 'guarded'
       changes: ChangeNote[]
       // 這個 session 用 Edit／Write 改過的檔（絕對路徑）
       touched: string[]

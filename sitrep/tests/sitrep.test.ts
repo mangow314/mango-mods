@@ -11,6 +11,7 @@ function world(on: On): World {
   const w: World = { bodies: [], fills: [], asks: [], pick: '{}', hold: null }
   on('turn.complete', (_$, e) => ({ text: e.answer }))
   on('turn.start', (_$, e) => ({ turnId: e.turnId }))
+  on('classic.Stop', () => ({}))
   on('model.complete', async (_$, e) => {
     w.asks.push({ model: e.model, prompt: e.prompt })
     if (w.hold) await w.hold
@@ -93,9 +94,10 @@ const PLAIN = long('照 A 改好。', '細節如下。')
 
 type Clock = ReturnType<typeof mock.clock>
 
-// 主對話一輪結束、挑編號模型照 pick 回答，等摘錄寫回
-async function say($: Engine, clock: Clock, w: World, answer: string, pick: World['pick'], durationMs = 10_000) {
+// 主對話一輪結束、挑編號模型照 pick 回答，等摘錄寫回。照實測順序先跑 classic.Stop（個人帳號）；guarded＝Team 帳號收不到
+async function say($: Engine, clock: Clock, w: World, answer: string, pick: World['pick'], durationMs = 10_000, guarded = false) {
   w.pick = pick
+  if (!guarded) await $.classic.Stop({ stop_hook_active: false, background_tasks: [{ id: 'b1', type: 'shell', status: 'running', description: 'dev server', command: 'npm run dev' }] })
   await $.turn.complete({ answer, durationMs, isAborted: false, turnId: 't', reason: 'answer' })
   await clock.advance(0)
   await clock.settle()
@@ -684,6 +686,24 @@ test('回合結束那列：這一輪派了背景子代理（引擎寫 Waiting fo
   await say($, clock, w, REPLY, PICKS, 7_000)
   const ui = await $.ui.mount({ plugin: 'sitrep', surface: 'terminal', component: 'TurnDuration', props: { word: 'Baked', durationMs: 7_000 } })
   expect(await texts(ui)).toBe('')
+})
+
+test('pane 進行中：個人帳號列出背景 shell，不畫 Team 帳號的註明', ZH, async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+  paneWorld(on)
+  await say($, clock, w, PLAIN, picks(PLAIN, { outcome: '照 A 改好。' }))
+  const text = await texts(await pane($))
+  expect(text).toContain('背景 shell npm run dev')
+  expect(text).not.toContain('Team／Enterprise 帳號看不到')
+})
+
+test('pane 進行中：Team 帳號（收不到 classic.*）註明背景 shell、任務清單看不到', ZH, async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+  paneWorld(on)
+  await say($, clock, w, PLAIN, picks(PLAIN, { outcome: '照 A 改好。' }), 10_000, true)
+  expect(await texts(await pane($))).toContain('背景 shell、任務清單：Team／Enterprise 帳號看不到')
 })
 
 test('/sitrep-pane：關著就開、開著就關', ZH, async ($, on) => {

@@ -55,6 +55,7 @@ const ZH = {
   changes: '變更 · 未 commit',
   notThisTime: '（不是這次改的）',
   files: (n: number) => `${n} 檔`,
+  guarded: '背景 shell、任務清單：Team／Enterprise 帳號看不到',
   nothing: '目前沒有需要你或進行中的事',
   more: (n: number) => `…還有 ${n} 項`,
   stateRunning: '執行中',
@@ -101,6 +102,7 @@ const EN: Texts = {
   changes: 'Changes · uncommitted',
   notThisTime: ' (not changed this turn)',
   files: n => `${n} file${n === 1 ? '' : 's'}`,
+  guarded: 'Background shells and the task list: not shown under a Team/Enterprise sign-in',
   nothing: 'Nothing needs you and nothing is running',
   more: n => `…${n} more`,
   stateRunning: 'running',
@@ -180,6 +182,9 @@ const lastAtom = atom({ plugin: 'sitrep', key: 'last' } as const, null as { id: 
 const evidenceAtom = atom({ plugin: 'sitrep', key: 'evidence' } as const, null as Evidence | null)
 const backgroundAtom = atom({ plugin: 'sitrep', key: 'background' } as const, [] as string[])
 const tasksAtom = atom({ plugin: 'sitrep', key: 'tasks' } as const, [] as TaskNote[])
+// classic.* 收不收得到：Team／Enterprise 登入時內建守門 mod（sec-default）讓 classic.* 跳過使用者裝的 mod，
+// 背景 shell 與任務清單就沒有來源。主對話正常結束一定先跑 classic.Stop 才有 turn.complete，沒看到就當成收不到
+const classicAtom = atom({ plugin: 'sitrep', key: 'classic' } as const, 'unknown' as 'unknown' | 'seen' | 'guarded')
 const changesAtom = atom({ plugin: 'sitrep', key: 'changes' } as const, [] as ChangeNote[])
 const touchedAtom = atom({ plugin: 'sitrep', key: 'touched' } as const, [] as string[])
 const paneOpenAtom = atom({ plugin: 'sitrep', key: 'paneOpen' } as const, false)
@@ -251,6 +256,7 @@ export const register: Register = (on, options) => {
   // 主對話停下時引擎回報的背景工作（背景 shell、monitor、workflow；子代理另外從 $.agent.list() 拿）
   on('classic.Stop', async ($, e, next) => {
     const result = await next(e)
+    await update($, classicAtom, () => 'seen')
     if (result.block !== undefined) return result
     const work = (e.background_tasks ?? []).filter(t => t.type !== 'subagent').map(t => `${t.type} ${t.command ?? t.description}`)
     await update($, backgroundAtom, () => work)
@@ -277,6 +283,7 @@ export const register: Register = (on, options) => {
       await update($, agentsAtom, list => list.map(a => (a.id === id ? { ...a, status: e.isAborted ? 'killed' : 'completed', durationMs: e.durationMs } : a)))
       return result
     }
+    if (!e.isAborted) await update($, classicAtom, c => (c === 'unknown' ? 'guarded' : c))
     const lines = numberLines(e.answer)
     const isLong = lines.join('').length >= EXCERPT_MIN || lines.filter(l => HEADING_RE.test(l)).length >= EXCERPT_HEADINGS
     const id = isLong ? keyOf(e.answer) : undefined
@@ -659,6 +666,7 @@ async function drawPane($: EngineInterface, e: RenderEvent, width: number) {
     rows: [
       ...agents.map(a => runningRow(`run-${a.id}`, T.subagent(a.description), a.startedAt)),
       ...(await read($, backgroundAtom)).map((b, i) => runningRow(`bg-${i}`, T.background(b), undefined)),
+      ...((await read($, classicAtom)) === 'guarded' ? [<Text key="guarded" color={DIM}>{clip(T.guarded, width)}</Text>] : []),
     ],
     max: 5,
   })
