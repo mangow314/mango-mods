@@ -54,10 +54,12 @@ language of your conversation.
     "waiting on you" states are yellow.
   - Then the outcome in bold, and right under it `You do` lines in yellow.
   - Sections the model picks (for example Changes, Checks) leave the body and
-    become one summary line each; `▸` puts a section back in its place in the
-    body. When there are questions, a section whose heading mentions a
-    decision (`## Decisions`, `## 待你決定`) is folded the same way, as
-    `Options`, so the questions are not written twice.
+    become one summary line each, under a bold blue label; `▸` puts a section
+    back in its place in the body. When there are questions, a section whose
+    heading mentions a decision (`## Decisions`, `## 待你決定`) also leaves
+    the body, so the questions are not written twice; its other lines (the
+    pros and cons, why one is recommended) are shown in the box under the
+    questions, with no `▸` to press.
   - Questions come next, one option per line, never cut short. Clicking an
     option only fills "question. option" into the prompt box; nothing is
     sent. A question asked without listed choices shows alone (answer by

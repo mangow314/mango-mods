@@ -61,8 +61,6 @@ const ZH = {
   stateDone: '完成',
   stateFailed: '失敗',
   stateKilled: '已中止',
-  optionsLabel: '利弊',
-  optionsSummary: '各選項的說明與建議',
   backInReply: '（已放回正文）',
   youDo: '你要做  ',
   thenI: '之後我  ',
@@ -109,8 +107,6 @@ const EN: Texts = {
   stateDone: 'done',
   stateFailed: 'failed',
   stateKilled: 'killed',
-  optionsLabel: 'Options',
-  optionsSummary: 'what each option means, and the pick',
   backInReply: ' (back in the reply)',
   youDo: 'You do  ',
   thenI: 'Then I  ',
@@ -436,9 +432,14 @@ export const register: Register = (on, options) => {
         </Box>
       )
     }
-    const facets = withDecisionFacet(found.summary, found.rest)
+    const facets = found.summary.facets
     const open = await read($, openAtom)
-    const { shown, sections } = cutSections(found.rest, facets, i => open[`${found.id}:${i}`] === true)
+    const asked = decisionHeading(found.summary, found.rest)
+    // 決定段排在最後一起切：永遠從正文拿掉，內文攤在框裡
+    const cut = cutSections(found.rest, asked === undefined ? facets : [...facets, { label: '', summary: '', heading: asked }], i => i < facets.length && open[`${found.id}:${i}`] === true)
+    const { shown } = cut
+    const sections = cut.sections.slice(0, facets.length)
+    const notes = asked === undefined ? [] : decisionNotes(cut.sections[facets.length] ?? '', found.summary.items)
     const body = await draw(shown)
     const { Box, Text } = $.ui.resolve(e)
     // 結論框畫在帶區塊的那一段下面，不靠 TurnDuration：短回合、子代理回報觸發的回合，引擎不一定畫那列（實測 3s 那輪沒有）
@@ -469,7 +470,7 @@ export const register: Register = (on, options) => {
     // 框寬固定（不跟內容跳，實機 36～81 欄）：終端寬減 4，最寬 88
     const width = Math.min((e.viewport?.columns ?? 92) - 4, BOX_MAX)
     // 選項標籤可用的欄數：框線 2、內距 2、縮排 2、選項鍵 2、空一格
-    const items = await itemRows($, e, found.id, found.summary.items, width - 9)
+    const items = await itemRows($, e, found.id, found.summary.items, width - 9, notes)
     const rows = [
       <Text key="outcome" color={BRIGHT} bold>{found.summary.outcome}</Text>,
       ...items.todo,
@@ -571,7 +572,7 @@ async function excerpt($: EngineInterface, id: string, answer: string, lines: st
   await update($, turnsAtom, list => list.map(t => (t.id === id ? { ...t, glyph: glyphOf(summary), outcome: summary.outcome } : t)))
   // 新的結論框沒有題目＝之前的題目已經處理過（例如使用者自己打字回答），那列跟著消失
   // 完工回覆的「你要做」多半是建議（例如手動再測一次），不在 prompt 上方催；卡住、做到一半才提示
-  const todo = summary.status === 'done' ? [] : summary.items.filter(i => i.kind === 'user-next').map(i => i.text)
+  const todo = summary.status === 'done' ? [] : summary.items.filter(i => i.kind === 'user-next').map(i => i.text.replace(TODO_PREFIX_RE, ''))
   await update($, pendingAtom, () => ({ id, decisions: decisionsOf(summary.items), todo }))
   await update($, lastAtom, () => ({ id, summary }))
   // 證據：沿用最近一輪有「驗證」段的結果，直到下一次驗證蓋過去（問題輪通常沒有驗證段，pane 卻正好開著）
@@ -1013,7 +1014,7 @@ const OUTCOME_HEADING_RE = /^(?:結果|結論|答案|results?|outcome|summary|an
 const DETAIL_HEADING_RE = /變更|驗證|風險|證據|change|verif|check|test|risk|evidence/i
 const DECISION_HEADING_RE = /決定|decision|choose|choice/i
 // 規則認選項只認大寫字母（「e.g. …」不算），而且一段裡要從 A 起連號
-const OPTION_KEY_RE = /^(?:選項\s*|option\s+)?([A-Z])\s*[.)）:：、]/
+const OPTION_KEY_RE = /^(?:選項\s*|[Oo]ption\s+)?([A-Z])\s*[.)）:：、]/
 
 // 回覆有認得的標題時，照標題改寫模型挑的編號（模型偶爾挑錯結論行、漏掉選項）：
 // 結論＝「結果」這類標題下第一行；題目＝「待你決定」段裡 A、B… 連號的選項行與它們前一行；
@@ -1100,14 +1101,36 @@ function cutSections(text: string, facets: Facet[], isOpen: (i: number) => boole
   return { shown: lines.join('\n').replace(/\n{3,}/g, '\n\n').trim(), sections }
 }
 
-// 有題目時，正文裡標題含「決定」的那段（例如「## 待你決定」）也收進框，列成「利弊」：題目本身已畫在框裡，
-// 正文再寫一次就是同一件事說兩次（實機 s2 三個模型都這樣）。沒有標題的寫法（直接列 1. 2.）抓不到，照原樣留在正文
-function withDecisionFacet(summary: Summary | null, text: string): Facet[] {
-  const facets = summary?.facets ?? []
-  if (!summary || decisionsOf(summary.items).length === 0) return facets
-  const taken = new Set(facets.map(f => norm(f.heading ?? '')))
-  const heading = text.split('\n').map(l => /^#{1,6}\s+(.+?)\s*#*\s*$/.exec(l)?.[1]).find(h => h !== undefined && /決定|decision|choose|choice/i.test(h) && !taken.has(norm(h)))
-  return heading === undefined ? facets : [...facets, { label: T.optionsLabel, summary: T.optionsSummary, heading }]
+// 有題目時，正文裡標題含「決定」的那段（例如「## 待你決定」）從正文拿掉、說明攤在框裡題目底下：題目本身已畫在框裡，
+// 正文再寫一次就是同一件事說兩次（實機 s2 三個模型都這樣）；收成一列要按 ▸ 才看得到利弊（使用者 2026-10-13 選框內攤開）。
+// 沒有標題的寫法（直接列 1. 2.）抓不到，照原樣留在正文
+function decisionHeading(summary: Summary, text: string): string | undefined {
+  if (decisionsOf(summary.items).length === 0) return undefined
+  const taken = new Set(summary.facets.map(f => norm(f.heading ?? '')))
+  return text.split('\n').map(l => /^#{1,6}\s+(.+?)\s*#*\s*$/.exec(l)?.[1]).find(h => h !== undefined && DECISION_HEADING_RE.test(h) && !taken.has(norm(h)))
+}
+
+// 決定段裡框還沒畫的行（利弊、建議的理由…），按題分組：[0] 是第一題之前的行，[n + 1] 是第 n 題之後、下一題之前的行
+// （實機：兩題的說明全排在第二題底下，第一題的「我建議」看起來像第二題的）。題目、選項、你要做／之後我已經畫過的不再列
+function decisionNotes(section: string, items: Item[]): string[][] {
+  const shown = new Set(items.map(i => i.text))
+  const questions = decisionsOf(items).map(d => d.text)
+  const groups: string[][] = [[], ...questions.map(() => [])]
+  let at = 0
+  let inFence = false
+  for (const raw of section.split('\n')) {
+    const l = raw.trim()
+    if (l.startsWith('```')) {
+      inFence = !inFence
+      continue
+    }
+    if (inFence || l === '' || HEADING_RE.test(l) || TABLE_RULE_RE.test(l)) continue
+    const text = cleanLine(l)
+    const q = questions.indexOf(text, at === 0 ? 0 : at - 1)
+    if (q >= 0) at = q + 1
+    else if (text !== '' && !shown.has(text) && !OPTION_KEY_RE.test(text)) groups[at]?.push(text)
+  }
+  return groups
 }
 
 function norm(s: string): string {
@@ -1129,8 +1152,8 @@ function facetRows($: EngineInterface, e: RenderEvent, id: string, facets: Facet
         {section
           ? <Button key={`toggle-${i}`} plain label={isOpen ? '▾' : '▸'} onPress={() => update($, openAtom, o => ({ ...o, [key]: !isOpen }))} />
           : <Text color={DIM}>{'·'}</Text>}
-        {/* 灰階分層（不加新顏色）：標籤亮一階加粗、內文用亮字，「之後我」維持最暗，兩者分得開（使用者實機：收合列太灰不顯眼） */}
-        <Text color={SOFT} bold>{` ${f.label}${' '.repeat(width - cols(f.label))}  `}</Text>
+        {/* 標籤藍色粗體（使用者 2026-10-13：灰色標籤在長摘要裡找不到段落），內文用亮字，「之後我」維持最暗 */}
+        <Text color={BLUE} bold>{` ${f.label}${' '.repeat(width - cols(f.label))}  `}</Text>
         <Text color={BRIGHT}>{isOpen ? `${f.summary}${T.backInReply}` : f.summary}</Text>
       </Box>
     )
@@ -1138,7 +1161,17 @@ function facetRows($: EngineInterface, e: RenderEvent, id: string, facets: Facet
 }
 
 // 待你決定的題目（選項按鈕）、你要做的事（黃）、之後我接著做的事（灰）
-async function itemRows($: EngineInterface, e: RenderEvent, id: string, items: Item[], room: number) {
+function noteRows($: EngineInterface, e: RenderEvent, key: string, lines: string[], width: number) {
+  const { Text } = $.ui.resolve(e)
+  return lines.flatMap((n, i) => wrapCols(n, width).map((l, j) => <Text key={`${key}-${i}-${j}`}>{`  ${l}`}</Text>))
+}
+
+// 原句自己就以「你要做：」「之後我會…」開頭時拿掉，框裡的標籤已經寫了（實機：You do  你要做：明天實機看一次）
+const TODO_PREFIX_RE = /^(?:你要做|你需要|待你做|you do|you need to|to do|todo)\s*[:：]\s*/i
+const THEN_PREFIX_RE = /^(?:之後我|接下來我|下一步|then i|next)\s*[:：]\s*/i
+
+// notes：決定段的說明（decisionNotes 的分組），各畫在所屬題目的選項底下
+async function itemRows($: EngineInterface, e: RenderEvent, id: string, items: Item[], room: number, notes: string[][] = []) {
   const answers = (await read($, answersAtom))[id] ?? {}
   const { Box, Button, Text } = $.ui.resolve(e)
   const decisions = decisionsOf(items)
@@ -1148,7 +1181,7 @@ async function itemRows($: EngineInterface, e: RenderEvent, id: string, items: I
     <Box key={`q-${n}`} flexDirection="column" marginTop={n === 0 ? 1 : 0}>
       <Text>
         <Text color={YELLOW} bold>{'? '}</Text>
-        <Text color={BRIGHT}>{decisions.length > 1 ? `${n + 1}. ${d.text}` : d.text}</Text>
+        <Text color={BRIGHT} bold>{decisions.length > 1 ? `${n + 1}. ${d.text}` : d.text}</Text>
       </Text>
       {/* 一個選項一行、標籤不截斷，長的照框寬換行（實機：並排時每個選項只剩十來個字） */}
       <Box flexDirection="column" marginLeft={2}>
@@ -1173,15 +1206,20 @@ async function itemRows($: EngineInterface, e: RenderEvent, id: string, items: I
           )
         })}
       </Box>
+      {/* 這題的說明（利弊、建議的理由）：一般字色（灰字太淡，使用者實機嫌辨識度差），照框寬自己斷行 */}
+      {noteRows($, e, `note-${n}`, notes[n + 1] ?? [], room + 2)}
     </Box>
   ))
+  // 第一題之前的說明排在題目前面
+  const intro = noteRows($, e, 'note-intro', notes[0] ?? [], room + 2)
+  if (intro.length > 0 && questions.length > 0) questions.unshift(<Box key="note-intro" flexDirection="column" marginTop={1}>{intro}</Box>)
   // 沒列選項的開放題：只畫題目，回答直接打字
   for (const [i, a] of asks.entries()) {
     questions.push(
       <Box key={`ask-${i}`} marginTop={questions.length === 0 ? 1 : 0}>
         <Text>
           <Text color={YELLOW} bold>{'? '}</Text>
-          <Text color={BRIGHT}>{a.text}</Text>
+          <Text color={BRIGHT} bold>{a.text}</Text>
         </Text>
       </Box>,
     )
@@ -1190,11 +1228,11 @@ async function itemRows($: EngineInterface, e: RenderEvent, id: string, items: I
   const todo = others.filter(o => o.kind === 'user-next').map((o, i) => (
     <Text key={`todo-${i}`}>
       <Text color={YELLOW} bold>{T.youDo}</Text>
-      <Text>{o.text}</Text>
+      <Text>{o.text.replace(TODO_PREFIX_RE, '')}</Text>
     </Text>
   ))
   const later = others.filter(o => o.kind !== 'user-next').map((o, i) => (
-    <Text key={`later-${i}`} color={DIM}>{`${T.thenI}${o.text}`}</Text>
+    <Text key={`later-${i}`} color={DIM}>{`${T.thenI}${o.text.replace(THEN_PREFIX_RE, '')}`}</Text>
   ))
   return { todo, questions, later }
 }

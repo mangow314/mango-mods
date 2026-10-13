@@ -135,14 +135,15 @@ test('長回覆：回合結束後請 haiku 挑編號（程式碼區塊不編號�
   expect(text).toContain('照 A 改好。')
 })
 
-test('預設英文標籤：狀態、選項、你要做、待答列；英文的 Decisions 段一樣收成選項列', async ($, on) => {
+test('預設英文標籤：狀態、選項、你要做、待答列；英文的 Decisions 段一樣從正文拿掉', async ($, on) => {
   const clock = mock.clock(on)
   const w = world(on)
-  const reply = long(
+  // 補長度的那行放在 Decisions 之前：Decisions 段的說明會攤在框裡
+  const reply = [
     '## Result', 'greet() takes a name now.',
-    '## Checks', '- 3 pass',
+    '## Checks', '- 3 pass', '', PAD, '',
     '## Decisions', 'Which one next?', '- Option A: pytest', '- Option B: mypy', '- Re-run the demo by hand',
-  )
+  ].join('\n')
   await say($, clock, w, reply, picks(reply, {
     status: 'blocked',
     outcome: 'greet() takes a name now.',
@@ -157,7 +158,6 @@ test('預設英文標籤：狀態、選項、你要做、待答列；英文的 D
   expect(text).toContain(' pytest')
   expect(text).toContain('recommended')
   expect(text).toContain('You do  Re-run the demo by hand')
-  expect(text).toContain('Options')
   expect(w.bodies.at(-1)).not.toContain('## Decisions')
   expect(text).not.toMatch(/[\u4e00-\u9fff]/)
   expect(await texts(await above($))).toContain('? 1 open')
@@ -260,7 +260,9 @@ test('標題規則的推薦：選項後面寫「建議」的那行標推薦；�
   expect(text).toContain('先修哪個？')
   expect(text).toMatch(/照標題解析\s+建議/)
   expect(text).not.toMatch(/標題上色\s+建議/)
-  expect(text).not.toContain('這行不是選項')
+  // 不當選項＝沒有 C 鍵；這行是說明，攤在題目底下
+  expect((await ui.findAll({ type: 'Button' })).map(b => String(b.props.label).trim())).not.toContain('C')
+  expect(text).toContain('e.g. 這行不是選項')
 })
 
 test('推薦指到選項後面那句「I\'d pick A」：取那句第一個選項字母；認不出字母就不標推薦，框照畫', async ($, on) => {
@@ -312,12 +314,11 @@ test('回覆：驗證段落收成一行、兩題畫進等你決定的框', ZH, a
   const ui = await message($, REPLY)
   const body = w.bodies.at(-1) ?? ''
   expect(body).not.toContain('51 pass')
-  // 有題目時「待你決定」段也收進框（列成利弊），題目不在正文再寫一次
+  // 有題目時「待你決定」段從正文拿掉，題目不在正文再寫一次
   expect(body).not.toContain('## 待你決定')
   const text = await texts(ui)
   expect(text).toContain('驗證')
   expect(text).toContain('51 pass · tsc ✓')
-  expect(text).toContain('利弊')
   expect(text).toContain('? 等你決定')
   expect(text).toContain('1. mod 放哪？')
   expect(text).toContain('開新 mod')
@@ -374,7 +375,7 @@ test('按選項：依題號把已選的答案填進提示框，不送出', ZH, a
   expect(w.fills).toEqual(['2. B', '1. A  2. B'])
 })
 
-test('收合的段落按 ▸ 放回正文原位（不畫在框裡），再按收回；利弊段一樣', ZH, async ($, on) => {
+test('收合的段落按 ▸ 放回正文原位（不畫在框裡），再按收回；待你決定段沒有 ▸，一直不在正文', ZH, async ($, on) => {
   const clock = mock.clock(on)
   const w = world(on)
   await say($, clock, w, REPLY, PICKS)
@@ -386,8 +387,45 @@ test('收合的段落按 ▸ 放回正文原位（不畫在框裡），再按收
   expect(await texts(ui)).toContain('已放回正文')
   await ui.press({ key: 'toggle-0' })
   expect(w.bodies.at(-1)).not.toContain('claude plugin test')
-  await ui.press({ key: 'toggle-1' })
-  expect(w.bodies.at(-1)).toContain('## 待你決定\n1. mod 放哪？')
+  expect((await ui.findAll({ type: 'Button' })).map(b => b.key)).not.toContain('toggle-1')
+  expect(w.bodies.at(-1)).not.toContain('## 待你決定')
+})
+
+test('待你決定段的說明攤在框裡題目底下，不用按 ▸；題目、選項、你要做不重列', ZH, async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+  const reply = long('## 結果', '研究完成。', '## 待你決定', '先修哪個？', '- 選項 A：照標題解析', '- 選項 B：標題上色', '我建議 A：判斷準了，畫面才有意義。', '- 明天實機看一次')
+  await say($, clock, w, reply, picks(reply, { status: 'blocked', outcome: '研究完成。', todo: ['- 明天實機看一次'] }))
+  const ui = await message($, reply)
+  const lines = (await ui.findAll({ type: 'Text' })).map(t => t.text).filter(t => !t.includes('\n'))
+  expect(lines).toContain('  我建議 A：判斷準了，畫面才有意義。')
+  // 說明行是「兩格縮排＋原句」；你要做、選項那幾行不再以說明列出
+  expect(lines).not.toContain('  明天實機看一次')
+  expect(lines).not.toContain('  選項 A：照標題解析')
+  expect(w.bodies.at(-1)).not.toContain('我建議 A')
+})
+
+test('兩題各自的說明畫在自己的選項底下：第一題的「我建議」排在第二題題目之前', ZH, async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+  const reply = long('## 結果', '研究完成。', '## 待你決定', '1. 先修哪個？', '- 選項 A：照標題解析', '- 選項 B：標題上色', '我建議 A：判斷準了才有意義。',
+    '2. 版本怎麼跳？', '- 選項 A：0.6.1', '- 選項 B：0.7.0', '我建議 B：對外行為變了。')
+  await say($, clock, w, reply, picks(reply, { status: 'blocked', outcome: '研究完成。' }))
+  const lines = (await (await message($, reply)).findAll({ type: 'Text' })).map(t => t.text).filter(t => !t.includes('\n'))
+  const at = (s: string) => lines.findIndex(l => l.includes(s))
+  expect(at('我建議 A：判斷準了')).toBeGreaterThan(at('標題上色'))
+  expect(at('我建議 A：判斷準了')).toBeLessThan(at('版本怎麼跳？'))
+  expect(at('我建議 B：對外行為變了')).toBeGreaterThan(at('0.7.0'))
+})
+
+test('你要做的原句自己以「你要做：」開頭：框裡不重複標籤', ZH, async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+  const reply = long('## 結果', '改好了。', '你要做：明天實機看一次')
+  await say($, clock, w, reply, picks(reply, { status: 'partial', outcome: '改好了。', todo: ['你要做：明天實機看一次'] }))
+  const text = await texts(await message($, reply))
+  expect(text).toContain('你要做  明天實機看一次')
+  expect(text).not.toContain('你要做  你要做')
 })
 
 test('收合列的標籤補到同寬，摘要排成一直欄（中文字算 2 欄）', ZH, async ($, on) => {
