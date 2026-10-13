@@ -575,19 +575,22 @@ async function takeReading($: EngineInterface, e: TurnCompleteInput) {
   await update($, readingsAtom, list => [...list, { tokens, costUsd }].slice(-HISTORY))
   freshFrame = frame
   // 快取倒數只是附加資訊：讀不到 env／settings 也不能拖垮讀數與交接判斷
-  await noteCache($, e).catch(err => $.ui.log(`${TAG} cache countdown skipped: ${String(err)}`))
+  // context 比上一輪少一半以上＝這輪中間壓縮過（auto-compact）。Team／Enterprise 登入時守門 mod 不讓使用者 mod 收到
+  // session.compact，那邊的重設不會跑；這輪偏冷是壓縮造成的，不能拿來判 TTL
+  const compacted = prev !== null && tokens < prev.tokens / 2
+  await noteCache($, e, compacted).catch(err => $.ui.log(`${TAG} cache countdown skipped: ${String(err)}`))
   await update($, limitsAtom, () => deriveLimits(usage.context))
 }
 
 // 主線回合結束：記下時間、這段閒置的保溫次數歸零、推定 TTL；
 // 觀測修正：閒置超過 5 分鐘但還沒到推定 TTL，這輪卻偏冷 → 本 session 改判 5m（例如訂閱超額改扣用量）
-async function noteCache($: EngineInterface, e: TurnCompleteInput) {
+async function noteCache($: EngineInterface, e: TurnCompleteInput, compacted: boolean) {
   const now = await $.clock.now()
   const cache = await read($, cacheAtom)
   const u = e.usage
   const total = u ? u.input_tokens + u.cache_read_input_tokens + u.cache_creation_input_tokens : 0
   const pct = u && total > 0 ? Math.round((u.cache_read_input_tokens * 100) / total) : null
-  const idle = cache.lastRequestAt !== null && cache.turnStartedAt !== null ? cache.turnStartedAt - cache.lastRequestAt : null
+  const idle = !compacted && cache.lastRequestAt !== null && cache.turnStartedAt !== null ? cache.turnStartedAt - cache.lastRequestAt : null
   let observed = cache.observed
   if (observed === '' && idle !== null && pct !== null && pct < CACHE_COLD && idle > TTL_5M && idle < cache.ttlMs) {
     observed = `came back cold (${pct}%) after ${duration(idle)} idle`

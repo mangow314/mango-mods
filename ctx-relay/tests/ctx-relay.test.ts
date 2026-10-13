@@ -1395,6 +1395,17 @@ test('快取 TTL 判定順序：FORCE_PROMPT_CACHING_5M > CLAUDE_CODE_PROMPT_CAC
   expect(await ttl()).toContain('ttl 5m (FORCE_PROMPT_CACHING_5M)')
 })
 
+test('Team 帳號（收不到 session.compact）：這輪中間壓縮過（context 少一半以上），偏冷不拿來改判 TTL', async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world($, on)
+  await start($)
+  await turn($, w, 300_000)
+  await clock.advance(10 * 60_000)
+  await $.turn.start({ text: '', turnId: 't-a' })
+  await turn($, w, 40_000, { cacheRead: 1_000 })
+  expect(await status($)).toContain('ttl 1h')
+})
+
 test('觀測修正：閒置 10 分鐘（未到推定的 1h）回來卻偏冷 → 本 session 改判 5m，狀態寫原因', async ($, on) => {
   const clock = mock.clock(on)
   const w = world($, on)
