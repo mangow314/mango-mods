@@ -8,7 +8,7 @@ Claude Code 的 session 跑得越久，有兩件事越麻煩。回覆越寫越�
 |---|---|
 | [sitrep](sitrep/README.zh-TW.md) | 每則長回覆下方一個結論框：狀態、一句結論、你要做的事、可收合的段落（變更、驗證）、等你回答的題目；提示框上方一列可用鍵盤選答。框裡每個字都是回覆原句：小模型只挑行號 |
 | [ctx-relay](ctx-relay/README.zh-TW.md) | band 顯示 context 大小、每輪花費和 prompt cache 倒數；context 滿之前寫一份你看得懂的交接檔、`/clear`、在新對話接續。不需要其他 skill 或 hook |
-| [xv-band](xv-band/README.zh-TW.md) | Early access：提示框上方一列顯示 xvendor 跨廠審查 job 的即時狀態。要搭配 xvendor 才有用，xvendor 尚未公開 |
+| [xv-band](xv-band/README.zh-TW.md) | Early access：提示框上方一列顯示 xvendor 跨廠審查 job 的即時狀態。要先裝好 [xvendor](https://github.com/mangow314/xvendor) 才有用 |
 
 mod 是用 JS/TS function hooks 寫成的 Claude Code plugin：可以在提示框上方畫一行 band、在對話旁開 pane、對 session 事件做反應。這個 repo 是 plugin marketplace，結構和官方 [claude-code-playground/claude-code/mods](https://github.com/anthropics/claude-code-playground/tree/main/claude-code/mods) 一樣，每個 plugin 一個目錄。
 

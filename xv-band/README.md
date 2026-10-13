@@ -5,9 +5,9 @@
 A Claude Code mod that draws a band above the prompt with the live status of
 `xv` cross-vendor jobs (xvendor's `codex exec` / `agy -p` jobs).
 
-Early access: useful only with xvendor, the author's cross-vendor review tool,
-which is not released yet. The band's activity words are in Traditional
-Chinese.
+Early access: useful only with
+[xvendor](https://github.com/mangow314/xvendor), the author's cross-vendor
+review tool. The band's activity words are in Traditional Chinese.
 
 ## What it does
 

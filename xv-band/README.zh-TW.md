@@ -4,7 +4,7 @@
 
 在 Claude Code 提示框上方畫一條 band，即時顯示 `xv` 跨廠 job（xvendor 開的 `codex exec`／`agy -p` job）的狀態。
 
-Early access：要搭配作者的跨廠審查工具 xvendor 才有用，xvendor 尚未公開。
+Early access：要搭配作者的跨廠審查工具 [xvendor](https://github.com/mangow314/xvendor) 才有用。
 
 ## 做什麼
 

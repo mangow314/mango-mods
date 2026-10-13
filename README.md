@@ -13,7 +13,7 @@ can vanish. These two mods take on one problem each:
 | --- | --- |
 | [sitrep](sitrep/README.md) | Under each long reply, a box with the status, a one-line outcome, what you have to do, collapsed sections (changes, checks) and the questions waiting on you; one row above the prompt answers them from the keyboard. Every word in the box is the reply's own: a small model only picks line numbers |
 | [ctx-relay](ctx-relay/README.md) | A band with context size, per-turn cost and the prompt-cache countdown. Before the context fills up it writes a handoff file you can read, runs `/clear`, and resumes in the new conversation. Needs no other skill or hook |
-| [xv-band](xv-band/README.md) | Early access: a row above the prompt with the live status of xvendor cross-vendor review jobs. Useful only with xvendor, which is not released yet |
+| [xv-band](xv-band/README.md) | Early access: a row above the prompt with the live status of [xvendor](https://github.com/mangow314/xvendor) cross-vendor review jobs. Useful only with xvendor installed |
 
 A mod is a Claude Code plugin written as JS/TS function hooks: it can draw a
 band above the prompt, open a pane beside the conversation, and react to
