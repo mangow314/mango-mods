@@ -86,14 +86,9 @@ Glyphs: `?` yellow = your call, `>` yellow = your move, `!` red = blocked,
   (`⠋ Explore  description  running 42s`, ticking every 250 ms) and switch to
   `✓` with their run time. For such a turn, the engine's "Waiting for N
   background agents" line is not drawn.
-- `/agents-info` opens or closes a subagent pane: a top line with the count,
-  running count and output tokens, then running and finished (latest 10).
-  Each subagent gets its type, description and run time, then its model,
-  effort, latest context, request count and output tokens. Subagents started
-  by subagents or workflows are included. Where no pane can be shown (a cloud
-  session, `claude -p`) it replies with the same list as text. While
-  subagents run and the pane is not shown, the row above the prompt adds
-  `⠋ 2 subagents running · output 12k`.
+- sitrep draws no subagent list of its own. Claude Code already lists
+  running subagents below the status line, in both fullscreen and the
+  default renderer; set `subagentStatusLine` to change what each row shows.
 - `/sitrep-pane` opens or closes a status pane (experimental): needs you
   (questions, answer with a letter), running (subagents and background jobs),
   tasks (the engine's task list), evidence (the latest checks as small tags),
@@ -134,13 +129,13 @@ claude --plugin-dir ./mango-mods/sitrep
 - The box is matched to the reply by a hash of its text. When tool calls
   split a reply into several blocks, the box sits under the last one. A reply
   too short for an excerpt gets no box, so subagents it dispatched show only
-  in the row above the prompt and `/agents-info`.
+  in Claude Code's own list below the status line.
 - ctrl+o does not show the original reply: an assistant row does not say
   whether it is drawn in the ctrl+o transcript, so the box is drawn there
   too. Use `▸` to put a collapsed section back.
 - The excerpt arrives a few seconds after the reply, and the collapsed
   sections leave the body at that moment, so the body shifts up once.
-- `/agents-info` records a subagent when `agent.spawn` returns an id; a
+- The box and the status pane record a subagent when `agent.spawn` returns an id; a
   workflow's remote agent has none and is not listed. A subagent whose
   `turn.complete` never arrives keeps spinning until the session ends.
 - In focus mode (`/focus`) the engine hides background-task notification

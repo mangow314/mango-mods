@@ -17,8 +17,6 @@ import type { AgentNote, ChangeNote, Evidence, Excerpt, Facet, Item, Option, Sum
 // 6. 背景工作結束的通知列開頭換成狀態符號（✓ 完成、! 失敗、– 中止）；那一輪派出的背景子代理也列在結論框裡，跑完自動更新。
 // 7. 回覆裡的 ASCII 圖（含框線字元或箭頭的程式碼區塊）畫在灰底區塊、上方一行灰字「圖」，不被大量文字蓋過。
 // 8. 回覆裡的 ```dot 區塊照 7 畫原文，標籤附粗算的節點與邊數。
-// 9. /agents-info 開關子代理 pane：每個子代理一啟動就記下（agent.spawn），每次模型請求更新 model、effort、context、輸出 token（turn.step）。
-//    沒地方放 pane 時改用文字回；子代理在跑、pane 沒畫出來時，prompt 上方多一行「子代理 N 個進行中」。
 
 const TAG = 'sitrep'
 
@@ -26,20 +24,13 @@ const TAG = 'sitrep'
 const ZH = {
   status: { '?': '等你決定', '>': '等你動手', '!': '卡住', '~': '進行中', '✓': '完成' } as Record<string, string>,
   cmdPane: 'sitrep：開關狀態 pane（需要你、進行中、任務、證據、變更）',
-  cmdAgents: 'sitrep：開關子代理 pane（進行中、已結束，含 model、context、輸出 token、耗時）',
   registerFailed: (name: string, err: string) => `${TAG} 註冊 /${name} 失敗：${err}`,
   logFailed: (what: string, err: string) => `${TAG} ${what}失敗：${err}`,
   logSpawn: '記錄子代理啟動',
-  logUsage: '記錄子代理用量',
-  agentsClosed: `${TAG}：已關閉子代理 pane（/agents-info 可再打開）`,
-  agentsTitle: '子代理',
-  agentsOpened: `${TAG}：已打開子代理 pane（再打一次 /agents-info 關閉）`,
   paneClosed: `${TAG}：已關閉狀態 pane（/sitrep-pane 可再打開）`,
   paneOpened: `${TAG}：已打開狀態 pane（實驗中；再打一次 /sitrep-pane 關閉）`,
   excerpting: '摘錄中',
   noExcerpt: '本輪結束（無摘錄）',
-  agentsRunning: (n: number, out: string) => `子代理 ${n} 個進行中 · 輸出 ${out}`,
-  agentsHint: '   /agents-info 看細節',
   openCount: (n: number) => `? ${n} 題待決`,
   recommended: ' 建議',
   recShort: ' 建議',
@@ -66,15 +57,6 @@ const ZH = {
   files: (n: number) => `${n} 檔`,
   nothing: '目前沒有需要你或進行中的事',
   more: (n: number) => `…還有 ${n} 項`,
-  noAgents: '這個 session 還沒派過子代理',
-  noAgentsText: `${TAG}：這個 session 還沒派過子代理`,
-  finished: '已結束',
-  moreAgents: (n: number) => `…還有 ${n} 個`,
-  agentsHeader: (all: number, running: number, out: string) => `共 ${all} 個 · 進行中 ${running} · 輸出 ${out}`,
-  requests: (n: number) => `${n} 次請求`,
-  output: (out: string) => `輸出 ${out}`,
-  moreFinished: (n: number) => `…還有 ${n} 個已結束`,
-  noPane: `${TAG}：這裡沒有能放 pane 的畫面，改用文字列出子代理`,
   stateRunning: '執行中',
   stateDone: '完成',
   stateFailed: '失敗',
@@ -90,20 +72,13 @@ type Texts = typeof ZH
 const EN: Texts = {
   status: { '?': 'Your call', '>': 'Your move', '!': 'Blocked', '~': 'In progress', '✓': 'Done' },
   cmdPane: 'sitrep: toggle the status pane (needs you, running, tasks, evidence, changes)',
-  cmdAgents: 'sitrep: toggle the subagent pane (running and finished, with model, context, output tokens, time)',
   registerFailed: (name, err) => `${TAG} could not register /${name}: ${err}`,
   logFailed: (what, err) => `${TAG} ${what} failed: ${err}`,
   logSpawn: 'recording a subagent start',
-  logUsage: 'recording subagent usage',
-  agentsClosed: `${TAG}: closed the subagent pane (/agents-info opens it again)`,
-  agentsTitle: 'Subagents',
-  agentsOpened: `${TAG}: opened the subagent pane (/agents-info again closes it)`,
   paneClosed: `${TAG}: closed the status pane (/sitrep-pane opens it again)`,
   paneOpened: `${TAG}: opened the status pane (experimental; /sitrep-pane again closes it)`,
   excerpting: 'excerpting',
   noExcerpt: 'turn ended (no excerpt)',
-  agentsRunning: (n, out) => `${n} subagent${n === 1 ? '' : 's'} running · output ${out}`,
-  agentsHint: '   /agents-info for details',
   openCount: n => `? ${n} open`,
   recommended: ' recommended',
   recShort: ' rec',
@@ -130,15 +105,6 @@ const EN: Texts = {
   files: n => `${n} file${n === 1 ? '' : 's'}`,
   nothing: 'Nothing needs you and nothing is running',
   more: n => `…${n} more`,
-  noAgents: 'No subagents in this session yet',
-  noAgentsText: `${TAG}: no subagents in this session yet`,
-  finished: 'Finished',
-  moreAgents: n => `…${n} more`,
-  agentsHeader: (all, running, out) => `${all} total · ${running} running · output ${out}`,
-  requests: n => `${n} request${n === 1 ? '' : 's'}`,
-  output: out => `output ${out}`,
-  moreFinished: n => `…${n} more finished`,
-  noPane: `${TAG}: no room for a pane here; listing subagents as text`,
   stateRunning: 'running',
   stateDone: 'done',
   stateFailed: 'failed',
@@ -154,7 +120,6 @@ let T: Texts = EN
 const KEEP_TURNS = 50
 const KEEP_AGENTS = 50
 const PANE = 'sitrep'
-const AGENTS_PANE = 'sitrep-agents'
 // 子代理在跑時的重畫計時器（模組層，同一時間只開一個）：每 250ms 一幀，轉圈字形與已跑時間跟著走
 let tick: Timer | null = null
 let frame = 0
@@ -239,29 +204,11 @@ export const register: Register = (on, options) => {
     } catch (err) {
       $.ui.log(T.registerFailed('sitrep-pane', String(err)))
     }
-    try {
-      await $.command.register({ name: 'agents-info', description: T.cmdAgents })
-    } catch (err) {
-      $.ui.log(T.registerFailed('agents-info', String(err)))
-    }
     return result
   })
 
-  // 子代理 pane 也只手動開關
-  on('command.run', { command: 'agents-info' }, async $ => {
-    if ((await $.ui.panes()).some(p => p.id === AGENTS_PANE)) {
-      await $.ui.close({ id: AGENTS_PANE })
-      return { text: T.agentsClosed }
-    }
-    const opened = await $.ui.open({ id: AGENTS_PANE, title: T.agentsTitle, columns: 60 })
-    if (opened.isPlaced) return { text: T.agentsOpened }
-    // 指令開的 pane 任何寬度都會畫；沒畫＝這裡沒有能放 pane 的畫面（雲端、-p、舊版桌面）：關掉免得下次變成「關閉」，清單改成文字回
-    await $.ui.close({ id: AGENTS_PANE })
-    return { text: await agentsText($) }
-  })
-
-  // 子代理一啟動就記下：開始時間與 model 是真的。主對話派的等這一輪結束由 trackAgents 補上結論框；
-  // 子代理再派的、workflow 的不屬於任何結論框（card ''），只在 pane 列出。寫 state 失敗不能擋住子代理啟動
+  // 子代理一啟動就記下：開始時間是真的。主對話派的等這一輪結束由 trackAgents 補上結論框；
+  // 子代理再派的、workflow 的不屬於任何結論框（card ''），只在狀態 pane 列出。寫 state 失敗不能擋住子代理啟動
   on('agent.spawn', async ($, e, next) => {
     const started = await next(e)
     if (started.deny !== undefined || !started.agentId) return started
@@ -269,7 +216,7 @@ export const register: Register = (on, options) => {
     try {
       const at = await $.clock.now()
       const nested = e.parentAgentId !== undefined || e.workflow !== undefined
-      const note: AgentNote = { id, type: e.subagentType, description: e.description, status: 'running', startedAt: at, model: started.model, ...(nested ? { card: '' } : {}) }
+      const note: AgentNote = { id, type: e.subagentType, description: e.description, status: 'running', startedAt: at, ...(nested ? { card: '' } : {}) }
       await update($, agentsAtom, list => [...list.filter(a => a.id !== id), note].slice(-KEEP_AGENTS))
       startTick($)
     } catch (err) {
@@ -277,28 +224,6 @@ export const register: Register = (on, options) => {
     }
     return started
   }).catch(($, e, next) => next(e)) // 這個 hook 本身出錯也照常啟動子代理（next 已呼叫過就回放那次結果，不會啟動兩次）
-
-  // 子代理每次模型請求：model、effort、這次請求的 context（輸入＋快取＋輸出）、累計輸出 token、請求次數
-  on('turn.step', async function* ($, e, next) {
-    const result = yield* next(e)
-    const id = e.agentId
-    const usage = result.usage
-    if (!id || !usage) return result
-    try {
-      const context = usage.input_tokens + usage.cache_read_input_tokens + usage.cache_creation_input_tokens + usage.output_tokens
-      await update($, agentsAtom, list => list.map(a => (a.id !== id ? a : {
-        ...a,
-        model: usage.model || a.model,
-        effort: e.effort ?? a.effort,
-        context,
-        output: (a.output ?? 0) + usage.output_tokens,
-        steps: (a.steps ?? 0) + 1,
-      })))
-    } catch (err) {
-      $.ui.log(T.logFailed(T.logUsage, String(err)))
-    }
-    return result
-  })
 
   // pane 只能手動開關（2026-10-08 使用者：pane 視覺另案設計，平常只用安靜版，不再自動開）
   on('command.run', { command: 'sitrep-pane' }, async $ => {
@@ -400,21 +325,12 @@ export const register: Register = (on, options) => {
     const todo = pending?.todo[0]
     // pane 開著時題目在 pane 裡選：這列不畫，alt+n（ctrl+x tab）才會直接跳到 pane
     const hasAsk = !!pending && (!!first || todo !== undefined) && !(await read($, paneOpenAtom))
-    const running = await runningAgents($)
-    if (!hasAsk && running.length === 0) return next(e)
+    if (!hasAsk) return next(e)
     // band 只有一個：先讓排在下面的 mod 畫（例如 ctx-relay 的交接列），自己這列疊在它下面
     const below = await next(e)
     const { Box, Button, Text } = $.ui.resolve(e)
-    // 子代理在跑、子代理 pane 沒畫出來時一行：tmux 預設不是 fullscreen，pane 疊在提示框上方太占位，平常看這行就夠
-    const agentsLine = running.length > 0 ? (
-      <Text key="above-agents" wrap="truncate-end">
-        <Text color={BLUE} bold>{`${spin()} `}</Text>
-        <Text color={SOFT}>{T.agentsRunning(running.length, tokens(running.reduce((n, a) => n + (a.output ?? 0), 0)))}</Text>
-        <Text color={DIM}>{T.agentsHint}</Text>
-      </Text>
-    ) : null
     let line: RenderElement | null = null
-    if (hasAsk && pending && first) {
+    if (pending && first) {
       const { d, n } = first
       const total = pending.decisions.length
       // hotkey 只收一個小寫字母；數字不給：空的提示框裡按數字會直接按到 band 的按鈕，也會撞 ctx-relay 的 "1"
@@ -437,7 +353,7 @@ export const register: Register = (on, options) => {
           <Text color={DIM} wrap="truncate-end">{T.rowHint}</Text>
         </Box>
       )
-    } else if (hasAsk) {
+    } else {
       line = (
         <Text key="above-todo" wrap="truncate-end">
           <Text color={YELLOW} bold>{T.yourMove}</Text>
@@ -448,14 +364,12 @@ export const register: Register = (on, options) => {
     return (
       <Box flexDirection="column">
         {below}
-        {agentsLine}
         {line}
       </Box>
     )
   })
 
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
-    if (e.requestId === AGENTS_PANE) return drawAgents($, e, e.props.bodyColumns)
     if (e.requestId !== PANE) return next(e)
     return drawPane($, e, e.props.bodyColumns)
   })
@@ -888,115 +802,6 @@ function startTick($: EngineInterface) {
       tick = null
     })
   })
-}
-
-// /agents-info 的 pane：最上一行總數，下面分進行中、已結束（最近 10 個）；每個子代理兩行：
-// 狀態符號（跑的時候轉圈）、類型、描述、耗時；灰字 model · effort · ctx · 請求次數 · 輸出 token。
-// 2026-10-09 試過像素螃蟹（Raster），9×2 格太大、5×1 格看不出形狀，使用者選回轉圈
-async function drawAgents($: EngineInterface, e: RenderEvent, width: number) {
-  const { Box, Text } = $.ui.resolve(e)
-  const list = await read($, agentsAtom)
-  if (list.length === 0) return <Text color={DIM}>{T.noAgents}</Text>
-  const now = await $.clock.now().catch(() => null)
-  const { running, ended } = splitAgents(list)
-  const row = (a: AgentNote) => {
-    const { mark, time, detail } = agentLine(a, now)
-    // 描述的預算扣掉符號、類型、右邊的時間（都按欄寬算，中文 2 欄），太窄也至少留 6 欄
-    const room = Math.max(6, width - 2 - cols(a.type) - 2 - (time === '' ? 0 : cols(time) + 1))
-    return (
-      <Box key={`ag-${a.id}`} flexDirection="column">
-        <Box flexDirection="row">
-          <Text color={mark.color} bold>{`${mark.glyph} `}</Text>
-          <Text color={SOFT}>{`${a.type}  `}</Text>
-          <Text wrap="truncate-end">{clip(a.description, room)}</Text>
-          <Box flexGrow={1} />
-          <Text color={DIM}>{time}</Text>
-        </Box>
-        {detail !== '' ? <Text color={DIM} wrap="truncate-end">{`  ${clip(detail, Math.max(1, width - 2))}`}</Text> : null}
-      </Box>
-    )
-  }
-  return (
-    <Box flexDirection="column">
-      <Text color={SOFT}>{agentsHeader(list)}</Text>
-      {running.length > 0 ? (
-        <Box key="running" flexDirection="column" marginTop={1}>
-          <Text color={BLUE}>{T.running}</Text>
-          {running.map(row)}
-        </Box>
-      ) : null}
-      {ended.length > 0 ? (
-        <Box key="ended" flexDirection="column" marginTop={1}>
-          <Text color={DIM}>{T.finished}</Text>
-          {ended.slice(0, 10).map(row)}
-          {ended.length > 10 ? <Text key="more" color={DIM}>{T.moreAgents(ended.length - 10)}</Text> : null}
-        </Box>
-      ) : null}
-    </Box>
-  )
-}
-
-// 進行中照最新排前面；已結束同樣最新在前
-function splitAgents(list: AgentNote[]) {
-  return {
-    running: list.filter(a => !(a.status in TASK_MARKS)).reverse(),
-    ended: list.filter(a => a.status in TASK_MARKS).reverse(),
-  }
-}
-
-function agentsHeader(list: AgentNote[]): string {
-  const output = list.reduce((n, a) => n + (a.output ?? 0), 0)
-  return T.agentsHeader(list.length, splitAgents(list).running.length, tokens(output))
-}
-
-// 一個子代理的狀態符號、耗時（跑完的是總耗時，跑的時候是已跑時間）、灰字細節：model · effort · ctx · 請求次數 · 輸出
-function agentLine(a: AgentNote, now: number | null) {
-  const mark = TASK_MARKS[a.status] ?? { glyph: spin(), color: BLUE }
-  const time = a.status in TASK_MARKS
-    ? (a.durationMs !== undefined ? duration(a.durationMs) : '')
-    : now !== null && a.startedAt !== undefined ? duration(now - a.startedAt) : ''
-  const detail = [
-    a.model ? shortModel(a.model) : '',
-    a.effort !== undefined ? String(a.effort) : '',
-    a.context !== undefined ? `ctx ${tokens(a.context)}` : '',
-    a.steps ? T.requests(a.steps) : '',
-    a.output ? T.output(tokens(a.output)) : '',
-  ].filter(x => x !== '').join(' · ')
-  return { mark, time, detail }
-}
-
-// 還在跑的子代理；子代理 pane 已經畫出來時回空的（prompt 上方那行不必重複）
-async function runningAgents($: EngineInterface): Promise<AgentNote[]> {
-  const { running } = splitAgents(await read($, agentsAtom))
-  if (running.length === 0) return []
-  const panes = await $.ui.panes().catch(() => [])
-  return panes.some(p => p.id === AGENTS_PANE && p.isPlaced) ? [] : running
-}
-
-// 沒地方放 pane 時 /agents-info 回的文字：跟 pane 同樣的內容，每個子代理一行
-async function agentsText($: EngineInterface): Promise<string> {
-  const list = await read($, agentsAtom)
-  if (list.length === 0) return T.noAgentsText
-  const now = await $.clock.now().catch(() => null)
-  const { running, ended } = splitAgents(list)
-  const lines = [...running, ...ended.slice(0, 10)].map(a => {
-    const { mark, time, detail } = agentLine(a, now)
-    return [`${mark.glyph} ${a.type}  ${a.description}`, time, detail].filter(x => x !== '').join(' · ')
-  })
-  if (ended.length > 10) lines.push(T.moreFinished(ended.length - 10))
-  return [T.noPane, agentsHeader(list), ...lines].join('\n')
-}
-
-// claude-opus-5-5 → opus-5-5；拿掉日期尾巴和 [1m] 這類標記
-function shortModel(id: string): string {
-  return id.replace(/^claude-/, '').replace(/\[.*\]$/, '').replace(/-\d{8}$/, '')
-}
-
-// token 數：1234 → 1.2k、42000 → 42k、1500000 → 1.5M
-function tokens(n: number): string {
-  if (n < 1000) return String(n)
-  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`
-  return `${(n / 1_000_000).toFixed(1)}M`
 }
 
 // 結論框裡這一輪派出去的背景子代理：轉圈＋執行中 已跑時間；跑完照通知列的符號（✓ 完成、! 失敗、– 中止）
