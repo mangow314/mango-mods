@@ -706,6 +706,21 @@ test('pane 進行中：Team 帳號（收不到 classic.*）註明背景 shell、
   expect(await texts(await pane($))).toContain('背景 shell、任務清單：Team／Enterprise 帳號看不到')
 })
 
+test('pane 任務：別的 hook 擋下的建立和完成不記（被擋的完成不算完成）', ZH, async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+  paneWorld(on)
+  on('classic.TaskCreated', (_$, e) => (e.task_id === 't2' ? { block: '不准建' } : {}))
+  on('classic.TaskCompleted', () => ({ block: '測試還沒過' }))
+  await $.classic.TaskCreated({ task_id: 't1', task_subject: '改 A' } as never)
+  await $.classic.TaskCreated({ task_id: 't2', task_subject: '改 B' } as never)
+  await $.classic.TaskCompleted({ task_id: 't1', task_subject: '改 A' } as never)
+  await say($, clock, w, PLAIN, picks(PLAIN, { outcome: '照 A 改好。' }))
+  const text = await texts(await pane($))
+  expect(text).toContain('任務 0/1')
+  expect(text).not.toContain('改 B')
+})
+
 test('/sitrep-pane：關著就開、開著就關', ZH, async ($, on) => {
   world(on)
   const p = paneWorld(on)

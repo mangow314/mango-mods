@@ -263,14 +263,17 @@ export const register: Register = (on, options) => {
     return result
   })
 
+  // 別的 hook 擋下（block）的建立／完成沒有生效，不記
   on('classic.TaskCreated', async ($, e, next) => {
     const result = await next(e)
+    if (result.block !== undefined) return result
     await update($, tasksAtom, list => [...list.filter(t => t.id !== e.task_id), { id: e.task_id, subject: e.task_subject, done: false }].slice(-30))
     return result
   })
 
   on('classic.TaskCompleted', async ($, e, next) => {
     const result = await next(e)
+    if (result.block !== undefined) return result
     await update($, tasksAtom, list => list.map(t => (t.id === e.task_id ? { ...t, done: true } : t)))
     return result
   })
