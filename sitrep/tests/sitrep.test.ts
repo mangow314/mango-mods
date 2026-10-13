@@ -86,6 +86,11 @@ const PICKS = picks(REPLY, {
   sections: [{ heading: '## 驗證', summary: '- 51 pass · tsc ✓' }],
 })
 
+// 同 REPLY 的行與編號，標題換成規則認不出的字：結論、題目、段落全照模型挑的
+const RAW = REPLY.replace('## 結果', '## 現況').replace('## 驗證', '## 跑過的').replace('## 待你決定', '## 請你挑')
+// 沒有標題的長回覆
+const PLAIN = long('照 A 改好。', '細節如下。')
+
 type Clock = ReturnType<typeof mock.clock>
 
 // 主對話一輪結束、挑編號模型照 pick 回答，等摘錄寫回
@@ -175,8 +180,8 @@ test('預設英文標籤：短回覆寫 no excerpt，編號對不上寫 excerpt 
   await say($, clock, w, 'Done.', '{}', 12_000)
   const ui = await $.ui.mount({ plugin: 'sitrep', surface: 'terminal', component: 'TurnDuration', props: { word: 'Baked', durationMs: 12_000 } })
   expect(await texts(ui)).toContain('– turn ended (no excerpt)')
-  await say($, clock, w, REPLY, JSON.stringify({ status: 'done', outcome: 999 }))
-  expect(await texts(await message($, REPLY))).toContain('excerpt failed: line numbers did not match the reply')
+  await say($, clock, w, PLAIN, JSON.stringify({ status: 'done', outcome: 999 }))
+  expect(await texts(await message($, PLAIN))).toContain('excerpt failed: line numbers did not match the reply')
 })
 
 test('短回覆不呼叫模型，回合結束那列寫無摘錄', ZH, async ($, on) => {
@@ -203,10 +208,11 @@ test('短回覆但有 2 個以上標題（分段的完工報告）一樣摘錄',
 test('編號超出範圍或結論指到標題：整份不收，框的位置寫摘錄失敗', ZH, async ($, on) => {
   const clock = mock.clock(on)
   const w = world(on)
-  await say($, clock, w, REPLY, JSON.stringify({ status: 'done', outcome: 999 }))
-  expect(await texts(await message($, REPLY))).toContain('摘錄失敗：回傳的編號對不上原文')
-  await say($, clock, w, REPLY, JSON.stringify({ status: 'done', outcome: 1 }))
-  expect(await texts(await message($, REPLY))).toContain('摘錄失敗：回傳的編號對不上原文')
+  // 沒有「結果」這類標題：結論全靠模型，指錯就整份不收
+  await say($, clock, w, RAW, JSON.stringify({ status: 'done', outcome: 999 }))
+  expect(await texts(await message($, RAW))).toContain('摘錄失敗：回傳的編號對不上原文')
+  await say($, clock, w, RAW, JSON.stringify({ status: 'done', outcome: 1 }))
+  expect(await texts(await message($, RAW))).toContain('摘錄失敗：回傳的編號對不上原文')
 })
 
 test('次要欄位指錯只丟那一項：你要做、段落、選項指錯時框照畫，其餘照常', ZH, async ($, on) => {
@@ -216,14 +222,45 @@ test('次要欄位指錯只丟那一項：你要做、段落、選項指錯時�
   bad.todo = [999]
   bad.sections = [{ heading: 2, summary: 3 }]
   bad.decisions[1] = { ...bad.decisions[1], options: [10, 999] }
-  await say($, clock, w, REPLY, JSON.stringify(bad))
+  await say($, clock, w, RAW, JSON.stringify(bad))
+  const ui = await message($, RAW)
+  // 標題認不出時沒有段落收進框，正文照原樣在；只看框裡的字（正文是一整塊多行的 Text）
+  const box = (await ui.findAll({ type: 'Text' })).map(t => t.text).filter(t => !t.includes('\n')).join(' ')
+  expect(box).not.toContain('摘錄失敗')
+  expect(box).toContain('照 A 改好，測試全過。')
+  expect(box).toContain('開新 mod')
+  expect(box).toContain('band 再精簡？')
+  expect(box).not.toContain('拿掉')
+  expect(box).not.toContain('明天實機看 5 處')
+})
+
+test('認得的標題照標題改寫模型挑錯的編號：結果段第一行當結論、待你決定段的 A／B 連號當選項、驗證段第一行當摘要', ZH, async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+  // 模型把結論挑成你要做那行、漏了題目與段落
+  await say($, clock, w, REPLY, picks(REPLY, { outcome: '- 明天實機看 5 處' }))
   const text = await texts(await message($, REPLY))
   expect(text).not.toContain('摘錄失敗')
   expect(text).toContain('照 A 改好，測試全過。')
-  expect(text).toContain('開新 mod')
-  expect(text).toContain('band 再精簡？')
-  expect(text).not.toContain('拿掉')
-  expect(text).not.toContain('明天實機看 5 處')
+  expect(text).toContain('? 等你決定')
+  expect(text).toContain('1. mod 放哪？')
+  expect(text).toContain('併進 your-turn')
+  expect(text).toContain('拿掉')
+  expect(text).toContain('51 pass · tsc ✓')
+  expect(w.bodies.at(-1) ?? '').not.toContain('51 pass')
+})
+
+test('標題規則的推薦：選項後面寫「建議」的那行標推薦；「e.g.」這類小寫開頭不當選項', ZH, async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+  const reply = long('## 結果', '研究完成。', '## 待你決定', '先修哪個？', '- A. 照標題解析', '- B. 標題上色', '我建議 A，判斷準了畫面才有意義。', '- e.g. 這行不是選項')
+  await say($, clock, w, reply, picks(reply, { outcome: '研究完成。' }))
+  const ui = await message($, reply)
+  const text = await texts(ui)
+  expect(text).toContain('先修哪個？')
+  expect(text).toMatch(/照標題解析\s+建議/)
+  expect(text).not.toMatch(/標題上色\s+建議/)
+  expect(text).not.toContain('這行不是選項')
 })
 
 test('推薦指到選項後面那句「I\'d pick A」：取那句第一個選項字母；認不出字母就不標推薦，框照畫', async ($, on) => {

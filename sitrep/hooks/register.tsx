@@ -948,6 +948,7 @@ function buildSummary(lines: string[], raw: string): Summary | null {
   } catch {
     return null
   }
+  applyHeadings(lines, d)
   const at = (n: unknown): string | null => (typeof n === 'number' && Number.isInteger(n) && n >= 1 && n <= lines.length ? lines[n - 1] ?? null : null)
   const isHeading = (n: unknown) => HEADING_RE.test(at(n) ?? '')
   const list = (x: unknown): unknown[] => (Array.isArray(x) ? x : [])
@@ -1006,6 +1007,54 @@ function buildSummary(lines: string[], raw: string): Summary | null {
     facets.push({ label: clip(norm(heading), 16), summary: clip(cleanLine(at(s) ?? ''), 60), heading })
   }
   return { ...(status ? { status } : {}), outcome: clip(cleanLine(outcome), 80), items, facets }
+}
+
+const OUTCOME_HEADING_RE = /^(?:結果|結論|答案|results?|outcome|summary|answer|tl;?dr)$/i
+const DETAIL_HEADING_RE = /變更|驗證|風險|證據|change|verif|check|test|risk|evidence/i
+const DECISION_HEADING_RE = /決定|decision|choose|choice/i
+// 規則認選項只認大寫字母（「e.g. …」不算），而且一段裡要從 A 起連號
+const OPTION_KEY_RE = /^(?:選項\s*|option\s+)?([A-Z])\s*[.)）:：、]/
+
+// 回覆有認得的標題時，照標題改寫模型挑的編號（模型偶爾挑錯結論行、漏掉選項）：
+// 結論＝「結果」這類標題下第一行；題目＝「待你決定」段裡 A、B… 連號的選項行與它們前一行；
+// 細節段（變更、驗證、風險…）的摘要＝段裡第一行。認不出的欄位與狀態、你要做、之後我照模型的
+function applyHeadings(lines: string[], d: Record<string, unknown>) {
+  const heads = lines.flatMap((l, i) => {
+    const m = HEADING_RE.exec(l)
+    return m ? [{ i, level: m[1]?.length ?? 1, text: norm(m[2] ?? '') }] : []
+  })
+  const body = (h: { i: number; level: number }) => {
+    const end = heads.find(x => x.i > h.i && x.level <= h.level)?.i ?? lines.length
+    return Array.from({ length: end - h.i - 1 }, (_, k) => h.i + 1 + k).filter(i => !HEADING_RE.test(lines[i] ?? ''))
+  }
+  const result = heads.find(h => OUTCOME_HEADING_RE.test(h.text))
+  const first = result ? body(result)[0] : undefined
+  if (first !== undefined) d.outcome = first + 1
+  const detail = heads.filter(h => h !== result && DETAIL_HEADING_RE.test(h.text) && !DECISION_HEADING_RE.test(h.text)).flatMap(h => {
+    const top = body(h)[0]
+    return top === undefined ? [] : [{ heading: h.i + 1, summary: top + 1 }]
+  })
+  const picked = Array.isArray(d.sections) ? (d.sections as Record<string, unknown>[]) : []
+  d.sections = [...picked.filter(s => !detail.some(x => x.heading === s?.heading)), ...detail]
+  const ask = heads.find(h => DECISION_HEADING_RE.test(h.text))
+  if (!ask) return
+  const rows = body(ask)
+  const keys = rows.map(r => OPTION_KEY_RE.exec(cleanLine(lines[r] ?? ''))?.[1])
+  // 每題從 A 那行起（前一行是題目），連號到斷為止
+  const starts = keys.flatMap((key, k) => (key === 'A' && k > 0 ? [k] : []))
+  const old = Array.isArray(d.decisions) ? (d.decisions as Record<string, unknown>[]) : []
+  const decisions = starts.flatMap((s, n) => {
+    let end = s
+    while (end < rows.length && keys[end] === String.fromCharCode(65 + end - s)) end++
+    if (end - s < 2) return []
+    const question = (rows[s - 1] ?? 0) + 1
+    // 推薦：選項後面、下一題的題目之前提到「建議／recommend」的那行；沒有就沿用模型對同一題標的
+    const tail = rows.slice(end, (starts[n + 1] ?? rows.length + 1) - 1)
+    const said = tail.find(r => /建議|推薦|recommend|I'd pick|I would pick/i.test(lines[r] ?? ''))
+    const recommended = said !== undefined ? said + 1 : old.find(o => o?.question === question)?.recommended
+    return [{ question, options: rows.slice(s, end).map(r => r + 1), ...(recommended !== undefined ? { recommended } : {}) }]
+  })
+  if (decisions.length > 0) d.decisions = decisions
 }
 
 // 要使用者選的題目（有選項的 decision）；題號就是在這個陣列裡的位置

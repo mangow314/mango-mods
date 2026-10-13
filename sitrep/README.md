@@ -35,6 +35,13 @@ language of your conversation.
   checks every number and builds the box from those lines. Any number out of
   range or pointing at the wrong kind of line rejects the whole answer. The
   system prompt is left alone.
+  - Headings the mod recognizes override the model's numbers: the first line
+    under a `Result`/`Summary`/`## 結果` heading is the outcome, consecutive
+    `A.`/`B.` (or `選項 A：`) lines in a `Decisions`/`## 待你決定` section are
+    a question's options (the line before them is the question; a later line
+    saying "recommend"/`建議` marks the pick), and the first line of a
+    Changes/Checks/Risks section is its summary. Status, `You do` and `Then I`
+    still come from the model.
   - While it waits, the reply shows `… excerpting`; a failure shows
     `– excerpt failed: <reason>` where the box would be. If a new turn starts
     before the answer arrives, the excerpt is dropped.
