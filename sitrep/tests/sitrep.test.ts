@@ -36,6 +36,9 @@ function world(on: On): World {
 // 既有測試照中文標籤寫（language 預設 en）
 const ZH = { options: { language: 'zh-TW' } }
 
+// 顯示欄寬（中文算 2）
+const cols = (s: string) => [...s].reduce((n, ch) => n + ((ch.codePointAt(0) ?? 0) >= 0x2e80 ? 2 : 1), 0)
+
 // 夠長才摘錄：每則測試回覆最後補一行 800 字
 const PAD = '補'.repeat(800)
 const long = (...lines: string[]) => [...lines, '', PAD].join('\n')
@@ -437,6 +440,105 @@ test('收合列的標籤補到同寬，摘要排成一直欄（中文字算 2 �
   await say($, clock, w, reply, picks(reply, { outcome: '好。', sections: [{ heading: '## 變更', summary: '改 README' }, { heading: '## 殘留風險', summary: '巢狀清單' }] }))
   const labels = (await (await message($, reply)).findAll({ type: 'Text' })).map(t => t.text).filter(t => /變更|殘留風險/.test(t))
   expect(labels).toEqual([' 變更      ', ' 殘留風險  '])
+})
+
+test('▸ 段一段一列：標籤與摘要依框寬截斷（70 欄與 92 欄），92 欄的摘要比 0.8.0 的 60 欄上限長', ZH, async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+  const head = '這是一個非常長的段落標題用來測試標籤截斷行為'
+  const sum = '摘要'.repeat(60)
+  const reply = long('好。', `## ${head}`, sum)
+  await say($, clock, w, reply, picks(reply, { outcome: '好。', sections: [{ heading: `## ${head}`, summary: sum }] }))
+  const rowAt = async (columns: number, text = reply, first = '這是一個') => {
+    const ui = await $.ui.mount({ plugin: 'sitrep', surface: 'terminal', component: 'AssistantMessage', props: { text, isFirstOfReply: true }, viewport: { columns, rows: 40 } })
+    const t = (await ui.findAll({ type: 'Text' })).map(x => x.text)
+    const i = t.findIndex(x => x.includes(first))
+    return { label: t[i] ?? '', summary: t[i + 1] ?? '' }
+  }
+  for (const columns of [70, 92]) {
+    const { label, summary } = await rowAt(columns)
+    const avail = Math.min(columns - 4, 88) - 4
+    expect(label.trimEnd().endsWith('…')).toBe(true)
+    expect(cols(label) + cols(summary) + 1).toBeLessThanOrEqual(avail)
+    expect(summary.endsWith('…')).toBe(true)
+  }
+  // 標籤欄占三成（同組共用），長標籤旁的摘要本來就短；摘要用滿框寬要用短標籤的 fixture 看
+  const short = long('好。', '## 變更', sum)
+  await say($, clock, w, short, picks(short, { outcome: '好。', sections: [{ heading: '## 變更', summary: sum }] }))
+  expect(cols((await rowAt(92, short, '變更')).summary)).toBeGreaterThan(60)
+})
+
+test('結論最多兩行框內寬（92 欄 viewport，框內 84 欄）：1.5 倍完整顯示，3 倍截斷補 …', ZH, async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+  const inner = 84
+  const outcomeText = async (outcome: string) => {
+    const reply = long('## 結果', outcome)
+    await say($, clock, w, reply, picks(reply, { outcome }))
+    const t = (await (await message($, reply)).findAll({ type: 'Text' })).map(x => x.text)
+    return t.find(x => x.startsWith('結論') && !x.includes('\n')) ?? ''
+  }
+  const mid = '結論'.repeat(31) + '。'
+  expect(cols(mid)).toBe(126)
+  const shown = await outcomeText(mid)
+  expect(shown).toBe(mid)
+  expect(shown.endsWith('…')).toBe(false)
+  const big = '結論'.repeat(62) + '。'
+  expect(cols(big)).toBe(250)
+  const cut = await outcomeText(big)
+  expect(cut.endsWith('…')).toBe(true)
+  expect(cols(cut)).toBeLessThanOrEqual(2 * inner)
+})
+
+// 長版分段的隔線：標籤獨立成一個 Text（粗體彩色），頭尾線段是旁邊的 Text；不綁線段字元。回傳整串 Text 供比對順序
+const SEP_LABELS = ['風險', '需要你', '細節']
+async function seps(ui: Awaited<ReturnType<typeof message>>) {
+  const all = (await ui.findAll({ type: 'Text' })).map(t => t.text).filter(t => !t.includes('\n'))
+  return { all, lines: all.filter(t => SEP_LABELS.includes(t)) }
+}
+
+test('長版框分段：結論在最上面，依序風險、需要你、細節三條隔線', ZH, async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+  const reply = long('## 結果', '照 A 改好。', '## 殘留風險', '- 舊紀錄不相容', '## 驗證', '- 51 pass', '## 待你決定', '1. mod 放哪？', '- 選項 A：開新 mod', '- 選項 B：併進 your-turn', '2. band 再精簡？', '- 選項 A：拿掉', '- 選項 B：保留', '- 明天實機看 5 處')
+  await say($, clock, w, reply, picks(reply, {
+    outcome: '照 A 改好。',
+    decisions: [
+      { question: '1. mod 放哪？', options: ['- 選項 A：開新 mod', '- 選項 B：併進 your-turn'] },
+      { question: '2. band 再精簡？', options: ['- 選項 A：拿掉', '- 選項 B：保留'] },
+    ],
+    todo: ['- 明天實機看 5 處'],
+    sections: [{ heading: '## 殘留風險', summary: '- 舊紀錄不相容' }, { heading: '## 驗證', summary: '- 51 pass' }],
+  }))
+  const { all, lines } = await seps(await message($, reply))
+  expect(lines).toEqual(['風險', '需要你', '細節'])
+  const at = (s: string) => all.findIndex(t => t.includes(s))
+  const sepAt = (n: string) => all.findIndex(t => t === n)
+  expect(at('照 A 改好。')).toBeLessThan(sepAt('風險'))
+  expect(sepAt('風險')).toBeLessThan(at('舊紀錄不相容'))
+  expect(at('舊紀錄不相容')).toBeLessThan(sepAt('需要你'))
+  expect(sepAt('需要你')).toBeLessThan(at('1. mod 放哪？'))
+  expect(at('明天實機看 5 處')).toBeLessThan(sepAt('細節'))
+  expect(sepAt('細節')).toBeLessThan(at('51 pass'))
+})
+
+test('短版框不分段：沒有任何隔線', ZH, async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+  const reply = long('好。', '## 變更', '改 README', '## 殘留風險', '巢狀清單')
+  await say($, clock, w, reply, picks(reply, { outcome: '好。', sections: [{ heading: '## 變更', summary: '改 README' }, { heading: '## 殘留風險', summary: '巢狀清單' }] }))
+  expect((await seps(await message($, reply))).lines).toEqual([])
+})
+
+test('長版但只有細節（沒有風險、題目、你要做）：只有「細節」一條隔線', ZH, async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+  const heads = ['變更', '驗證', '證據', '測試', '備註', '範圍', '紀錄', '附錄', '來源', '版本', '相依', '清單', '參考']
+  const reply = long('## 結果', '做完了。', ...heads.flatMap(h => [`## ${h}`, `- ${h}摘要`]))
+  await say($, clock, w, reply, picks(reply, { outcome: '做完了。', sections: heads.map(h => ({ heading: `## ${h}`, summary: `- ${h}摘要` })) }))
+  const { all, lines } = await seps(await message($, reply))
+  expect(lines).toEqual(['細節'])
+  expect(all.findIndex(t => t.includes('做完了。'))).toBeLessThan(all.findIndex(t => t === '細節'))
 })
 
 test('沒有摘錄的回覆照原樣交給引擎', ZH, async ($, on) => {

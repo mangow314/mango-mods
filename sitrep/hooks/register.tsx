@@ -46,6 +46,9 @@ const ZH = {
   mismatch: '回傳的編號對不上原文',
   superseded: '本輪結束（新一輪已開始，摘錄作廢）',
   needsYou: (n: number) => `需要你 · ${n}`,
+  secRisk: '風險',
+  secNeed: '需要你',
+  secDetail: '細節',
   running: '進行中',
   subagent: (d: string) => `子代理 ${d}`,
   background: (b: string) => `背景 ${b}`,
@@ -94,6 +97,9 @@ const EN: Texts = {
   mismatch: 'line numbers did not match the reply',
   superseded: 'turn ended (a new turn started; excerpt dropped)',
   needsYou: n => `Needs you · ${n}`,
+  secRisk: 'Risks',
+  secNeed: 'Needs you',
+  secDetail: 'Details',
   running: 'Running',
   subagent: d => `subagent ${d}`,
   background: b => `background ${b}`,
@@ -504,15 +510,36 @@ export const register: Register = (on, options) => {
     // 框寬固定（不跟內容跳，實機 36～81 欄）：終端寬減 4，最寬 88
     const width = Math.min((e.viewport?.columns ?? 92) - 4, BOX_MAX)
     // 選項標籤可用的欄數：框線 2、內距 2、縮排 2、選項鍵 2、空一格
-    const items = await itemRows($, e, found.id, found.summary.items, width - 9, notes)
-    const rows = [
-      <Text key="outcome" color={BRIGHT} bold>{found.summary.outcome}</Text>,
-      ...items.todo,
-      ...facetRows($, e, found.id, facets, sections, open),
-      ...(await agentRows($, e, found.id)),
-      ...items.questions,
-      ...items.later,
-    ]
+    // 長版（現況列數估算 > 12 且除了結論還有風險／需要你／細節任一區）才分段，順序：結論→風險→需要你→細節；短版維持一整串
+    const risky = (f: Facet) => RISK_RE.test(f.heading ?? f.label)
+    const agents = await agentRows($, e, found.id)
+    const layout = sectionLayout(found.summary, notes, agents.length, width)
+    const items = await itemRows($, e, found.id, found.summary.items, width - 9, notes, layout !== null)
+    const sep = (key: string, label: string) => {
+      const line = boxSep(label, width)
+      return (
+        <Box key={`sep-${key}`} flexDirection="row" marginX={-2}>
+          <Text color={frame.title} dimColor>{line.head}</Text>
+          <Text color={label === T.secRisk ? RED : label === T.secDetail ? BLUE : YELLOW} bold>{label}</Text>
+          <Text color={frame.title} dimColor>{line.tail}</Text>
+        </Box>
+      )
+    }
+    const rows = layout === null
+      ? [
+        <Text key="outcome" color={BRIGHT} bold>{clip(found.summary.outcome, 2 * (width - 4))}</Text>,
+        ...items.todo,
+        ...facetRows($, e, found.id, facets, sections, open, width - 4),
+        ...agents,
+        ...items.questions,
+        ...items.later,
+      ]
+      : [
+        <Text key="outcome" color={BRIGHT} bold>{clip(found.summary.outcome, 2 * (width - 4))}</Text>,
+        ...(layout.risk ? [sep('risk', T.secRisk), ...facetRows($, e, found.id, facets, sections, open, width - 4, risky)] : []),
+        ...(layout.need ? [sep('need', T.secNeed), ...items.questions, ...items.todo] : []),
+        ...(layout.detail ? [sep('detail', T.secDetail), ...facetRows($, e, found.id, facets, sections, open, width - 4, f => !risky(f)), ...agents, ...items.later] : []),
+      ]
     // 標題疊在上框線（2026-10-09 使用者要再試）：框自己的子元素會被框線蓋掉（your-turn 2026-10-05 實測），
     // 所以標題是框的「後一個兄弟」、absolute 疊上去。舊紀錄：框頂捲出畫面時標題曾疊到內容上（實機 opus/s2:1），這次重看
     return (
@@ -1040,9 +1067,9 @@ function buildSummary(lines: string[], raw: string): Summary | null {
     const s = sec.summary
     if (typeof s !== 'number' || s <= h || s > end || isHeading(s)) continue
     const heading = m[2] ?? ''
-    facets.push({ label: clip(norm(heading), 16), summary: clip(cleanLine(at(s) ?? ''), 60), heading })
+    facets.push({ label: clip(norm(heading), 40), summary: clip(cleanLine(at(s) ?? ''), 200), heading })
   }
-  return { ...(status ? { status } : {}), outcome: clip(cleanLine(outcome), 80), items, facets }
+  return { ...(status ? { status } : {}), outcome: clip(cleanLine(outcome), 300), items, facets }
 }
 
 const OUTCOME_HEADING_RE = /^(?:結果|結論|答案|results?|outcome|summary|answer|tl;?dr)$/i
@@ -1174,24 +1201,51 @@ function norm(s: string): string {
 
 type RenderEvent = Parameters<EngineInterface['ui']['resolve']>[0]
 
-function facetRows($: EngineInterface, e: RenderEvent, id: string, facets: Facet[], sections: (string | null)[], open: Record<string, boolean>) {
+// 長版分段用：風險段的標題認「風險／risk」。抽取沒有另外標風險，只能靠標題字
+const RISK_RE = /風險|risk/i
+
+// 隔線 `├── 標籤 ────┤`，正好 width 欄（框外寬）：畫在框內一列，用 marginX=-2 吃回 paddingX 與框線，兩端 ├ ┤ 接框線的 │。標籤另外上色，所以拆成頭尾
+function boxSep(label: string, width: number): { head: string; tail: string } {
+  const head = '├── '
+  return { head, tail: ` ${'─'.repeat(Math.max(2, width - cols(head) - cols(label) - 2))}┤` }
+}
+
+// 長版才分段：現況列數估算 H0（框線 2、結論 1～2、你要做、段落、子代理、每題 1＋選項數＋說明行、之後我，不含折行）> 12，且除了結論至少一區非空。
+// 回傳哪幾區要畫；短版回 null
+function sectionLayout(s: Summary, notes: string[][], agents: number, width: number): { risk: boolean; need: boolean; detail: boolean } | null {
+  const decisions = decisionsOf(s.items)
+  const asks = s.items.filter(i => i.kind === 'decision' && !decisions.includes(i)).length
+  const todo = s.items.filter(i => i.kind === 'user-next').length
+  const later = s.items.filter(i => i.kind === 'agent-next').length
+  const risks = s.facets.filter(f => RISK_RE.test(f.heading ?? f.label)).length
+  const questions = decisions.reduce((n, d) => n + 1 + (d.options?.length ?? 0), 0) + asks + notes.reduce((n, g) => n + g.length, 0)
+  const h0 = 2 + (cols(s.outcome) > width - 4 ? 2 : 1) + todo + s.facets.length + agents + questions + (questions > 0 ? 1 : 0) + later
+  const layout = { risk: risks > 0, need: questions + todo > 0, detail: s.facets.length - risks + agents + later > 0 }
+  // 類別（spec R2）＝結論、風險、需要你、細節；結論一定有，所以任一區非空就滿 2 類
+  return h0 > 12 && (layout.risk || layout.need || layout.detail) ? layout : null
+}
+
+function facetRows($: EngineInterface, e: RenderEvent, id: string, facets: Facet[], sections: (string | null)[], open: Record<string, boolean>, avail: number, only: (f: Facet) => boolean = () => true) {
   const { Box, Button, Text } = $.ui.resolve(e)
   // 標籤補到同寬，摘要排成一直欄（「變更」與「殘留風險」長度不同，摘要起點原本對不齊）
-  const width = Math.max(0, ...facets.map(f => cols(f.label)))
-  return facets.map((f, i) => {
+  // 每段固定一列：標籤欄最寬取可用欄數的三成（至少 6），摘要用剩下的欄數，都用 clip 截
+  const labelW = Math.min(Math.max(0, ...facets.filter(only).map(f => cols(f.label))), Math.max(6, Math.floor(avail * 0.3)))
+  const summaryW = avail - 2 - 1 - labelW - 2
+  return facets.flatMap((f, i) => {
+    if (!only(f)) return []
     const key = `${id}:${i}`
     const isOpen = open[key] === true
     const section = sections[i]
-    return (
+    return [(
       <Box key={`facet-${i}`} flexDirection="row">
         {section
           ? <Button key={`toggle-${i}`} plain label={isOpen ? '▾' : '▸'} onPress={() => update($, openAtom, o => ({ ...o, [key]: !isOpen }))} />
           : <Text color={DIM}>{'·'}</Text>}
         {/* 標籤藍色粗體（使用者 2026-10-13：灰色標籤在長摘要裡找不到段落），內文用亮字，「之後我」維持最暗 */}
-        <Text color={BLUE} bold>{` ${f.label}${' '.repeat(width - cols(f.label))}  `}</Text>
-        <Text color={BRIGHT}>{isOpen ? `${f.summary}${T.backInReply}` : f.summary}</Text>
+        <Text color={BLUE} bold>{` ${clip(f.label, labelW)}${' '.repeat(Math.max(0, labelW - cols(clip(f.label, labelW))))}  `}</Text>
+        <Text color={BRIGHT}>{clip(isOpen ? `${f.summary}${T.backInReply}` : f.summary, summaryW)}</Text>
       </Box>
-    )
+    )]
   })
 }
 
@@ -1206,14 +1260,16 @@ const TODO_PREFIX_RE = /^(?:你要做|你需要|待你做|you do|you need to|to 
 const THEN_PREFIX_RE = /^(?:之後我|接下來我|下一步|then i|next)\s*[:：]\s*/i
 
 // notes：決定段的說明（decisionNotes 的分組），各畫在所屬題目的選項底下
-async function itemRows($: EngineInterface, e: RenderEvent, id: string, items: Item[], room: number, notes: string[][] = []) {
+async function itemRows($: EngineInterface, e: RenderEvent, id: string, items: Item[], room: number, notes: string[][] = [], sectioned = false) {
   const answers = (await read($, answersAtom))[id] ?? {}
   const { Box, Button, Text } = $.ui.resolve(e)
   const decisions = decisionsOf(items)
+  // 分段時隔線已經把區隔開，第一題上方不再空一行
+  const gap = sectioned ? 0 : 1
   const asks = items.filter(i => i.kind === 'decision' && !decisions.includes(i))
   const others = items.filter(i => i.kind !== 'decision')
   const questions = decisions.map((d, n) => (
-    <Box key={`q-${n}`} flexDirection="column" marginTop={n === 0 ? 1 : 0}>
+    <Box key={`q-${n}`} flexDirection="column" marginTop={n === 0 ? gap : 0}>
       <Text>
         <Text color={YELLOW} bold>{'? '}</Text>
         <Text color={BRIGHT} bold>{decisions.length > 1 ? `${n + 1}. ${d.text}` : d.text}</Text>
@@ -1247,11 +1303,11 @@ async function itemRows($: EngineInterface, e: RenderEvent, id: string, items: I
   ))
   // 第一題之前的說明排在題目前面
   const intro = noteRows($, e, 'note-intro', notes[0] ?? [], room + 2)
-  if (intro.length > 0 && questions.length > 0) questions.unshift(<Box key="note-intro" flexDirection="column" marginTop={1}>{intro}</Box>)
+  if (intro.length > 0 && questions.length > 0) questions.unshift(<Box key="note-intro" flexDirection="column" marginTop={gap}>{intro}</Box>)
   // 沒列選項的開放題：只畫題目，回答直接打字
   for (const [i, a] of asks.entries()) {
     questions.push(
-      <Box key={`ask-${i}`} marginTop={questions.length === 0 ? 1 : 0}>
+      <Box key={`ask-${i}`} marginTop={questions.length === 0 ? gap : 0}>
         <Text>
           <Text color={YELLOW} bold>{'? '}</Text>
           <Text color={BRIGHT} bold>{a.text}</Text>

@@ -67,6 +67,12 @@ language of your conversation.
     sent. A question asked without listed choices shows alone (answer by
     typing). A table row the model picks is shown with its cells joined by
     ` · `. `Then I` (what Claude does next) comes last, dim.
+  - The outcome takes at most two lines and ends in `…` past that. Each `▸`
+    section is one line, label and summary cut to the box width. A box
+    estimated taller than 12 rows is split into sections after the outcome:
+    `Risks` in red, `Needs you` in yellow (questions, `You do`), `Details` in
+    blue (other sections, subagents, `Then I`), each under a divider joined
+    to the border; an empty section is left out.
   - Once a newer reply has its own box, an older box folds to one line
     (`▸ ✓ outcome  8s`); `▸` draws it again.
   - Colors are Claude Code theme names (`warning`, `error`, `success`,
