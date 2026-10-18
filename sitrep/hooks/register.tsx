@@ -1001,7 +1001,18 @@ function optionOf(line: string, n: number): Option {
   return m ? { key: (m[1] ?? '').toUpperCase(), label: m[2] ?? '' } : { key: String.fromCharCode(65 + n), label: text }
 }
 
-// 模型回的編號 → 結論框。結論、題目指錯（超出範圍、結論指到標題）才整份不收，回 null；
+// 結論行：指到標題時，標題不是欄位名（結果、變更…）就用標題文字，是欄位名就用它之後第一個非標題行；都拿不到、超出範圍回 null
+function outcomeOf(lines: string[], n: unknown): string | null {
+  if (typeof n !== 'number' || !Number.isInteger(n) || n < 1 || n > lines.length) return null
+  const line = lines[n - 1] ?? ''
+  const m = HEADING_RE.exec(line)
+  if (!m) return line
+  const text = norm(m[2] ?? '')
+  if (!OUTCOME_HEADING_RE.test(text) && !DETAIL_HEADING_RE.test(text) && !DECISION_HEADING_RE.test(text)) return text === '' ? null : text
+  return lines.slice(n).find(l => !HEADING_RE.test(l)) ?? null
+}
+
+// 模型回的編號 → 結論框。結論、題目指錯（超出範圍、結論指到標題又拿不到內容）才整份不收，回 null；
 // 選項、推薦、你要做、之後我、段落指錯只丟那一項，框照畫（使用者 2026-10-12 選逐欄降級）
 function buildSummary(lines: string[], raw: string): Summary | null {
   let d: Record<string, unknown>
@@ -1015,8 +1026,8 @@ function buildSummary(lines: string[], raw: string): Summary | null {
   const at = (n: unknown): string | null => (typeof n === 'number' && Number.isInteger(n) && n >= 1 && n <= lines.length ? lines[n - 1] ?? null : null)
   const isHeading = (n: unknown) => HEADING_RE.test(at(n) ?? '')
   const list = (x: unknown): unknown[] => (Array.isArray(x) ? x : [])
-  const outcome = at(d.outcome)
-  if (outcome === null || isHeading(d.outcome)) return null
+  const outcome = outcomeOf(lines, d.outcome)
+  if (outcome === null) return null
   const status = d.status === 'blocked' || d.status === 'partial' || d.status === 'done' ? d.status : undefined
   const items: Item[] = []
   for (const x of list(d.decisions)) {

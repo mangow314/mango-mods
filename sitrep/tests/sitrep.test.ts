@@ -189,6 +189,55 @@ test('預設英文標籤：短回覆寫 no excerpt，編號對不上寫 excerpt 
   expect(await texts(await message($, PLAIN))).toContain('excerpt failed: line numbers did not match the reply')
 })
 
+// Concise 風格的完工報告：沒有「## 結果」，第 2 行是標題本身（實機 session 57783473 的回覆，內容虛構）
+const CONCISE = [
+  '**⚠️ 以下內容依你的要求虛構，沒有讀任何檔案，也沒有執行任何指令；行號、指令輸出、版號都是編出來的。**',
+  '',
+  '## 完工報告：sitrep 結論框改成分段版',
+  '',
+  '### 變更',
+  '1. 結論框原本是一整段文字，改成「結論／依據／下一步」三段分開渲染（`sitrep/hooks/register.tsx:212`）。',
+  '2. 新增 `splitVerdict()`，依空行和段落標題切段（`sitrep/hooks/register.tsx:148`）。',
+  '',
+  '### 殘留風險',
+  '- 「下一步」段如果出現在 code block 裡，`splitVerdict()` 會切錯。',
+  '',
+  '### 驗證',
+  '| 指令 | 結果 |',
+  '|---|---|',
+  '| `bun test sitrep/tests/sitrep.test.ts` | 47 pass／0 fail |',
+  '',
+  PAD,
+].join('\n')
+
+// 只取框內畫出的字：回覆正文是含換行的單一 Text，框內的字都是單行
+async function boxOf($: Engine, reply: string) {
+  const ui = await message($, reply)
+  const cells = (await ui.findAll({ type: 'Text' })).map(t => t.text).filter(t => !t.includes('\n'))
+  const bordered = (await ui.findAll({ type: 'Box' })).filter(b => b.props.borderStyle !== undefined)
+  return { cells, bordered }
+}
+
+test('結論指到標題（不是欄位名）：用標題文字當結論，框照畫', ZH, async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+  await say($, clock, w, CONCISE, JSON.stringify({ status: 'done', outcome: 2 }))
+  const { cells, bordered } = await boxOf($, CONCISE)
+  expect(bordered).toHaveLength(1)
+  expect(cells.some(t => t.includes('摘錄失敗'))).toBe(false)
+  expect(cells).toContain('完工報告：sitrep 結論框改成分段版')
+})
+
+test('結論指到欄位名標題（### 變更）：用它底下第一行當結論', ZH, async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+  await say($, clock, w, CONCISE, JSON.stringify({ status: 'done', outcome: 3 }))
+  const { cells, bordered } = await boxOf($, CONCISE)
+  expect(bordered).toHaveLength(1)
+  expect(cells.some(t => t.includes('摘錄失敗'))).toBe(false)
+  expect(cells.some(t => t.startsWith('結論框原本是一整段文字'))).toBe(true)
+})
+
 test('短回覆不呼叫模型，回合結束那列寫無摘錄', ZH, async ($, on) => {
   const clock = mock.clock(on)
   const w = world(on)
@@ -210,14 +259,17 @@ test('短回覆但有 2 個以上標題（分段的完工報告）一樣摘錄',
   expect(await texts(await message($, reply))).toContain('✓ 完成')
 })
 
-test('編號超出範圍或結論指到標題：整份不收，框的位置寫摘錄失敗', ZH, async ($, on) => {
+test('編號超出範圍：整份不收，框的位置寫摘錄失敗', ZH, async ($, on) => {
   const clock = mock.clock(on)
   const w = world(on)
-  // 沒有「結果」這類標題：結論全靠模型，指錯就整份不收
   await say($, clock, w, RAW, JSON.stringify({ status: 'done', outcome: 999 }))
   expect(await texts(await message($, RAW))).toContain('摘錄失敗：回傳的編號對不上原文')
+  // 結論指到標題不再整份不收：框照畫，用標題文字當結論
   await say($, clock, w, RAW, JSON.stringify({ status: 'done', outcome: 1 }))
-  expect(await texts(await message($, RAW))).toContain('摘錄失敗：回傳的編號對不上原文')
+  const { cells, bordered } = await boxOf($, RAW)
+  expect(bordered).toHaveLength(1)
+  expect(cells.some(t => t.includes('現況'))).toBe(true)
+  expect(cells.some(t => t.includes('摘錄失敗'))).toBe(false)
 })
 
 test('次要欄位指錯只丟那一項：你要做、段落、選項指錯時框照畫，其餘照常', ZH, async ($, on) => {
