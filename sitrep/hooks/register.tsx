@@ -1009,7 +1009,17 @@ function outcomeOf(lines: string[], n: unknown): string | null {
   if (!m) return line
   const text = norm(m[2] ?? '')
   if (!OUTCOME_HEADING_RE.test(text) && !DETAIL_HEADING_RE.test(text) && !DECISION_HEADING_RE.test(text)) return text === '' ? null : text
-  return lines.slice(n).find(l => !HEADING_RE.test(l)) ?? null
+  for (let i = n; i < lines.length; i++) if (!HEADING_RE.test(lines[i] ?? '') && !isShell(lines, i)) return lines[i] ?? null
+  return null
+}
+
+// 殼行：只引出下文、本身沒內容的行——冒號結尾的引言（「做法：」「理由有三個：」）或表頭（表格第一列、下一行還是表格列）。
+// 不拿來當結論或段落摘要（實測 40 則裡約 15 處段落摘要是這種）
+const TABLE_ROW_RE = /^\|.*\|$/
+function isShell(lines: string[], i: number): boolean {
+  const l = lines[i] ?? ''
+  if (/[:：]$/.test(cleanLine(l))) return true
+  return TABLE_ROW_RE.test(l) && !TABLE_ROW_RE.test(lines[i - 1] ?? '') && TABLE_ROW_RE.test(lines[i + 1] ?? '')
 }
 
 // 模型回的編號 → 結論框。結論、題目指錯（超出範圍、結論指到標題又拿不到內容）才整份不收，回 null；
@@ -1048,17 +1058,24 @@ function buildSummary(lines: string[], raw: string): Summary | null {
         recommended = [...cleanLine(at(q.recommended) ?? '').matchAll(/(?<![A-Za-z])([A-Z])(?![A-Za-z])/g)].map(m => m[1] ?? '').find(k => keys.has(k))
       }
     }
-    items.push({ kind: 'decision', text: cleanLine(question), options, ...(recommended !== undefined ? { recommended } : {}) })
+    // 題目指到標題（「## 待你決定」）：用標題文字，不留 #
+    const asked = HEADING_RE.exec(question)?.[2] ?? question
+    items.push({ kind: 'decision', text: cleanLine(asked), options, ...(recommended !== undefined ? { recommended } : {}) })
   }
+  // 結論只留第一句（結果段常把三句寫在同一行，框裡截成 …）；比對重複時整行與第一句都算結論
+  const whole = cleanLine(outcome)
+  const lead = leadSentence(whole)
+  const shown = new Set([whole, lead])
   for (const [field, kind] of [['todo', 'user-next'], ['next', 'agent-next']] as const) {
-    // 跟結論或前面的項目同一句就不再列（實機：之後我把結論那句又列一次）
+    // 跟結論或前面的項目同一句就不再列（實機：之後我把結論那句又列一次）；標題行不是動作
     for (const n of list(d[field])) {
       const line = at(n)
-      if (line === null) continue
+      if (line === null || isHeading(n)) continue
       const text = cleanLine(line)
-      if (text !== cleanLine(outcome) && !items.some(i => i.text === text)) items.push({ kind, text })
+      if (!shown.has(text) && !items.some(i => i.text === text)) items.push({ kind, text })
     }
   }
+  for (const i of items) shown.add(i.text)
   const facets: Facet[] = []
   for (const x of list(d.sections)) {
     const sec = x as Record<string, unknown>
@@ -1075,12 +1092,19 @@ function buildSummary(lines: string[], raw: string): Summary | null {
         break
       }
     }
-    const s = sec.summary
+    let s = sec.summary
     if (typeof s !== 'number' || s <= h || s > end || isHeading(s)) continue
+    // 挑到殼行：往下找段裡第一個不是標題、不是殼行的
+    while (s <= end && (isHeading(s) || isShell(lines, s - 1))) s++
+    if (s > end) continue
+    // 摘要跟結論、你要做、之後我、別段摘要同一句：這段不收合，留在正文（實測 40 則有 6 則同一句出現兩次）
+    const text = cleanLine(at(s) ?? '')
+    if (shown.has(text)) continue
+    shown.add(text)
     const heading = m[2] ?? ''
-    facets.push({ label: clip(norm(heading), 40), summary: clip(cleanLine(at(s) ?? ''), 200), heading })
+    facets.push({ label: clip(norm(heading), 40), summary: clip(text, 200), heading })
   }
-  return { ...(status ? { status } : {}), outcome: clip(cleanLine(outcome), 300), items, facets }
+  return { ...(status ? { status } : {}), outcome: clip(lead, 300), items, facets }
 }
 
 const OUTCOME_HEADING_RE = /^(?:結果|結論|答案|results?|outcome|summary|answer|tl;?dr)$/i
@@ -1102,13 +1126,16 @@ function applyHeadings(lines: string[], d: Record<string, unknown>) {
     return Array.from({ length: end - h.i - 1 }, (_, k) => h.i + 1 + k).filter(i => !HEADING_RE.test(lines[i] ?? ''))
   }
   const result = heads.find(h => OUTCOME_HEADING_RE.test(h.text))
-  const first = result ? body(result)[0] : undefined
+  const first = result ? body(result).find(i => !isShell(lines, i)) : undefined
   if (first !== undefined) d.outcome = first + 1
+  const picked = Array.isArray(d.sections) ? (d.sections as Record<string, unknown>[]) : []
+  // 細節段的摘要：模型挑的行在段裡、不是殼行就照用（實測有挑得比第一行好的），否則取段裡第一個不是殼行的
   const detail = heads.filter(h => h !== result && DETAIL_HEADING_RE.test(h.text) && !DECISION_HEADING_RE.test(h.text)).flatMap(h => {
-    const top = body(h)[0]
+    const rows = body(h).filter(i => !isShell(lines, i))
+    const mine = picked.find(s => s?.heading === h.i + 1)?.summary
+    const top = typeof mine === 'number' && rows.includes(mine - 1) ? mine - 1 : rows[0]
     return top === undefined ? [] : [{ heading: h.i + 1, summary: top + 1 }]
   })
-  const picked = Array.isArray(d.sections) ? (d.sections as Record<string, unknown>[]) : []
   d.sections = [...picked.filter(s => !detail.some(x => x.heading === s?.heading)), ...detail]
   const ask = heads.find(h => DECISION_HEADING_RE.test(h.text))
   if (!ask) return
@@ -1352,7 +1379,11 @@ function firstSentence(text: string): string {
   // 跳過標題行與 [Subagent hand-back] 這類方括號開頭的框架行，取第一行正文
   const line = text.split('\n').filter(l => !/^\s*#/.test(l) && !/^\s*\[[^\]]+\]/.test(l))
     .map(l => l.replace(/^[-*>]\s+|\*\*/g, '').trim()).find(l => l !== '' && !l.startsWith('```')) ?? ''
-  // 全形句號後面不必有空白；半形的要接空白或行尾（1.5、v0.9.0 不算句尾）
+  return leadSentence(line)
+}
+
+// 一行裡的第一句：全形句號後面不必有空白；半形的要接空白或行尾（1.5、v0.9.0 不算句尾；e.g. 會被當句尾，已知限制）
+function leadSentence(line: string): string {
   const m = /^(.+?(?:[。！？]|[.!?](?=\s|$)))/.exec(line)
   return (m?.[1] ?? line).trim()
 }

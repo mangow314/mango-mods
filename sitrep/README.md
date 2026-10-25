@@ -41,9 +41,17 @@ language of your conversation.
     under a `Result`/`Summary`/`## 結果` heading is the outcome, consecutive
     `A.`/`B.` (or `選項 A：`) lines in a `Decisions`/`## 待你決定` section are
     a question's options (the line before them is the question; a later line
-    saying "recommend"/`建議` marks the pick), and the first line of a
-    Changes/Checks/Risks section is its summary. Status, `You do` and `Then I`
-    still come from the model.
+    saying "recommend"/`建議` marks the pick), and a Changes/Checks/Risks
+    section's summary is the model's pick when it lies in that section,
+    otherwise the section's first line. Status, `You do` and `Then I` still
+    come from the model.
+  - The box keeps only the outcome line's first sentence (up to the first
+    `。！？`, or `.!?` followed by a space); the reply is unchanged. A lead-in
+    ending in a colon (`Steps:`) or a table header is never the outcome or a
+    section summary; the next line is used. A section whose summary repeats
+    the outcome, a `You do`/`Then I` line or another summary stays in the
+    body. `You do`/`Then I` pointing at a heading are dropped; a question
+    pointing at a heading shows the heading text without `#`.
   - While it waits, the reply shows `… excerpting`; a failure shows
     `– excerpt failed: <reason>` where the box would be. If a new turn starts
     before the answer arrives, the excerpt is dropped.

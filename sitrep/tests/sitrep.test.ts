@@ -238,6 +238,62 @@ test('結論指到欄位名標題（### 變更）：用它底下第一行當結�
   expect(cells.some(t => t.startsWith('結論框原本是一整段文字'))).toBe(true)
 })
 
+test('結論只留第一句；你要做指到結論整行也不重列', ZH, async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+  const line = '改好了，測試全過。另外順手修了 README 的錯字，版號進到 0.10.0。'
+  const reply = long('## 結果', line, '## 說明', '其他細節。')
+  await say($, clock, w, reply, picks(reply, { status: 'blocked', outcome: line, todo: [line] }))
+  const { cells } = await boxOf($, reply)
+  expect(cells).toContain('改好了，測試全過。')
+  expect(cells.some(t => t.includes('順手修了'))).toBe(false)
+  expect(cells.some(t => t.includes('你要做'))).toBe(false)
+})
+
+test('段落摘要跳過殼行：冒號引言、表頭不當摘要；模型挑的行在段裡就照用', ZH, async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+  const reply = long(
+    '## 結果', '照計畫改好。',
+    '## 驗證', '跑過的指令：', '- 64 pass',
+    '## 變更', '| 檔案 | 改了什麼 |', '|---|---|', '| register.tsx | 加殼行判斷 |',
+    '## 風險', '- 版號未發布', '- e.g. 縮寫會被當句尾',
+    '## 做法', '分兩步：', '- 先加殼行判斷',
+  )
+  await say($, clock, w, reply, picks(reply, {
+    outcome: '照計畫改好。',
+    sections: [{ heading: '## 驗證', summary: '跑過的指令：' }, { heading: '## 變更', summary: '| 檔案 | 改了什麼 |' }, { heading: '## 風險', summary: '- e.g. 縮寫會被當句尾' }, { heading: '## 做法', summary: '分兩步：' }],
+  }))
+  const { cells } = await boxOf($, reply)
+  expect(cells.some(t => t.includes('先加殼行判斷'))).toBe(true)
+  expect(cells.some(t => t.includes('分兩步'))).toBe(false)
+  expect(cells.some(t => t.includes('64 pass'))).toBe(true)
+  expect(cells.some(t => t.includes('register.tsx · 加殼行判斷'))).toBe(true)
+  expect(cells.some(t => t.includes('縮寫會被當句尾'))).toBe(true)
+  expect(cells.some(t => t.includes('跑過的指令') || t.includes('檔案 · 改了什麼') || t.includes('版號未發布'))).toBe(false)
+})
+
+test('段落摘要跟你要做同一句：只列你要做，那段留在正文', ZH, async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+  const reply = long('照計畫改好。', '## 後續', '- 實機看 88 欄的框', '- 其餘不用動')
+  await say($, clock, w, reply, picks(reply, { status: 'blocked', outcome: '照計畫改好。', todo: ['- 實機看 88 欄的框'], sections: [{ heading: '## 後續', summary: '- 實機看 88 欄的框' }] }))
+  const { cells } = await boxOf($, reply)
+  expect(cells.filter(t => t === '實機看 88 欄的框')).toHaveLength(1)
+  expect(w.bodies.at(-1) ?? '').toContain('## 後續')
+})
+
+test('指到標題行：題目用標題文字不留 #，之後我指到標題就不列', ZH, async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+  const reply = long('盤點完了。', '## 待你決定', '- 先修 PICK_RULES', '- 先做並排框', '## 下一步', '等你選完再動手。')
+  await say($, clock, w, reply, picks(reply, { status: 'blocked', outcome: '盤點完了。', decisions: [{ question: '## 待你決定', options: ['- 先修 PICK_RULES', '- 先做並排框'] }], next: ['## 下一步'] }))
+  const { cells } = await boxOf($, reply)
+  expect(cells.some(t => t.includes('待你決定'))).toBe(true)
+  expect(cells.some(t => t.includes('#'))).toBe(false)
+  expect(cells.some(t => t.includes('之後我'))).toBe(false)
+})
+
 test('短回覆不呼叫模型，回合結束那列寫無摘錄', ZH, async ($, on) => {
   const clock = mock.clock(on)
   const w = world(on)
@@ -400,11 +456,11 @@ test('選項指回題目那行或重複：當成開放題，只畫題目、沒�
 test('表格列：分隔列不編號，挑到的表格列去掉直線、格子用 · 接起來；跟結論同一句的不再列', ZH, async ($, on) => {
   const clock = mock.clock(on)
   const w = world(on)
-  const reply = long('## 計畫', '| 階段 | 內容 |', '|---|---|', '| 5 收尾 | push 由你做 |', '## 結果', '確認後開始。')
-  await say($, clock, w, reply, picks(reply, { status: 'blocked', outcome: '確認後開始。', todo: ['| 5 收尾 | push 由你做 |'], next: ['確認後開始。'], sections: [{ heading: '## 計畫', summary: '| 階段 | 內容 |' }] }))
+  const reply = long('## 計畫', '| 階段 | 內容 |', '|---|---|', '| 4 測試 | 跑全套 |', '| 5 收尾 | push 由你做 |', '## 結果', '確認後開始。')
+  await say($, clock, w, reply, picks(reply, { status: 'blocked', outcome: '確認後開始。', todo: ['| 5 收尾 | push 由你做 |'], next: ['確認後開始。'], sections: [{ heading: '## 計畫', summary: '| 4 測試 | 跑全套 |' }] }))
   const text = await texts(await message($, reply))
   expect(text).toContain('你要做  5 收尾 · push 由你做')
-  expect(text).toContain('階段 · 內容')
+  expect(text).toContain('4 測試 · 跑全套')
   expect(text).not.toContain('|')
   expect(text).not.toContain('之後我')
 })
