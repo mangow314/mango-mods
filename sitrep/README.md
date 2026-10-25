@@ -76,8 +76,9 @@ language of your conversation.
     pros and cons, why one is recommended) are shown in the box under the
     questions, with no `▸` to press.
   - Questions come next, one option per line, never cut short. Clicking an
-    option only fills "question. option" into the prompt box; nothing is
-    sent. A question asked without listed choices shows alone (answer by
+    option only fills its letter into the prompt box (`A`; with several
+    questions, the answers so far by question number, `1. A  2. B`); nothing
+    is sent. A question asked without listed choices shows alone (answer by
     typing). A table row the model picks is shown with its cells joined by
     ` · `. `Then I` (what Claude does next) comes last, dim.
   - The outcome takes at most two lines and ends in `…` past that. Each `▸`
