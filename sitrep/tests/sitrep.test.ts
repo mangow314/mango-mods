@@ -181,12 +181,9 @@ test('推薦標記：選項最後一行放不下就換到下一行，不讓引�
   expect(cells).toContain('  recommended')
 })
 
-test('預設英文標籤：短回覆寫 no excerpt，編號對不上寫 excerpt failed', async ($, on) => {
+test('預設英文標籤：編號對不上寫 excerpt failed', async ($, on) => {
   const clock = mock.clock(on)
   const w = world(on)
-  await say($, clock, w, 'Done.', '{}', 12_000)
-  const ui = await $.ui.mount({ plugin: 'sitrep', surface: 'terminal', component: 'TurnDuration', props: { word: 'Baked', durationMs: 12_000 } })
-  expect(await texts(ui)).toContain('– turn ended (no excerpt)')
   await say($, clock, w, PLAIN, JSON.stringify({ status: 'done', outcome: 999 }))
   expect(await texts(await message($, PLAIN))).toContain('excerpt failed: line numbers did not match the reply')
 })
@@ -296,13 +293,13 @@ test('指到標題行：題目用標題文字不留 #，之後我指到標題就
   expect(cells.some(t => t.includes('之後我'))).toBe(false)
 })
 
-test('短回覆不呼叫模型，回合結束那列寫無摘錄', ZH, async ($, on) => {
+test('短回覆不呼叫模型，回合結束那列照引擎原樣', ZH, async ($, on) => {
   const clock = mock.clock(on)
   const w = world(on)
   await say($, clock, w, '好，改了。', '{}', 12_000)
   expect(w.asks).toHaveLength(0)
   const ui = await $.ui.mount({ plugin: 'sitrep', surface: 'terminal', component: 'TurnDuration', props: { word: 'Baked', durationMs: 12_000 } })
-  expect(await texts(ui)).toContain('– 本輪結束（無摘錄）')
+  expect(await texts(ui)).toContain('engine Baked')
   expect(w.bodies.length).toBe(0)
   await message($, '好，改了。')
   expect(w.bodies.at(-1)).toBe('好，改了。')
@@ -395,13 +392,11 @@ test('推薦指到選項後面那句「I\'d pick A」：取那句第一個選項
   expect(none).not.toContain('recommended')
 })
 
-test('模型沒回答：框的位置照實寫原因，回合結束那列也是', ZH, async ($, on) => {
+test('模型沒回答：框的位置照實寫原因', ZH, async ($, on) => {
   const clock = mock.clock(on)
   const w = world(on)
   await say($, clock, w, REPLY, { fail: 'api-error' }, 20_000)
   expect(await texts(await message($, REPLY))).toContain('摘錄失敗：api-error')
-  const ui = await $.ui.mount({ plugin: 'sitrep', surface: 'terminal', component: 'TurnDuration', props: { word: 'Baked', durationMs: 20_000 } })
-  expect(await texts(ui)).toContain('摘錄失敗：api-error')
 })
 
 test('摘錄回來前新一輪已開始：作廢，不畫框、不動待決題目', ZH, async ($, on) => {
@@ -769,7 +764,7 @@ test('結論條畫在回覆裡：狀態標籤＋結論＋耗時；框寬固定�
   expect(boxes.some(b => b.props.position === 'absolute' && b.props.top === 0)).toBe(true)
 })
 
-test('回合結束那列：有摘錄的交給引擎原樣畫；沒摘錄的換成灰色提示；子代理的不算', ZH, async ($, on) => {
+test('回合結束那列：有沒有摘錄都交給引擎原樣畫', ZH, async ($, on) => {
   const clock = mock.clock(on)
   const w = world(on)
   await say($, clock, w, REPLY, PICKS, 161_000)
@@ -780,9 +775,7 @@ test('回合結束那列：有摘錄的交給引擎原樣畫；沒摘錄的換�
     return texts(ui)
   }
   expect(await row(161_000)).toContain('engine Baked')
-  expect(await row(12_000)).toContain('– 本輪結束（無摘錄）')
-  // 耗時差幾百毫秒也對得回去
-  expect(await row(12_600)).toContain('本輪結束')
+  expect(await row(12_000)).toContain('engine Baked')
   expect(await row(5_000)).toContain('engine Baked')
 })
 

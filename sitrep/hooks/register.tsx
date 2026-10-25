@@ -10,7 +10,7 @@ import type { AgentNote, ChangeNote, Evidence, Excerpt, Facet, Item, Option, Sum
 // 2. 畫回覆時（AssistantMessage）用正文雜湊找摘錄，正文下面畫一個圓角結論框：標題（狀態＋耗時）疊在上框線，
 //    框裡是粗體結論、細節段落（從正文拿掉，一行摘要；展開時放回正文原位）、待你決定的題目（按選項把「題號. key」填進提示框，不送出）。
 //    AssistantMessage 沒有 isExpanded，分不出 ctrl+o 畫面，那裡一樣畫成結論框。
-// 3. 沒摘錄的回合（短回覆、摘錄作廢），回合結束那列（TurnDuration，「Baked for 3s」）換成「– 本輪結束（無摘錄）」，不假裝沒事；
+// 3. 回合結束那列（TurnDuration，「Baked for 3s」）照引擎原樣畫；只有那一輪派了背景子代理時不畫（結論框裡已列子代理）。
 //    那列沒有輪次編號，用耗時對回 turn.complete。
 // 4. 子代理回報那列（UserMessage，收合時「Message from @…」）換成它回報的第一句，ctrl+o 照原樣展開。
 // 5. 還有沒答的題目時，prompt 上方（AbovePrompt）一行「? N 項等你決定」，聚焦後按選項字母選答（一樣只填提示框）。
@@ -31,7 +31,6 @@ const ZH = {
   paneClosed: `${TAG}：已關閉狀態 pane（/sitrep-pane 可再打開）`,
   paneOpened: `${TAG}：已打開狀態 pane（實驗中；再打一次 /sitrep-pane 關閉）`,
   excerpting: '摘錄中',
-  noExcerpt: '本輪結束（無摘錄）',
   openCount: (n: number) => `? ${n} 題待決`,
   recommended: ' 建議',
   recShort: ' 建議',
@@ -44,7 +43,6 @@ const ZH = {
   fullText: '  (ctrl+o 看全文)',
   timedOut: (s: number) => `逾時或中止（${s}s）`,
   mismatch: '回傳的編號對不上原文',
-  superseded: '本輪結束（新一輪已開始，摘錄作廢）',
   needsYou: (n: number) => `需要你 · ${n}`,
   secRisk: '風險',
   secNeed: '需要你',
@@ -83,7 +81,6 @@ const EN: Texts = {
   paneClosed: `${TAG}: closed the status pane (/sitrep-pane opens it again)`,
   paneOpened: `${TAG}: opened the status pane (experimental; /sitrep-pane again closes it)`,
   excerpting: 'excerpting',
-  noExcerpt: 'turn ended (no excerpt)',
   openCount: n => `? ${n} open`,
   recommended: ' recommended',
   recShort: ' rec',
@@ -96,7 +93,6 @@ const EN: Texts = {
   fullText: '  (ctrl+o for the full text)',
   timedOut: s => `timed out or aborted (${s}s)`,
   mismatch: 'line numbers did not match the reply',
-  superseded: 'turn ended (a new turn started; excerpt dropped)',
   needsYou: n => `Needs you · ${n}`,
   secRisk: 'Risks',
   secNeed: 'Needs you',
@@ -315,9 +311,7 @@ export const register: Register = (on, options) => {
     await trackAgents($, id)
     // 有子代理在跑時每 250ms 重畫一次：轉圈字形和已跑時間證明它還活著（使用者 2026-10-08 選轉圈）；都跑完就停
     if ((await read($, agentsAtom)).some(a => !(a.status in TASK_MARKS))) startTick($)
-    const note: TurnNote = id
-      ? { id, durationMs: e.durationMs, glyph: '…', outcome: T.excerpting }
-      : { durationMs: e.durationMs, glyph: '–', outcome: T.noExcerpt }
+    const note: TurnNote = id ? { id, durationMs: e.durationMs } : { durationMs: e.durationMs }
     await update($, turnsAtom, list => [...list, note].slice(-KEEP_TURNS))
     if (id) {
       // 不在這裡等模型：回合結束不能被摘錄拖住，回來後再補畫
@@ -577,14 +571,11 @@ export const register: Register = (on, options) => {
     )
   })
 
-  // 結論已畫在回覆裡；這列只在「沒附區塊」的回合換成灰色提示，不假裝沒事
+  // 這一輪派了背景子代理：引擎這列會寫「Waiting for N background agents…」，結論框裡已經有子代理那一行，不畫
   on('ui.render', { component: 'TurnDuration' }, async ($, e, next) => {
     const note = matchTurn(await read($, turnsAtom), e.props.durationMs)
-    // 這一輪派了背景子代理：引擎這列會寫「Waiting for N background agents…」，結論框裡已經有子代理那一行，不畫
     if (note?.id && (await read($, agentsAtom)).some(a => a.card === note.id)) return $.ui.resolve(e).Box({})
-    if (!note || note.glyph !== '–') return next(e)
-    const { Text } = $.ui.resolve(e)
-    return <Text color={DIM}>{`– ${note.outcome}  ${duration(e.props.durationMs)}`}</Text>
+    return next(e)
   })
 
   on('ui.render', { component: 'UserMessage' }, async ($, e, next) => {
@@ -636,18 +627,16 @@ async function excerpt($: EngineInterface, id: string, answer: string, lines: st
       const { [id]: _, ...rest } = all
       return rest
     })
-    await update($, turnsAtom, list => list.map(t => (t.id === id ? { durationMs: t.durationMs, glyph: '–', outcome: T.superseded } : t)))
+    await update($, turnsAtom, list => list.map(t => (t.id === id ? { durationMs: t.durationMs } : t)))
     $.ui.invalidate('ui.render')
     return
   }
   await update($, excerptsAtom, all => keepLast({ ...all, [id]: result }))
   if (result.state === 'failed') {
-    await update($, turnsAtom, list => list.map(t => (t.id === id ? { ...t, glyph: '–', outcome: T.excerptFailed(result.reason) } : t)))
     $.ui.invalidate('ui.render')
     return
   }
   const summary = result.summary
-  await update($, turnsAtom, list => list.map(t => (t.id === id ? { ...t, glyph: glyphOf(summary), outcome: summary.outcome } : t)))
   // 新的結論框沒有題目＝之前的題目已經處理過（例如使用者自己打字回答），那列跟著消失
   // 完工回覆的「你要做」多半是建議（例如手動再測一次），不在 prompt 上方催；卡住、做到一半才提示
   const todo = summary.status === 'done' ? [] : summary.items.filter(i => i.kind === 'user-next').map(i => i.text.replace(TODO_PREFIX_RE, ''))

@@ -6,8 +6,8 @@ export type Facet = { label: string; summary: string; heading?: string }
 export type Summary = { status?: 'done' | 'blocked' | 'partial'; outcome: string; items: Item[]; facets: Facet[]; risks?: string[] }
 // 一則回覆的摘錄狀態（以回覆正文雜湊當 key）：摘錄中、好了、失敗（原因照實寫在框的位置）
 export type Excerpt = { state: 'pending' } | { state: 'ready'; summary: Summary } | { state: 'failed'; reason: string }
-// 一輪結束時記下的結論：TurnDuration 那列沒有輪次編號，只能用耗時對回來
-export type TurnNote = { id?: string; durationMs: number; glyph: string; outcome: string }
+// 一輪結束時記下的耗時與回覆雜湊（沒摘錄就沒有 id）：TurnDuration 那列沒有輪次編號，只能用耗時對回來
+export type TurnNote = { id?: string; durationMs: number }
 // 子代理：主對話派的記在派它那一輪的結論框（card＝回覆正文雜湊）下；card 還沒有＝剛啟動、這一輪還沒結束（''＝不屬於任何框）
 export type AgentNote = {
   id: string; type: string; description: string; status: string; card?: string; durationMs?: number; startedAt?: number
@@ -26,7 +26,7 @@ declare module 'claude-code' {
       answers: Record<string, Record<number, string>>
       // 展開中的收合段落：`${id}:${段落序號}`
       open: Record<string, boolean>
-      // 最近幾輪的結論，給 TurnDuration 那列用
+      // 最近幾輪：舊框收合、框上的耗時、TurnDuration 那列對子代理輪
       turns: TurnNote[]
       // 最近一張結論框的待決題目，給 prompt 上方那列用；沒摘錄的回合不動它
       // todo＝要你親手做的事（user-next），沒題目時 prompt 上方那列改提示它

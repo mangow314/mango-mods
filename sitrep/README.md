@@ -102,12 +102,9 @@ language of your conversation.
   `tool N · last <tool> <argument>` (for example `tool 4 · last Bash npm
   test`): main-conversation tool calls only, counted from 0 each turn. Elapsed
   time is left to Claude Code's own spinner line; tool rows are not hidden.
-- **No silent turns.** For a turn without an excerpt (a short reply, a failed
-  or dropped one), the line that closes the turn (`Baked for 3s`) becomes a
-  dim `– turn ended (no excerpt)` or the failure reason.
 
 Glyphs: `?` yellow = your call, `>` yellow = your move, `!` red = blocked,
-`~` in progress, `✓` done, `–` no excerpt.
+`~` in progress, `✓` done, `–` excerpt failed.
 
 ## Extras
 
@@ -156,10 +153,10 @@ claude --plugin-dir ./mango-mods/sitrep
   is not offered as buttons. An unanswered question from an earlier reply is
   not carried over unless the new reply repeats it. Which line the model
   calls the outcome, or "next", is its judgment and can be off.
-- The turn-closing line carries no turn id, so the "no excerpt" note is
-  matched to `turn.complete` by duration (±3 s); two turns with close
-  durations may swap. The engine may skip that line on short turns, which is
-  why the outcome bar is drawn inside the reply.
+- The turn-closing line carries no turn id, so hiding the "Waiting for N
+  background agents" line is matched to `turn.complete` by duration (±3 s);
+  two turns with close durations may swap. The engine may skip that line on
+  short turns, which is why the outcome bar is drawn inside the reply.
 - The box is matched to the reply by a hash of its text. When tool calls
   split a reply into several blocks, the box sits under the last one. A reply
   too short for an excerpt gets no box, so subagents it dispatched show only
