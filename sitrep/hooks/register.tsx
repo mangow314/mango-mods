@@ -176,9 +176,11 @@ const PICK_RULES = [
   '{"status":"done|blocked|partial","outcome":n,"decisions":[{"question":n,"options":[n,n],"recommended":n}],"todo":[n],"next":[n],"sections":[{"heading":n,"summary":n}]}',
   '- Every value except status is a line number from the reply. Never write text of your own.',
   '- outcome: the one line that best states the result or answer.',
-  '- status: done when the work or answer is complete; blocked when it waits on the user or an obstacle; partial when only part is done.',
-  '- decisions: only questions the reply explicitly asks the user. question is the line asking; options are the lines of each listed choice (2 or more, never the question line itself), or [] when the reply lists no choices; recommended is the option line the reply recommends, or omit it.',
-  '- todo: lines naming something the user must do by hand. next: lines naming what the assistant will do next. Use [] when there are none.',
+  '- status: blocked when the work cannot go on until the user answers a question, approves, or does a step only they can do, or when an obstacle stops it; partial when only part of the asked work is done; otherwise done. Optional suggestions or follow-ups do not make a reply blocked.',
+  '- decisions: only questions the reply explicitly asks the user. question is the line that asks (never a heading line); options are the lines of each listed choice (2 or more, never the question line itself), or [] when the reply lists no choices; recommended is the option line the reply recommends, or omit it.',
+  '- todo: lines telling the user to do something the work needs: run, test, push, approve, reply, paste output. Not suggestions, recommendations or optional extras, not explanations, not information about the state of things.',
+  '- next: lines where the assistant states an action it will take itself, including conditional ones ("after you pick, I will…"). A line asking the user to reply or paste something is todo, not next. A recommendation ("I recommend A") is neither.',
+  '- todo, next and section summaries never point at a heading line, a table header, or a line ending in ":" that only introduces what follows. Use [] when there are none.',
   '- sections: for each heading line ("#" lines) whose section holds details the user can expand later (changes, verification, risks, evidence), the heading line and the one line inside that section that best summarizes it. Skip the section holding the main result.',
 ].join('\n')
 
