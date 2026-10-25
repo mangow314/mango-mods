@@ -68,6 +68,7 @@ const ZH = {
   stateKilled: '已中止',
   backInReply: '（已放回正文）',
   youDo: '你要做  ',
+  riskTag: '風險  ',
   thenI: '之後我  ',
   notFilled: (why: string | undefined) => `${TAG}：沒填進提示框（${why ?? '原因不明'}）`,
   progress: (n: number, last: string) => `第 ${n} 個工具 · 最近 ${last}`,
@@ -119,6 +120,7 @@ const EN: Texts = {
   stateKilled: 'killed',
   backInReply: ' (back in the reply)',
   youDo: 'You do  ',
+  riskTag: 'Risk  ',
   thenI: 'Then I  ',
   notFilled: why => `${TAG}: could not fill the prompt (${why ?? 'unknown reason'})`,
   progress: (n, last) => `tool ${n} · last ${last}`,
@@ -173,14 +175,15 @@ let turnGen = 0
 // 給挑編號模型的規則：只回編號，文字一律由 mod 從回覆原句取
 const PICK_RULES = [
   'You index an assistant reply for a terminal UI. The reply is given as numbered lines "[n] text". Return ONLY one line of JSON, no prose:',
-  '{"status":"done|blocked|partial","outcome":n,"decisions":[{"question":n,"options":[n,n],"recommended":n}],"todo":[n],"next":[n],"sections":[{"heading":n,"summary":n}]}',
+  '{"status":"done|blocked|partial","outcome":n,"decisions":[{"question":n,"options":[n,n],"recommended":n}],"todo":[n],"next":[n],"risks":[n],"sections":[{"heading":n,"summary":n}]}',
   '- Every value except status is a line number from the reply. Never write text of your own.',
   '- outcome: the one line that best states the result or answer.',
   '- status: blocked when the work cannot go on until the user answers a question, approves, or does a step only they can do, or when an obstacle stops it; partial when only part of the asked work is done; otherwise done. Optional suggestions or follow-ups do not make a reply blocked.',
   '- decisions: only questions the reply explicitly asks the user. question is the line that asks (never a heading line); options are the lines of each listed choice (2 or more, never the question line itself), or [] when the reply lists no choices; recommended is the option line the reply recommends, or omit it.',
   '- todo: lines telling the user to do something the work needs: run, test, push, approve, reply, paste output. Not suggestions, recommendations or optional extras, not explanations, not information about the state of things.',
   '- next: lines where the assistant states an action it will take itself, including conditional ones ("after you pick, I will…"). A line asking the user to reply or paste something is todo, not next. A recommendation ("I recommend A") is neither.',
-  '- todo, next and section summaries never point at a heading line, a table header, or a line ending in ":" that only introduces what follows. Use [] when there are none.',
+  '- risks: lines pointing out a risk, something not verified, a limitation, or what could go wrong, under any heading or none. Most important first; never the outcome line. At most 4 lines in total, counting the summary you give for a section whose heading is about risks.',
+  '- todo, next, risks and section summaries never point at a heading line, a table header, or a line ending in ":" that only introduces what follows. Use [] when there are none.',
   '- sections: for each heading line ("#" lines) whose section holds details the user can expand later (changes, verification, risks, evidence), the heading line and the one line inside that section that best summarizes it. Skip the section holding the main result.',
 ].join('\n')
 
@@ -517,6 +520,13 @@ export const register: Register = (on, options) => {
     const agents = await agentRows($, e, found.id)
     const layout = sectionLayout(found.summary, notes, agents.length, width)
     const items = await itemRows($, e, found.id, found.summary.items, width - 9, notes, layout !== null)
+    // 風險句：短版每行前面紅色「風險」標籤；分段版已在「風險」隔線底下，只留一個點
+    const riskRows = (tagged: boolean) => (found.summary.risks ?? []).map((r, i) => (
+      <Text key={`risk-${i}`}>
+        {tagged ? <Text color={RED} bold>{T.riskTag}</Text> : <Text color={DIM}>{'· '}</Text>}
+        <Text color={BRIGHT}>{clip(r, width - 4 - (tagged ? cols(T.riskTag) : 2))}</Text>
+      </Text>
+    ))
     const sep = (key: string, label: string) => {
       const line = boxSep(label, width)
       return (
@@ -530,6 +540,7 @@ export const register: Register = (on, options) => {
     const rows = layout === null
       ? [
         <Text key="outcome" color={BRIGHT} bold>{clip(found.summary.outcome, 2 * (width - 4))}</Text>,
+        ...riskRows(true),
         ...items.todo,
         ...facetRows($, e, found.id, facets, sections, open, width - 4),
         ...agents,
@@ -538,7 +549,7 @@ export const register: Register = (on, options) => {
       ]
       : [
         <Text key="outcome" color={BRIGHT} bold>{clip(found.summary.outcome, 2 * (width - 4))}</Text>,
-        ...(layout.risk ? [sep('risk', T.secRisk), ...facetRows($, e, found.id, facets, sections, open, width - 4, risky)] : []),
+        ...(layout.risk ? [sep('risk', T.secRisk), ...facetRows($, e, found.id, facets, sections, open, width - 4, risky), ...riskRows(false)] : []),
         ...(layout.need ? [sep('need', T.secNeed), ...items.questions, ...items.todo] : []),
         ...(layout.detail ? [sep('detail', T.secDetail), ...facetRows($, e, found.id, facets, sections, open, width - 4, f => !risky(f)), ...agents, ...items.later] : []),
       ]
@@ -1106,7 +1117,19 @@ function buildSummary(lines: string[], raw: string): Summary | null {
     const heading = m[2] ?? ''
     facets.push({ label: clip(norm(heading), 40), summary: clip(text, 200), heading })
   }
-  return { ...(status ? { status } : {}), outcome: clip(lead, 300), items, facets }
+  // 風險句：風險常寫在「驗證」底下或一般條列裡，只靠風險標題認不出（實驗 25 則只有 5 則有風險標題）。
+  // 指錯、標題行、跟框裡已有的句子重複，只丟那一項；連同風險標題段的摘要最多 4 行
+  const room = 4 - facets.filter(f => RISK_RE.test(f.heading ?? f.label)).length
+  const risks: string[] = []
+  for (const n of list(d.risks)) {
+    const line = at(n)
+    if (line === null || isHeading(n) || risks.length >= room) continue
+    const text = cleanLine(line)
+    if (text === '' || shown.has(text)) continue
+    shown.add(text)
+    risks.push(clip(text, 200))
+  }
+  return { ...(status ? { status } : {}), outcome: clip(lead, 300), items, facets, ...(risks.length > 0 ? { risks } : {}) }
 }
 
 const OUTCOME_HEADING_RE = /^(?:結果|結論|答案|results?|outcome|summary|answer|tl;?dr)$/i
@@ -1257,10 +1280,11 @@ function sectionLayout(s: Summary, notes: string[][], agents: number, width: num
   const asks = s.items.filter(i => i.kind === 'decision' && !decisions.includes(i)).length
   const todo = s.items.filter(i => i.kind === 'user-next').length
   const later = s.items.filter(i => i.kind === 'agent-next').length
-  const risks = s.facets.filter(f => RISK_RE.test(f.heading ?? f.label)).length
+  const riskFacets = s.facets.filter(f => RISK_RE.test(f.heading ?? f.label)).length
+  const risks = riskFacets + (s.risks?.length ?? 0)
   const questions = decisions.reduce((n, d) => n + 1 + (d.options?.length ?? 0), 0) + asks + notes.reduce((n, g) => n + g.length, 0)
-  const h0 = 2 + (cols(s.outcome) > width - 4 ? 2 : 1) + todo + s.facets.length + agents + questions + (questions > 0 ? 1 : 0) + later
-  const layout = { risk: risks > 0, need: questions + todo > 0, detail: s.facets.length - risks + agents + later > 0 }
+  const h0 = 2 + (cols(s.outcome) > width - 4 ? 2 : 1) + todo + s.facets.length + (s.risks?.length ?? 0) + agents + questions + (questions > 0 ? 1 : 0) + later
+  const layout = { risk: risks > 0, need: questions + todo > 0, detail: s.facets.length - riskFacets + agents + later > 0 }
   // 類別（spec R2）＝結論、風險、需要你、細節；結論一定有，所以任一區非空就滿 2 類
   return h0 > 12 && (layout.risk || layout.need || layout.detail) ? layout : null
 }

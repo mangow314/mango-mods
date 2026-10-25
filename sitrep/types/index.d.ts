@@ -2,7 +2,8 @@
 export type Option = { key: string; label: string }
 export type Item = { kind: 'decision' | 'user-next' | 'agent-next'; text: string; options?: Option[]; recommended?: string }
 export type Facet = { label: string; summary: string; heading?: string }
-export type Summary = { status?: 'done' | 'blocked' | 'partial'; outcome: string; items: Item[]; facets: Facet[] }
+// risks：不在風險標題底下的風險句（0.10.2 起）；0.10.1 以前存下的摘錄沒有這欄
+export type Summary = { status?: 'done' | 'blocked' | 'partial'; outcome: string; items: Item[]; facets: Facet[]; risks?: string[] }
 // 一則回覆的摘錄狀態（以回覆正文雜湊當 key）：摘錄中、好了、失敗（原因照實寫在框的位置）
 export type Excerpt = { state: 'pending' } | { state: 'ready'; summary: Summary } | { state: 'failed'; reason: string }
 // 一輪結束時記下的結論：TurnDuration 那列沒有輪次編號，只能用耗時對回來

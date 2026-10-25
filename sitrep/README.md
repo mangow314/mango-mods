@@ -31,11 +31,12 @@ language of your conversation.
   outside code blocks) or has 2+ headings, after the turn ends sitrep numbers
   the reply's lines and asks `haiku` (low effort, 20 s limit) for line numbers
   only: the outcome line, questions with their option lines, what you have to
-  do, what Claude does next, and the sections that can be collapsed. The mod
+  do, what Claude does next, up to 4 risk lines (risks, unverified items,
+  limits, under any heading), and the sections that can be collapsed. The mod
   checks every number and builds the box from those lines. An outcome or a
   question that is out of range or points at the wrong kind of line rejects
-  the whole answer; a bad option, recommendation, `You do`, `Then I` or
-  section number drops only that item. The
+  the whole answer; a bad option, recommendation, `You do`, `Then I`,
+  risk or section number drops only that item. The
   system prompt is left alone.
   - Headings the mod recognizes override the model's numbers: the first line
     under a `Result`/`Summary`/`## 結果` heading is the outcome, consecutive
@@ -62,7 +63,8 @@ language of your conversation.
     blocked reply keeps its color even with a `You do` line; only a reply
     that stopped halfway to wait for you is `Your move`. Only the two
     "waiting on you" states are yellow.
-  - Then the outcome in bold, and right under it `You do` lines in yellow.
+  - Then the outcome in bold, risk lines with a red `Risk` tag, and `You do`
+    lines in yellow.
   - Sections the model picks (for example Changes, Checks) leave the body and
     become one summary line each, under a bold blue label; `▸` puts a section
     back in its place in the body. When there are questions, a section whose
@@ -78,7 +80,7 @@ language of your conversation.
   - The outcome takes at most two lines and ends in `…` past that. Each `▸`
     section is one line, label and summary cut to the box width. A box
     estimated taller than 12 rows is split into sections after the outcome:
-    `Risks` in red, `Needs you` in yellow (questions, `You do`), `Details` in
+    `Risks` in red (risk sections and risk lines), `Needs you` in yellow (questions, `You do`), `Details` in
     blue (other sections, subagents, `Then I`), each under a divider joined
     to the border; an empty section is left out.
   - Once a newer reply has its own box, an older box folds to one line

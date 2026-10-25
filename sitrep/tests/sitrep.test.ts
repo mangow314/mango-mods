@@ -50,6 +50,7 @@ type Picks = {
   decisions?: { question: string; options: string[]; recommended?: string }[]
   todo?: string[]
   next?: string[]
+  risks?: string[]
   sections?: { heading: string; summary: string }[]
 }
 function picks(reply: string, p: Picks): string {
@@ -71,6 +72,7 @@ function picks(reply: string, p: Picks): string {
     decisions: (p.decisions ?? []).map(d => ({ question: n(d.question), options: d.options.map(n), ...(d.recommended ? { recommended: n(d.recommended) } : {}) })),
     todo: (p.todo ?? []).map(n),
     next: (p.next ?? []).map(n),
+    risks: (p.risks ?? []).map(n),
     sections: (p.sections ?? []).map(s => ({ heading: n(s.heading), summary: n(s.summary) })),
   })
 }
@@ -628,6 +630,61 @@ test('長版框分段：結論在最上面，依序風險、需要你、細節�
   expect(sepAt('需要你')).toBeLessThan(at('1. mod 放哪？'))
   expect(at('明天實機看 5 處')).toBeLessThan(sepAt('細節'))
   expect(sepAt('細節')).toBeLessThan(at('51 pass'))
+})
+
+// 風險句不在風險標題底下：寫在「驗證」段裡
+const RISKY = long('## 結果', '照 A 改好。', '## 驗證', '- 51 pass', '- 未驗證：70 欄實機沒看', '## 待你決定', '1. mod 放哪？', '- 選項 A：開新 mod', '- 選項 B：併進 your-turn', '2. band 再精簡？', '- 選項 A：拿掉', '- 選項 B：保留', '- 明天實機看 5 處')
+// 同一句風險，沒有待你決定段：短版
+const RISKY_SHORT = long('## 結果', '照 A 改好。', '## 驗證', '- 51 pass', '- 未驗證：70 欄實機沒看', '- 明天實機看 5 處')
+const RISKY_DECISIONS = [
+  { question: '1. mod 放哪？', options: ['- 選項 A：開新 mod', '- 選項 B：併進 your-turn'] },
+  { question: '2. band 再精簡？', options: ['- 選項 A：拿掉', '- 選項 B：保留'] },
+]
+
+test('風險句（不在風險標題下）：長版畫在「風險」段裡', ZH, async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+  await say($, clock, w, RISKY, picks(RISKY, { outcome: '照 A 改好。', decisions: RISKY_DECISIONS, todo: ['- 明天實機看 5 處'], risks: ['- 未驗證：70 欄實機沒看'], sections: [{ heading: '## 驗證', summary: '- 51 pass' }] }))
+  const { all, lines } = await seps(await message($, RISKY))
+  expect(lines).toEqual(['風險', '需要你', '細節'])
+  const at = (s: string) => all.findIndex(t => t.includes(s))
+  const sepAt = (n: string) => all.findIndex(t => t === n)
+  expect(sepAt('風險')).toBeLessThan(at('未驗證：70 欄實機沒看'))
+  expect(at('未驗證：70 欄實機沒看')).toBeLessThan(sepAt('需要你'))
+})
+
+test('風險句：短版畫在結論後、你要做前，前面紅色「風險」標籤', ZH, async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+  await say($, clock, w, RISKY_SHORT, picks(RISKY_SHORT, { status: 'blocked', outcome: '照 A 改好。', todo: ['- 明天實機看 5 處'], risks: ['- 未驗證：70 欄實機沒看'] }))
+  const { cells } = await boxOf($, RISKY_SHORT)
+  const tag = cells.indexOf('風險  ')
+  expect(tag).toBeGreaterThan(cells.indexOf('照 A 改好。'))
+  expect(cells[tag + 1]).toBe('未驗證：70 欄實機沒看')
+  expect(tag).toBeLessThan(cells.findIndex(t => t.startsWith('你要做')))
+})
+
+test('風險句指到標題或超出範圍：只丟那一項，框照畫', ZH, async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+  const raw = JSON.parse(picks(RISKY_SHORT, { outcome: '照 A 改好。', risks: ['## 驗證', '- 未驗證：70 欄實機沒看'] })) as { risks: number[] }
+  raw.risks.push(999)
+  await say($, clock, w, RISKY_SHORT, JSON.stringify(raw))
+  const { cells, bordered } = await boxOf($, RISKY_SHORT)
+  expect(bordered).toHaveLength(1)
+  expect(cells.filter(t => t === '風險  ')).toHaveLength(1)
+  expect(cells).toContain('未驗證：70 欄實機沒看')
+  expect(cells.some(t => t.includes('#'))).toBe(false)
+})
+
+test('風險句連同風險標題段的摘要最多 4 行', ZH, async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+  const reply = long('照 A 改好。', '## 殘留風險', '- 舊紀錄不相容', '## 說明', '- 風險一', '- 風險二', '- 風險三', '- 風險四')
+  await say($, clock, w, reply, picks(reply, { outcome: '照 A 改好。', risks: ['- 風險一', '- 風險二', '- 風險三', '- 風險四'], sections: [{ heading: '## 殘留風險', summary: '- 舊紀錄不相容' }] }))
+  const { cells } = await boxOf($, reply)
+  expect(cells).toContain('舊紀錄不相容')
+  expect(cells.filter(t => /^風險[一二三四]$/.test(t))).toEqual(['風險一', '風險二', '風險三'])
 })
 
 test('短版框不分段：沒有任何隔線', ZH, async ($, on) => {
