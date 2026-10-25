@@ -31,8 +31,9 @@ language of your conversation.
   outside code blocks) or has 2+ headings, after the turn ends sitrep numbers
   the reply's lines and asks `haiku` (low effort, 20 s limit) for line numbers
   only: the outcome line, questions with their option lines, what you have to
-  do, what Claude does next, up to 4 risk lines (risks, unverified items,
-  limits, under any heading), and the sections that can be collapsed. The mod
+  do, what Claude does next, up to 4 risk sentences counting risk-section
+  summaries (risks, unverified items, limits, under any heading), and the
+  sections that can be collapsed. The mod
   checks every number and builds the box from those lines. An outcome or a
   question that is out of range or points at the wrong kind of line rejects
   the whole answer; a bad option, recommendation, `You do`, `Then I`,
@@ -50,9 +51,11 @@ language of your conversation.
     `。！？`, or `.!?` followed by a space); the reply is unchanged. A lead-in
     ending in a colon (`Steps:`) or a table header is never the outcome or a
     section summary; the next line is used. A section whose summary repeats
-    the outcome, a `You do`/`Then I` line or another summary stays in the
-    body. `You do`/`Then I` pointing at a heading are dropped; a question
-    pointing at a heading shows the heading text without `#`.
+    the outcome, a `You do`/`Then I` line, an option, a line of the
+    decisions section shown under the questions, or another summary stays
+    in the body; a risk line repeating any of them is dropped. `You do`/
+    `Then I` pointing at a heading are dropped; a question pointing at a
+    heading shows the heading text without `#`.
   - While it waits, the reply shows `… excerpting`; a failure shows
     `– excerpt failed: <reason>` where the box would be. If a new turn starts
     before the answer arrives, the excerpt is dropped.
@@ -63,8 +66,8 @@ language of your conversation.
     blocked reply keeps its color even with a `You do` line; only a reply
     that stopped halfway to wait for you is `Your move`. Only the two
     "waiting on you" states are yellow.
-  - Then the outcome in bold, risk lines with a red `Risk` tag, and `You do`
-    lines in yellow.
+  - Then the outcome in bold, risk lines with a red `Risk` tag (wrapped in
+    full, never cut), and `You do` lines in yellow.
   - Sections the model picks (for example Changes, Checks) leave the body and
     become one summary line each, under a bold blue label; `▸` puts a section
     back in its place in the body. When there are questions, a section whose

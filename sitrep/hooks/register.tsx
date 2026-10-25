@@ -521,12 +521,16 @@ export const register: Register = (on, options) => {
     const layout = sectionLayout(found.summary, notes, agents.length, width)
     const items = await itemRows($, e, found.id, found.summary.items, width - 9, notes, layout !== null)
     // 風險句：短版每行前面紅色「風險」標籤；分段版已在「風險」隔線底下，只留一個點
-    const riskRows = (tagged: boolean) => (found.summary.risks ?? []).map((r, i) => (
-      <Text key={`risk-${i}`}>
-        {tagged ? <Text color={RED} bold>{T.riskTag}</Text> : <Text color={DIM}>{'· '}</Text>}
-        <Text color={BRIGHT}>{clip(r, width - 4 - (tagged ? cols(T.riskTag) : 2))}</Text>
-      </Text>
-    ))
+    // 風險句沒有段落可以按 ▸ 放回正文，所以整句折行畫完、不截斷（使用者實機：截成 … 就看不到全文）
+    const riskRows = (tagged: boolean) => (found.summary.risks ?? []).flatMap((r, i) => {
+      const lead = tagged ? cols(T.riskTag) : 2
+      return wrapCols(r, width - 4 - lead).map((l, j) => (
+        <Text key={`risk-${i}-${j}`}>
+          {j > 0 ? ' '.repeat(lead) : tagged ? <Text color={RED} bold>{T.riskTag}</Text> : <Text color={DIM}>{'· '}</Text>}
+          <Text color={BRIGHT}>{l}</Text>
+        </Text>
+      ))
+    })
     const sep = (key: string, label: string) => {
       const line = boxSep(label, width)
       return (
@@ -1088,7 +1092,17 @@ function buildSummary(lines: string[], raw: string): Summary | null {
       if (!shown.has(text) && !items.some(i => i.text === text)) items.push({ kind, text })
     }
   }
-  for (const i of items) shown.add(i.text)
+  // 選項文字也算框裡已有的（實機：風險句、段落摘要就是選項 B 那行，框裡寫了兩次）；比對時去掉「A.」這類選項鍵
+  for (const i of items) {
+    shown.add(i.text)
+    for (const o of i.options ?? []) shown.add(o.label)
+  }
+  // 有題目時，「待你決定」段其餘的行（建議、理由）會畫在題目底下，也算已有（實機：「我建議選 A」同時出現在風險段與需要你段）
+  if (decisionsOf(items).length > 0) {
+    const ask = lines.findIndex(l => DECISION_HEADING_RE.test(HEADING_RE.exec(l)?.[2] ?? ''))
+    for (let i = ask + 1; ask >= 0 && i < lines.length && !HEADING_RE.test(lines[i] ?? ''); i++) shown.add(cleanLine(lines[i] ?? ''))
+  }
+  const dup =(text: string) => shown.has(text) || shown.has(optionOf(text, 0).label)
   const facets: Facet[] = []
   for (const x of list(d.sections)) {
     const sec = x as Record<string, unknown>
@@ -1112,7 +1126,7 @@ function buildSummary(lines: string[], raw: string): Summary | null {
     if (s > end) continue
     // 摘要跟結論、你要做、之後我、別段摘要同一句：這段不收合，留在正文（實測 40 則有 6 則同一句出現兩次）
     const text = cleanLine(at(s) ?? '')
-    if (shown.has(text)) continue
+    if (dup(text)) continue
     shown.add(text)
     const heading = m[2] ?? ''
     facets.push({ label: clip(norm(heading), 40), summary: clip(text, 200), heading })
@@ -1125,9 +1139,9 @@ function buildSummary(lines: string[], raw: string): Summary | null {
     const line = at(n)
     if (line === null || isHeading(n) || risks.length >= room) continue
     const text = cleanLine(line)
-    if (text === '' || shown.has(text)) continue
+    if (text === '' || dup(text)) continue
     shown.add(text)
-    risks.push(clip(text, 200))
+    risks.push(text)
   }
   return { ...(status ? { status } : {}), outcome: clip(lead, 300), items, facets, ...(risks.length > 0 ? { risks } : {}) }
 }

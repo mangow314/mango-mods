@@ -1,6 +1,6 @@
 {
   "name": "sitrep",
-  "version": "0.10.2",
+  "version": "0.10.3",
   "description": "Under each long reply, a box built from the reply's own lines (haiku only picks line numbers): status, outcome, what you have to do, collapsible sections, and questions you answer from the keyboard (fills the prompt, never sends). Older boxes fold to one line.",
   "author": {
     "name": "Mango"

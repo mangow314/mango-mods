@@ -687,6 +687,49 @@ test('風險句連同風險標題段的摘要最多 4 行', ZH, async ($, on) =>
   expect(cells.filter(t => /^風險[一二三四]$/.test(t))).toEqual(['風險一', '風險二', '風險三'])
 })
 
+test('風險句太長時折行畫完，不截成 …', ZH, async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+  const risk = `- 未驗證：${'這段很長的風險說明'.repeat(12)}結尾`
+  const reply = long('照 A 改好。', risk)
+  await say($, clock, w, reply, picks(reply, { outcome: '照 A 改好。', risks: [risk] }))
+  const { cells } = await boxOf($, reply)
+  const tag = cells.indexOf('風險  ')
+  expect(tag).toBeGreaterThan(-1)
+  expect(cells.some(t => t.includes('結尾'))).toBe(true)
+  expect(cells.some(t => t.includes('未驗證') && t.endsWith('…'))).toBe(false)
+})
+
+test('風險句、段落摘要跟選項同一句：不再列', ZH, async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+  const reply = long('改好了。', '## 怎麼判斷', '- 還是很淡：問題在透明度', '## 請你看', '現在的方框？', 'A. 變清楚了：維持現狀', 'B. 還是很淡：問題在透明度')
+  await say($, clock, w, reply, picks(reply, {
+    status: 'blocked', outcome: '改好了。',
+    decisions: [{ question: '現在的方框？', options: ['A. 變清楚了：維持現狀', 'B. 還是很淡：問題在透明度'] }],
+    risks: ['B. 還是很淡：問題在透明度'],
+    sections: [{ heading: '## 怎麼判斷', summary: '- 還是很淡：問題在透明度' }],
+  }))
+  const { cells } = await boxOf($, reply)
+  expect(cells.filter(t => t.includes('還是很淡'))).toEqual([' 還是很淡：問題在透明度'])
+  expect(cells).not.toContain('風險  ')
+})
+
+test('風險句是待你決定段裡的建議：只畫在題目底下，不進風險', ZH, async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+  const rec = '我建議選 A。改動很小，但我還沒實際跑過合併確認。'
+  const reply = long('兩個 commit 都進去了。', '## 待你決定', '接下來要怎麼合進 master？', 'A. 現在合', 'B. 先不合', rec)
+  await say($, clock, w, reply, picks(reply, {
+    status: 'blocked', outcome: '兩個 commit 都進去了。',
+    decisions: [{ question: '接下來要怎麼合進 master？', options: ['A. 現在合', 'B. 先不合'], recommended: rec }],
+    risks: [rec],
+  }))
+  const { cells } = await boxOf($, reply)
+  expect(cells).not.toContain('風險  ')
+  expect(cells.filter(t => t.includes('我建議選 A'))).toHaveLength(1)
+})
+
 test('短版框不分段：沒有任何隔線', ZH, async ($, on) => {
   const clock = mock.clock(on)
   const w = world(on)
