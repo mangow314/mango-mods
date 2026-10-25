@@ -162,11 +162,12 @@ you can decide whether to keep going, compact first, or start a new session.
   4. `ENABLE_PROMPT_CACHING_1H` set → 1 hour
   5. a Claude subscription (the session reports rate limits) → 1 hour;
      otherwise (API key, cloud provider) → 5 minutes
-- Correction from what it sees: if you come back after more than 5 minutes
-  but before the assumed TTL, and that turn's hit rate is below 40%,
-  ctx-relay switches this session to 5 minutes (for example, a subscription
-  that went over its included usage drops to 5 minutes). `/ctx-relay-status`
-  shows why.
+- The TTL is an estimate; `/ctx-relay-status` marks it `estimated`. If you
+  come back after more than 5 minutes but before the assumed TTL, and that
+  turn's hit rate is below 40%, `/ctx-relay-status` notes it. The TTL is not
+  changed: a subscription over its included usage drops to 5 minutes, but
+  switching the model, tools or system prompt also starts a cold cache, and
+  the mod cannot tell which happened.
 - After the main conversation is compacted (`/compact`, auto-compact, or idle
   compaction), the old cache no longer matches the start of the conversation,
   so the countdown is dropped until the next turn ends.

@@ -545,8 +545,8 @@ async function cacheStatus($: EngineInterface): Promise<string[]> {
   const now = await $.clock.now()
   const ttl = cache.ttlMs === TTL_1H ? '1h' : '5m'
   const left = cacheLeft(cache, now)
-  const lines = [`cache: ttl ${ttl} (${cache.ttlSource}) · last request ${duration(now - cache.lastRequestAt)} ago · ${left <= 0 ? 'cold' : `${cacheLabel(cache, now)[0].replace(/^cache /, '')} left`}`]
-  if (cache.observed !== '') lines.push(`cache note: switched to 5m, ${cache.observed}`)
+  const lines = [`cache: ttl ${ttl} (${cache.ttlSource}, estimated) · last request ${duration(now - cache.lastRequestAt)} ago · ${left <= 0 ? 'cold' : `${cacheLabel(cache, now)[0].replace(/^cache /, '')} left`}`]
+  if (cache.observed !== '') lines.push(`cache note: last turn ${cache.observed}; the TTL may be 5m, or the model, tools or system prompt changed`)
   return lines
 }
 
@@ -582,8 +582,9 @@ async function takeReading($: EngineInterface, e: TurnCompleteInput) {
   await update($, limitsAtom, () => deriveLimits(usage.context))
 }
 
-// 主線回合結束：記下時間、這段閒置的保溫次數歸零、推定 TTL；
-// 觀測修正：閒置超過 5 分鐘但還沒到推定 TTL，這輪卻偏冷 → 本 session 改判 5m（例如訂閱超額改扣用量）
+// 主線回合結束：記下時間、這段閒置的保溫次數歸零、推定 TTL。
+// 閒置超過 5 分鐘、還沒到推定 TTL，這輪卻偏冷：只記下來給 /ctx-relay-status，不改判 TTL——
+// 換模型、工具或系統提示也會偏冷，分不出是不是 TTL 掉成 5m（例如訂閱超額），改判一次會錯整個 session
 async function noteCache($: EngineInterface, e: TurnCompleteInput, compacted: boolean) {
   const now = await $.clock.now()
   const cache = await read($, cacheAtom)
@@ -591,11 +592,10 @@ async function noteCache($: EngineInterface, e: TurnCompleteInput, compacted: bo
   const total = u ? u.input_tokens + u.cache_read_input_tokens + u.cache_creation_input_tokens : 0
   const pct = u && total > 0 ? Math.round((u.cache_read_input_tokens * 100) / total) : null
   const idle = !compacted && cache.lastRequestAt !== null && cache.turnStartedAt !== null ? cache.turnStartedAt - cache.lastRequestAt : null
-  let observed = cache.observed
-  if (observed === '' && idle !== null && pct !== null && pct < CACHE_COLD && idle > TTL_5M && idle < cache.ttlMs) {
-    observed = `came back cold (${pct}%) after ${duration(idle)} idle`
-  }
-  const ttl = observed !== '' ? { ttlMs: TTL_5M, ttlSource: 'observed' } : await resolveTtl($)
+  const observed = idle !== null && pct !== null && pct < CACHE_COLD && idle > TTL_5M && idle < cache.ttlMs
+    ? `came back cold (${pct}%) after ${duration(idle)} idle`
+    : ''
+  const ttl = await resolveTtl($)
   await update($, cacheAtom, () => ({ lastRequestAt: now, turnStartedAt: null, ...ttl, observed, keepalives: 0 }))
   startFrames($)
 }

@@ -83,7 +83,7 @@ prompt 快取讓下一次請求便宜地重讀對話。一段時間沒有請求�
   3. 設定 `promptCacheTtl`（`5m` 或 `1h`）
   4. 有設 `ENABLE_PROMPT_CACHING_1H` → 1 小時
   5. Claude 訂閱（session 回報用量上限）→ 1 小時；否則（API key、雲端供應商）→ 5 分鐘
-- 觀測修正：閒置超過 5 分鐘、還沒到推定的 TTL 就回來，那輪命中率卻低於 40%，ctx-relay 就把這個 session 改判 5 分鐘（例如訂閱超出方案用量後會降成 5 分鐘）。`/ctx-relay-status` 會寫原因。
+- TTL 是推估值，`/ctx-relay-status` 標 `estimated`。閒置超過 5 分鐘、還沒到推定的 TTL 就回來，那輪命中率卻低於 40% 時，`/ctx-relay-status` 會記一筆，但不改 TTL：訂閱超出方案用量會降成 5 分鐘，換模型、工具或系統提示也會讓快取變冷，mod 分不出是哪一種。
 - 主對話壓縮後（`/compact`、自動壓縮、閒置壓縮），舊快取對不上對話開頭，倒數先收掉，下一輪結束再算。
 - 閒置壓縮：Claude Code 會在你閒置時、快取過期前自己把長對話壓縮，並顯示「Compacted while idle, before the prompt cache expired」。文件沒寫，以下讀自 2.1.294 執行檔：只在快取是 1 小時、還沒過期，context 至少 200K（`CLAUDE_CODE_IDLE_COMPACT_MIN_TOKENS`，下限 100K），閒置到 TTL 的大約 90%（約 54 分鐘），而且 Anthropic 為你的帳號開了這功能時才跑。在 settings 設 `"idleCompaction": false` 可關掉。它會讓 context 變小，所以這時不會碰到交接線。
 - ctx-relay 不幫快取保溫：用 `$.model.fork` 送的請求讀不到主對話的快取（見「已知限制」），所以延長不了它。

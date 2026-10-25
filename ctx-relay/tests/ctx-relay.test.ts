@@ -1343,7 +1343,7 @@ test('快取倒數：回合結束後顯示剩幾分，<1 分鐘改秒數，過�
   expect((await band($)).text).toContain('cache 30s')
   await clock.advance(31_000)
   expect((await band($)).text).toContain('󰜗 cold')
-  expect(await status($)).toContain('cache: ttl 1h (subscription)')
+  expect(await status($)).toContain('cache: ttl 1h (subscription, estimated)')
 })
 
 test('快取過期：不再顯示上一輪的命中率，只留雪花 cold', async ($, on) => {
@@ -1384,15 +1384,15 @@ test('快取 TTL 判定順序：FORCE_PROMPT_CACHING_5M > CLAUDE_CODE_PROMPT_CAC
     return (await status($)).split('\n').find(l => l.startsWith('cache:')) ?? ''
   }
   w.rateLimits = []
-  expect(await ttl()).toContain('ttl 5m (no subscription)')
+  expect(await ttl()).toContain('ttl 5m (no subscription, estimated)')
   w.env.ENABLE_PROMPT_CACHING_1H = '1'
-  expect(await ttl()).toContain('ttl 1h (ENABLE_PROMPT_CACHING_1H)')
+  expect(await ttl()).toContain('ttl 1h (ENABLE_PROMPT_CACHING_1H, estimated)')
   w.settings.promptCacheTtl = '5m'
-  expect(await ttl()).toContain('ttl 5m (promptCacheTtl setting)')
+  expect(await ttl()).toContain('ttl 5m (promptCacheTtl setting, estimated)')
   w.env.CLAUDE_CODE_PROMPT_CACHE_TTL = '1h'
-  expect(await ttl()).toContain('ttl 1h (CLAUDE_CODE_PROMPT_CACHE_TTL)')
+  expect(await ttl()).toContain('ttl 1h (CLAUDE_CODE_PROMPT_CACHE_TTL, estimated)')
   w.env.FORCE_PROMPT_CACHING_5M = '1'
-  expect(await ttl()).toContain('ttl 5m (FORCE_PROMPT_CACHING_5M)')
+  expect(await ttl()).toContain('ttl 5m (FORCE_PROMPT_CACHING_5M, estimated)')
 })
 
 test('Team 帳號（收不到 session.compact）：這輪中間壓縮過（context 少一半以上），偏冷不拿來改判 TTL', async ($, on) => {
@@ -1406,21 +1406,24 @@ test('Team 帳號（收不到 session.compact）：這輪中間壓縮過（conte
   expect(await status($)).toContain('ttl 1h')
 })
 
-test('觀測修正：閒置 10 分鐘（未到推定的 1h）回來卻偏冷 → 本 session 改判 5m，狀態寫原因', async ($, on) => {
+test('閒置 10 分鐘（未到推定的 1h）回來卻偏冷：狀態寫觀測，TTL 不改判；下一輪正常就不再寫', async ($, on) => {
   const clock = mock.clock(on)
   const w = world($, on)
   await start($)
   await turn($, w, 100_000)
-  // 只閒置 3 分鐘就偏冷：可能是換模型之類，不改判
+  // 只閒置 3 分鐘就偏冷：還在 5m 內，不記
   await clock.advance(3 * 60_000)
   await $.turn.start({ text: '', turnId: 't-a' })
   await turn($, w, 110_000, { cacheRead: 1_000 })
-  expect(await status($)).toContain('ttl 1h')
+  expect(await status($)).not.toContain('cache note')
   await clock.advance(10 * 60_000)
   await $.turn.start({ text: '', turnId: 't-b' })
   await turn($, w, 120_000, { cacheRead: 1_000 })
   const text = await status($)
-  expect(text).toContain('ttl 5m (observed)')
-  expect(text).toContain('cache note: switched to 5m, came back cold (10%) after 10m00s idle')
-  expect((await band($)).text).toContain('cache 5m')
+  expect(text).toContain('ttl 1h (subscription, estimated)')
+  expect(text).toContain('cache note: last turn came back cold (10%) after 10m00s idle')
+  expect((await band($)).text).toContain('cache 60m')
+  await $.turn.start({ text: '', turnId: 't-c' })
+  await turn($, w, 130_000)
+  expect(await status($)).not.toContain('cache note')
 })

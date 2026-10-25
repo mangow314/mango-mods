@@ -9,7 +9,7 @@ export type Receipt = { deltaTokens: number; deltaCost: number; durationMs: numb
 export type Limits = { window: number; fuse: number; nudge: number; handoff: number; cap: number; source: 'auto' | 'config' | 'capped' }
 
 // 快取倒數：lastRequestAt＝上一次主線回合（或保溫 fork）結束的時間，turnStartedAt＝這一輪開始的時間（算閒置多久）；
-// ttlMs／ttlSource＝推定的快取存活時間與依據；observed＝觀測修正的原因（有值＝本 session 改判 5m）；keepalives＝這段閒置已保溫幾次
+// ttlMs／ttlSource＝推定的快取存活時間與依據；observed＝上一輪閒置未到 TTL 卻偏冷的觀測（只顯示，不改判）；keepalives＝這段閒置已保溫幾次
 export type Cache = { lastRequestAt: number | null; turnStartedAt: number | null; ttlMs: number; ttlSource: string; observed: string; keepalives: number }
 
 // 自動交接狀態機：idle →（deferred ⇄）countdown → preparing → 切換；failed／cancelled／done 為本對話終態。
