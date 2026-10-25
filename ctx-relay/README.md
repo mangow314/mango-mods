@@ -262,6 +262,12 @@ follows.
   three handoff failures. Every failed handoff (before `/clear`) is appended
   to `<harness root>/ctx-relay/failures.jsonl` (time, auto or manual, tokens,
   minutes since you last typed, reason; last 100 kept).
+  It also counts the handoff ledger, `<harness root>/ctx-relay/handoffs.jsonl`
+  (last 500 kept): one line per countdown, cancel, postponement (you sent a
+  message or a new turn started), completed handoff, and failure. A
+  completed handoff records the tokens before it, the fork's token usage
+  (input, cache read, cache write, output), and whether the resume message
+  was sent. Use it to judge whether the automatic handoff earns its keep.
 - `/ctx-relay-notes`: opens (or, typed again, closes) a notes pane for
   checking where things stood: the handoff file this conversation resumed
   from (or the newest one in `handoff/`), plus the phase from the `INDEX.md`

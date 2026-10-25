@@ -280,6 +280,7 @@ export const register: Register = (on, options) => {
         prepGen += 1
         await setAuto($, { phase: 'idle' })
         $.ui.invalidate('ui.render')
+        await recordLedger($, { event: 'postponed', manual: false, detail: `you sent a message during ${auto.phase}` })
       }
       // 訊息裡帶交接檔完整路徑＝你接手了那份（手動貼上的接續指令）
       if (pickupRoot !== '' && e.text.includes('/handoff/')) {
@@ -305,6 +306,7 @@ export const register: Register = (on, options) => {
       prepGen += 1
       await setAuto($, { phase: 'idle' })
       $.ui.invalidate('ui.render')
+      await recordLedger($, { event: 'postponed', manual: false, detail: `a new turn started during ${auto.phase}` })
     }
     return next(e)
   })
@@ -342,6 +344,7 @@ export const register: Register = (on, options) => {
         ...(await cacheStatus($)),
         `last handoff file: ${lastHandoff ? lastHandoff.path + (lastHandoff.error ? ` (${lastHandoff.error})` : '') : 'none'}`,
         ...(await failureStatus($)),
+        ...(await ledgerStatus($)),
       ].join('\n'),
     }
   })
@@ -665,6 +668,7 @@ async function afterStop($: EngineInterface) {
   const now = await $.clock.now()
   await setAuto($, { phase: 'countdown', deadline: now + COUNTDOWN_MS })
   arm($, COUNTDOWN_MS)
+  await recordLedger($, { event: 'countdown', manual: false })
 }
 
 // 在跑的子代理＋上一次 Stop 時引擎回報的背景工作與一次性排程。不設逾時作廢（使用者 2026-10-03 選 B）：
@@ -714,6 +718,7 @@ async function cancel($: EngineInterface, why: string) {
   prepGen += 1
   await setAuto($, { phase: 'cancelled', detail: why })
   $.ui.invalidate('ui.render')
+  await recordLedger($, { event: 'cancelled', manual: false, detail: why })
 }
 
 async function fire($: EngineInterface) {
@@ -841,6 +846,7 @@ async function prepare($: EngineInterface, gen: number, isManual: boolean, note:
       lastHandoff = null
       await setAuto($, { phase: 'failed', detail: `/clear failed: ${String(err)} (handoff file at ${path})` })
       $.ui.invalidate('ui.render')
+      await recordLedger($, { event: 'failed', session: source.id, tokens, manual: isManual, detail: `/clear failed: ${String(err)}` })
       return
     } finally {
       ownClear = false
@@ -862,6 +868,15 @@ async function prepare($: EngineInterface, gen: number, isManual: boolean, note:
     } catch (err) {
       lastHandoff = { path, error: `the resume message failed: ${String(err)}` }
     }
+    const u = r.usage
+    await recordLedger($, {
+      event: 'handed-off',
+      session: source.id,
+      tokens,
+      manual: isManual,
+      fork: { input: u.input_tokens, cacheRead: u.cache_read_input_tokens, cacheWrite: u.cache_creation_input_tokens, output: u.output_tokens },
+      resumed: lastHandoff?.error === undefined,
+    })
     $.ui.invalidate('ui.render')
   } catch (err) {
     await fail(`unexpected error: ${String(err)}`)
@@ -922,6 +937,7 @@ async function recordFailure($: EngineInterface, detail: string, isManual: boole
   } catch (err) {
     $.ui.log(`${TAG} failed to record a handoff failure: ${String(err)}`)
   }
+  await recordLedger($, { event: 'failed', manual: isManual, detail })
 }
 
 // /ctx-relay-status 的失敗段：筆數＋最近 3 筆（新的在前）
@@ -939,6 +955,69 @@ async function failureStatus($: EngineInterface): Promise<string[]> {
     }
   })
   return [`handoff failures: ${lines.length} recorded (${root}/ctx-relay/failures.jsonl)`, ...recent]
+}
+
+// 交接帳本：<harness root>/ctx-relay/handoffs.jsonl，記每次倒數、取消、延後、交接完成、失敗。
+// failures.jsonl 只有失敗、沒有分母，判斷不了自動交接值不值得（council 2026-10-25 待答 2）；先記，再決定要不要簡化成手動
+const LEDGER_KEPT = 500
+type LedgerEntry = {
+  at: string
+  session: string
+  event: 'countdown' | 'cancelled' | 'postponed' | 'handed-off' | 'failed'
+  manual: boolean
+  tokens: number
+  // handed-off：fork 的用量（cache_read 接近 0＝整段前綴重付），接續訊息有沒有送出
+  fork?: { input: number; cacheRead: number; cacheWrite: number; output: number }
+  resumed?: boolean
+  detail?: string
+}
+
+// /clear 之後 $.state 歸零、session id 換新：交接完成那筆由呼叫端帶來源 session 與交接前的 tokens
+async function recordLedger($: EngineInterface, entry: Omit<LedgerEntry, 'at' | 'session' | 'tokens'> & { session?: string; tokens?: number }) {
+  try {
+    const root = await harnessRoot($)
+    if (root === '') return $.ui.log(`${TAG} harness root unknown; handoff ledger not written: ${entry.event}`)
+    const full: LedgerEntry = {
+      at: new Date(await $.clock.now()).toISOString(),
+      session: await $.session.id(),
+      tokens: (await read($, readingsAtom)).at(-1)?.tokens ?? 0,
+      ...entry,
+    }
+    const dir = `${root}/ctx-relay`
+    const path = `${dir}/handoffs.jsonl`
+    const mk = await $.process.run(['mkdir', '-p', dir])
+    if (mk.exitCode !== 0) return $.ui.log(`${TAG} failed to create ${dir}; handoff ledger not written: ${entry.event}`)
+    const lines = (await readOr($, path, '')).split('\n').filter(l => l.trim() !== '')
+    await $.fs.write(path, [...lines, JSON.stringify(full)].slice(-LEDGER_KEPT).join('\n') + '\n')
+  } catch (err) {
+    // 帳本只是統計，寫不進去不能擋交接；記 log 就好
+    $.ui.log(`${TAG} failed to write the handoff ledger: ${String(err)}`)
+  }
+}
+
+// /ctx-relay-status 的帳本行：各事件筆數
+async function ledgerStatus($: EngineInterface): Promise<string[]> {
+  const root = await harnessRoot($)
+  if (root === '') return []
+  const path = `${root}/ctx-relay/handoffs.jsonl`
+  const lines = (await readOr($, path, '')).split('\n').filter(l => l.trim() !== '')
+  if (lines.length === 0) return ['handoff ledger: none recorded']
+  const n: Record<string, number> = {}
+  let manual = 0
+  for (const l of lines) {
+    try {
+      const e = JSON.parse(l) as LedgerEntry
+      n[e.event] = (n[e.event] ?? 0) + 1
+      if (e.event === 'handed-off' && e.manual) manual += 1
+    } catch {
+      n.unreadable = (n.unreadable ?? 0) + 1
+    }
+  }
+  const since = /"at":"([^"]+)"/.exec(lines[0] ?? '')?.[1] ?? '?'
+  const handed = n['handed-off'] ?? 0
+  return [
+    `handoff ledger since ${since}: ${n.countdown ?? 0} countdowns, ${n.cancelled ?? 0} cancelled, ${n.postponed ?? 0} postponed, ${handed} handed off (${manual} manual), ${n.failed ?? 0} failed${n.unreadable ? `, ${n.unreadable} unreadable` : ''} (${path})`,
+  ]
 }
 
 // notes pane：這次接手的交接檔（沒有就拿 handoff/ 裡最新一份）整理成總覽卡，加上檔頭來源 session 的 INDEX.md 進度。

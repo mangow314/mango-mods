@@ -130,7 +130,7 @@ git repo：`<git-common-dir>/harness/handoff/`（在 `.git` 裡，不會被 comm
 - 接續送出被擋（例如 settings 的 hook 拒絕）時，這行留著，也不記已接手。
 
 ## 指令
-- `/ctx-relay-status`：顯示門檻、讀數、交接狀態、背景工作、快取 TTL（附判定來源）和剩餘時間，以及最近 3 次交接失敗。每次交接失敗（/clear 之前）都會追加到 `<harness root>/ctx-relay/failures.jsonl`（時間、自動或手動、token、你離開幾分鐘、原因；留最近 100 筆）
+- `/ctx-relay-status`：顯示門檻、讀數、交接狀態、背景工作、快取 TTL（附判定來源）和剩餘時間，以及最近 3 次交接失敗。每次交接失敗（/clear 之前）都會追加到 `<harness root>/ctx-relay/failures.jsonl`（時間、自動或手動、token、你離開幾分鐘、原因；留最近 100 筆）。另外列出交接帳本 `<harness root>/ctx-relay/handoffs.jsonl`（留最近 500 筆）的筆數：每次倒數、取消、延後（你送出訊息或開了新回合）、交接完成、失敗各一行；交接完成那行記交接前的 token、fork 的用量（input、cache read、cache write、output）和接續訊息有沒有送出。用來判斷自動交接值不值得
 - `/ctx-relay-notes`：打開（再打一次關掉）一個確認先前狀態用的筆記 pane，內容取自這個對話接手的交接檔（沒有就拿 `handoff/` 最新一份），加上檔頭那個來源 session 的 `INDEX.md` 進度。自動交接後，終端夠寬時會自己打開一次（不搶輸入框焦點）；不夠寬就由 toast 提示指令。分兩頁：`s` 狀態頁（下一步、禁止事項、缺口，再來是目標、階段、改動檔案），`v` 證據頁（已驗證原文、交接檔來源）。只用一個強調色加灰字；紅黃綠只染 ✓ ▲ ✗ 這些符號。長字自動換行。pane 自己畫深色底，終端機透明背景下也一樣好讀。按 `q` 關閉。
 - `/ctx-relay-now`：立刻交接；有背景工作在跑時要打 `/ctx-relay-now yes`。fork 指示、交接檔檔頭和新對話的接續訊息都寫明是 `/ctx-relay-now` 手動交接，不寫「越過自動交接線」
   - 後面可以接最新指令，例如 `/ctx-relay-now yes` 換行再打「做 B 並安裝新 mod」。第一個字是 `yes` 才算確定；其餘文字是指令。沒有背景工作時不用 `yes`，整段參數都算指令。

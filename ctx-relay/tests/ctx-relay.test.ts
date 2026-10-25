@@ -524,6 +524,33 @@ test('倒數中你親手送出訊息只延後：這輪結束還在線上就重�
   expect(w.cleared).toBe(1)
 })
 
+test('交接帳本：倒數、延後、交接完成（含 fork 用量與交接前 tokens）都記進 handoffs.jsonl，/ctx-relay-status 列筆數', async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world($, on)
+  await start($)
+  expect(await status($)).toContain('handoff ledger: none recorded')
+  await turn($, w, 450_000)
+  await $.prompt.submit({ text: '我還在', wait: false, origin: { kind: 'composer' } })
+  await turn($, w, 470_000)
+  await clock.advance(60_000)
+  await clock.settle()
+  const events = (w.files.get(`${ROOT}/ctx-relay/handoffs.jsonl`) ?? '').trim().split('\n').map(l => JSON.parse(l) as Record<string, unknown>)
+  expect(events.map(e => e.event)).toEqual(['countdown', 'postponed', 'countdown', 'handed-off'])
+  expect(events[3]).toMatchObject({ manual: false, tokens: 470_000, resumed: true, fork: { input: 10, cacheRead: 400_000, cacheWrite: 0, output: 900 } })
+  expect(await status($)).toMatch(/handoff ledger since .*: 2 countdowns, 0 cancelled, 1 postponed, 1 handed off \(0 manual\), 0 failed/)
+})
+
+test('交接帳本：按取消記 cancelled', async ($, on) => {
+  mock.clock(on)
+  const w = world($, on)
+  await start($)
+  await turn($, w, 450_000)
+  await (await band($)).ui.press({ key: 'cancel' })
+  const events = (w.files.get(`${ROOT}/ctx-relay/handoffs.jsonl`) ?? '').trim().split('\n').map(l => JSON.parse(l) as Record<string, unknown>)
+  expect(events.map(e => e.event)).toEqual(['countdown', 'cancelled'])
+  expect(events[1]).toMatchObject({ detail: 'you pressed Cancel' })
+})
+
 test('fork 失敗：不寫檔、不 clear，band 顯示原因', async ($, on) => {
   const clock = mock.clock(on)
   const w = world($, on, { forkText: null })
