@@ -4,13 +4,13 @@
     "name": "Mango"
   },
   "metadata": {
-    "description": "Claude Code mods for long sessions: sitrep boxes each reply's outcome and open questions; ctx-relay tracks context and hands off before it fills up."
+    "description": "Claude Code mods for long sessions: sitrep boxes each reply's outcome and open questions; ctx-relay hands off before the context fills up."
   },
   "plugins": [
     {
       "name": "ctx-relay",
       "source": "./ctx-relay",
-      "description": "A band with context size, per-turn cost and the prompt-cache countdown; past the handoff line it writes a handoff file, runs /clear and resumes in the new conversation."
+      "description": "Past the handoff line it writes a handoff file, runs /clear and resumes in the new conversation; its band appears only during a handoff."
     },
     {
       "name": "sitrep",

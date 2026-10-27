@@ -7,8 +7,7 @@ Claude Code 的 session 跑得越久，有兩件事越麻煩。回覆越寫越�
 | plugin | 用途 |
 |---|---|
 | [sitrep](sitrep/README.zh-TW.md) | 每則長回覆下方一個結論框：狀態、一句結論、你要做的事、可收合的段落（變更、驗證）、等你回答的題目；提示框上方一列可用鍵盤選答。框裡每個字都是回覆原句：小模型只挑行號 |
-| [ctx-relay](ctx-relay/README.zh-TW.md) | band 顯示 context 大小、每輪花費和 prompt cache 倒數；context 滿之前寫一份你看得懂的交接檔、`/clear`、在新對話接續。不需要其他 skill 或 hook |
-| [xv-band](xv-band/README.zh-TW.md) | Early access：提示框上方一列顯示 xvendor 跨廠審查 job 的即時狀態。要先裝好 [xvendor](https://github.com/mangow314/xvendor) 才有用 |
+| [ctx-relay](ctx-relay/README.zh-TW.md) | context 滿之前寫一份你看得懂的交接檔、`/clear`、在新對話接續。band 只在交接時出現。不需要其他 skill 或 hook |
 
 mod 是用 JS/TS function hooks 寫成的 Claude Code plugin：可以在提示框上方畫一行 band、在對話旁開 pane、對 session 事件做反應。這個 repo 是 plugin marketplace，結構和官方 [claude-code-playground/claude-code/mods](https://github.com/anthropics/claude-code-playground/tree/main/claude-code/mods) 一樣，每個 plugin 一個目錄。
 
@@ -28,9 +27,7 @@ mod 是用 JS/TS function hooks 寫成的 Claude Code plugin：可以在提示�
 
 ![ctx-relay 循環：context 長到交接線，mod 寫交接檔、/clear，新對話接手](docs/assets/ctx-relay-loop.svg)
 
-![ctx-relay band 在一輪結束時：小怪獸和膠囊進度條從 66% 綠變成 76% 黃，這輪新增的那格亮一下；右邊是 token、費用、快取倒數，和綠、黃兩色的每輪長條](docs/assets/bands.gif)
-
-進度條往交接線填滿（預設是自動壓縮點的 85%），越接近越變色（這裡一輪從 66% 綠漲到 76% 黃）。每輪結束時，這輪新增的格子亮一下。右邊是本輪增量、花費、prompt cache 還熱多久，以及最近幾輪的長條。
+一輪結束時 context 超過交接線（預設是自動壓縮點的 85%），提示框上方出現 60 秒倒數和取消按鈕。其他時候 ctx-relay 不顯示 context 用量，這交給你的 statusline。
 
 為什麼交接，而不讓自動壓縮處理：交接檔是放在 repo `.git` 資料夾裡的一般 Markdown 檔（Goal、Files、Verified、Next），你看得到也改得了，新對話也被要求先對照 git 再動手。
 

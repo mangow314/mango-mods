@@ -217,19 +217,13 @@ async function turn($: Engine, w: World, tokens: number, extra: { answer?: strin
   })
 }
 
-// Raster 的 cells 解回 [codePoint, fg, bg]
-function cells(b64: string): number[][] {
-  const bytes = Uint8Array.from(atob(b64), ch => ch.charCodeAt(0))
-  const words = [...new Uint32Array(bytes.buffer)]
-  return Array.from({ length: words.length / 3 }, (_, i) => words.slice(i * 3, i * 3 + 3))
-}
 
 
-// band 動畫每 250ms 重畫一次：同時掛著的 band 越多越慢，所以每次只留最新一個
+// 同時掛著的 band 越多，每次重畫越慢，所以每次只留最新一個
 let mounted: { unmount: () => Promise<void> } | null = null
 
-// 動畫計時器每 250ms 一次，測試時鐘一次 advance 最多處理 10000 次等待：長時間分段推進
-// 推進前先卸下 band，否則每一幀都重畫它
+// 交接倒數每秒重畫一次，測試時鐘一次 advance 最多處理 10000 次等待：長時間分段推進
+// 推進前先卸下 band，否則每次重畫都要畫它
 async function idle(clock: { advance: (ms: number) => Promise<unknown> }, ms: number) {
   await mounted?.unmount().catch(() => undefined)
   mounted = null
@@ -255,29 +249,15 @@ function handoffFiles(w: World): [string, string][] {
   return [...w.files.entries()].filter(([p]) => p.startsWith(`${ROOT}/handoff/`) && !p.includes('/.picked/'))
 }
 
-test('1M：顯示 token／交接線與佔交接線的百分比、收據；快取熱時不顯示命中率', async ($, on) => {
+test('band 平時不畫：沒越線、沒交接狀態時不佔畫面；用量與門檻看 /ctx-relay-status', async ($, on) => {
   mock.clock(on, { now: 1_000_000 })
   const w = world($, on)
   await start($)
   await turn($, w, 200_000)
   await turn($, w, 220_000)
-  const { text } = await band($)
-  // 引擎壓縮點 510400；交接線 ×85%＝433840；220000÷433840＝51%（不是佔模型窗的 22%）
-  expect(text).toContain('220K/434K 51%')
-  expect(text).not.toContain('22%')
-  expect(text).toContain('+20K $0.50')
-  expect(text).toContain('12s')
-  // cache 90%＝熱：不顯示
-  expect(text).not.toContain('90%')
-  expect(text).not.toContain('󰜗')
-})
-
-test('快取偏冷（命中 <40%）才顯示雪花＋命中率', async ($, on) => {
-  mock.clock(on)
-  const w = world($, on)
-  await start($)
-  await turn($, w, 200_000, { cacheRead: 1_200 })
-  expect((await band($)).text).toContain('󰜗 12%')
+  expect((await band($)).text).toBe('')
+  // 引擎壓縮點 510400；交接線 ×85%＝433840
+  expect(await status($)).toContain('context 220000; handoff line 433840')
 })
 
 test('非 1M：引擎回報的壓縮點低，交接線跟著變低', async ($, on) => {
@@ -285,7 +265,7 @@ test('非 1M：引擎回報的壓縮點低，交接線跟著變低', async ($, o
   const w = world($, on, { window: 200_000, fuse: 158_400 })
   await start($)
   await turn($, w, 100_000)
-  expect((await band($)).text).toContain('100K/135K')
+  expect(await status($)).toContain('handoff line 134640')
   // 158400×85%＝134640 → 140000 已越線
   await turn($, w, 140_000)
   expect((await band($)).text).toContain('at 135K')
@@ -296,9 +276,8 @@ test('handoffTokens：固定交接線，越過就自動交接', { options: { han
   const w = world($, on)
   await start($)
   await turn($, w, 390_000)
-  const before = (await band($)).text
-  expect(before).toContain('390K/400K')
-  expect(before).not.toContain('Handoff in')
+  expect(await status($)).toContain('handoff line 400000')
+  expect((await band($)).text).not.toContain('Handoff in')
   await turn($, w, 410_000)
   expect((await band($)).text).toContain('at 400K')
   await clock.advance(60_000)
@@ -356,9 +335,8 @@ test('越過交接線：倒數 60 秒後 fork 一次、寫交接檔（檔名帶�
   expect(w.forkPrompts).toHaveLength(1)
 })
 
-test('預設 lite：fork 指示英文、照對話語言寫；交接檔四欄英文標題、不讀 INDEX、不記硬約束；接續訊息與 notes 都讀得懂', async ($, on) => {
+test('預設 lite：fork 指示英文、照對話語言寫；交接檔四欄英文標題、不讀 INDEX、不記硬約束；接續訊息讀得懂', async ($, on) => {
   const clock = mock.clock(on)
-  on('ui.open', () => ({ value: { isPlaced: true as const } }))
   const w = world($, on, {
     forkText: ['SLUG: demo-task', '=== GOAL ===', 'ship the demo', '=== FILES ===', 'a.ts', '=== VERIFIED ===', '- Verified: unit tests pass', '- Gap: e2e not run', '=== NEXT ===', '- run e2e'].join('\n'),
   })
@@ -369,7 +347,7 @@ test('預設 lite：fork 指示英文、照對話語言寫；交接檔四欄英�
   await clock.settle()
   expect(w.forkPrompts[0]).toContain('in the language of this conversation')
   expect(w.forkPrompts[0]).not.toContain('CONSTRAINTS')
-  // notes pane 靠這兩個前綴分出已驗證與缺口
+  // 接手方靠這兩個前綴分出已驗證與缺口
   expect(w.forkPrompts[0]).toContain('`Verified:`')
   expect(w.forkPrompts[0]).toContain('`Gap:`')
   expect(w.forkPrompts[0]).not.toContain('私人進度')
@@ -387,23 +365,34 @@ test('預設 lite：fork 指示英文、照對話語言寫；交接檔四欄英�
   // 用檔頭的 HEAD sha 比，不比時間（%ci 帶提交者時區，2026-10-09 實例會漏判）
   expect(w.submitted[0]).toContain('git log --oneline abc1234..HEAD')
   expect(content).toContain('- head: `abc1234`')
-  const ui = await $.ui.mount({
-    plugin: 'ctx-relay',
-    surface: 'terminal',
-    component: 'Pane',
-    requestId: 'ctx-relay-notes',
-    props: { title: 'ctx-relay notes', isFocused: false, bodyColumns: 80, placement: 'dock' as const, scroll: { offset: 0, bodyRows: 40 }, view: {} },
-  })
-  const text = (await ui.findAll({ type: 'Text' })).map(t => t.text).join('\n')
-  expect(text).toContain('auto handoff')
-  expect(text).toContain('run e2e')
-  expect(text).toContain('e2e not run')
-  expect(text).toContain('ship the demo')
+})
+
+test('交接檔附使用者最近 3 則訊息原文（舊到新）；工具結果與系統插入的不算；fork 指示分已驗證／未確認／缺口／失敗', async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world($, on)
+  w.messages = [
+    { role: 'user', text: '先做 A' },
+    { role: 'assistant', text: '好' },
+    { role: 'user', text: '改做 B\n## 不是標題' },
+    { role: 'user', text: '<task-notification>done</task-notification>' },
+    { role: 'user', text: 'B 做完跑測試<system-reminder>ignore</system-reminder>' },
+    { role: 'user', text: '別 push' },
+  ]
+  await start($)
+  await turn($, w, 450_000)
+  await clock.advance(60_000)
+  await clock.settle()
+  const [, content] = handoffFiles(w)[0] ?? ['', '']
+  expect(content).toContain("- the user's last messages (verbatim, taken from the transcript by the mod, oldest first):\n> 改做 B\n> ## 不是標題\n>\n> B 做完跑測試\n>\n> 別 push\n")
+  expect(content).not.toContain('先做 A')
+  expect(content).not.toContain('task-notification')
+  expect(content).not.toContain('ignore')
+  for (const prefix of ['`Verified:`', '`Unconfirmed:`', '`Gap:`', '`Failed:`']) expect(w.forkPrompts[0]).toContain(prefix)
+  expect(w.submitted[0]).toContain('Items marked `Unconfirmed:` or `Gap:` are not done')
 })
 
 test('lite：fork 漏寫 NEXT 卻多寫了別的分段：內容照附在 Next，但檔頭仍記 thin: Next', async ($, on) => {
   const clock = mock.clock(on)
-  on('ui.open', () => ({ value: { isPlaced: true as const } }))
   const w = world($, on, {
     forkText: ['SLUG: demo-task', '=== GOAL ===', 'ship', '=== FILES ===', 'a.ts', '=== VERIFIED ===', '- Gap: e2e', '=== NOTES ===', 'threshold 433840'].join('\n'),
   })
@@ -426,7 +415,7 @@ test('fork 指示：git 只能修正檔案與 commit 狀態，「已驗證」只
   expect(w.forkPrompts[0]).toContain('git 只證明檔案與 commit 狀態，證明不了測試或檢查跑過')
   expect(w.forkPrompts[0]).toContain('「已驗證」只寫你在對話裡看過結果的項目，其餘列為缺口')
   expect(w.forkPrompts[0]).not.toContain('「已驗證 vs 驗證缺口」與你的對話記憶矛盾時以 git 真相為準')
-  // notes pane 靠這兩個前綴分出已驗證與缺口（同精簡版）
+  // 接手方靠這兩個前綴分出已驗證與缺口（同精簡版）
   expect(w.forkPrompts[0]).toContain('`Verified:`')
   expect(w.forkPrompts[0]).toContain('`Gap:`')
   expect(w.forkPrompts[0]).toContain('憑記憶寫的標「未核實」')
@@ -536,8 +525,27 @@ test('交接帳本：倒數、延後、交接完成（含 fork 用量與交接�
   await clock.settle()
   const events = (w.files.get(`${ROOT}/ctx-relay/handoffs.jsonl`) ?? '').trim().split('\n').map(l => JSON.parse(l) as Record<string, unknown>)
   expect(events.map(e => e.event)).toEqual(['countdown', 'postponed', 'countdown', 'handed-off'])
+  expect(events[0]).toMatchObject({ trigger: 'handoff' })
   expect(events[3]).toMatchObject({ manual: false, tokens: 470_000, resumed: true, fork: { input: 10, cacheRead: 400_000, cacheWrite: 0, output: 900 } })
   expect(await status($)).toMatch(/handoff ledger since .*: 2 countdowns, 0 cancelled, 1 postponed, 1 handed off \(0 manual\), 0 failed/)
+})
+
+test('倒數中主對話壓縮了：倒數作廢、不交接，帳本記 postponed；預先計算（precompute）不算', async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world($, on)
+  const summary = { role: 'user' as const, text: '摘要', toolUses: [] }
+  on('session.compact', () => ({ messages: [summary] }))
+  await start($)
+  await turn($, w, 450_000)
+  await $.session.compact({ trigger: 'precompute', instructions: '', messages: [summary] })
+  expect((await band($)).text).toContain('Handoff in')
+  await $.session.compact({ trigger: 'auto', instructions: '', messages: [summary] })
+  expect((await band($)).text).toBe('')
+  await clock.advance(60_000)
+  await clock.settle()
+  expect(w.cleared).toBe(0)
+  const events = (w.files.get(`${ROOT}/ctx-relay/handoffs.jsonl`) ?? '').trim().split('\n').map(l => JSON.parse(l) as Record<string, unknown>)
+  expect(events.at(-1)).toMatchObject({ event: 'postponed', detail: 'the conversation was compacted during countdown' })
 })
 
 test('交接帳本：按取消記 cancelled', async ($, on) => {
@@ -723,7 +731,7 @@ test('自動交接後的新對話：第一輪結束就有讀數，越線會再�
   await clock.settle()
   expect(w.cleared).toBe(1)
   await turn($, w, 30_000)
-  expect((await band($)).text).toContain('30K/434K')
+  expect(await status($)).toContain('context 30000')
   await turn($, w, 450_000)
   expect((await band($)).text).toContain('Handoff in')
 })
@@ -760,7 +768,7 @@ test('交接後你又手動 /clear：band 不再說「接續自」舊交接檔',
   expect((await band($)).text).not.toContain('Resumed from')
 })
 
-test('交接成功：band 寫「Resumed from …· next: 下一步 · /ctx-relay-notes」並跳 toast；你一打字下一步就收掉', async ($, on) => {
+test('交接成功：band 寫「Resumed from …· next: 下一步」並跳 toast 附交接檔路徑；你一打字整行收掉', async ($, on) => {
   const clock = mock.clock(on)
   const toasts: string[] = []
   on('ui.toast', (_$, e) => {
@@ -773,128 +781,10 @@ test('交接成功：band 寫「Resumed from …· next: 下一步 · /ctx-relay
   await clock.advance(60_000)
   await clock.settle()
   await turn($, w, 30_000)
-  expect((await band($)).text).toMatch(/Resumed from \S+\.md · next: 跑 e2e · \/ctx-relay-notes/)
-  // 這個情境沒有 pane 可開（引擎沒回 isPlaced）：退回 toast 指向 /ctx-relay-notes
-  expect(toasts.some(t => t.includes('/ctx-relay-notes'))).toBe(true)
+  expect((await band($)).text).toMatch(/Resumed from \S+\.md · next: 跑 e2e/)
+  expect(toasts.some(t => t.includes(`${ROOT}/handoff/`))).toBe(true)
   await $.prompt.submit({ text: '好', wait: false, origin: { kind: 'composer' } })
-  const text = (await band($)).text
-  expect(text).toContain('Resumed from')
-  expect(text).not.toContain('next: 跑 e2e')
-})
-
-test('交接成功且放得下：自動開一次 notes pane（不搶焦點），toast 說 q 關閉', async ($, on) => {
-  const clock = mock.clock(on)
-  const opens: { id: string; focus?: boolean }[] = []
-  const toasts: string[] = []
-  on('ui.open', (_$, e) => {
-    opens.push({ id: e.id, focus: e.focus })
-    return { value: { isPlaced: true as const } }
-  })
-  on('ui.toast', (_$, e) => {
-    toasts.push(e.text)
-    return { value: undefined }
-  })
-  const w = world($, on)
-  await start($)
-  await turn($, w, 450_000)
-  await clock.advance(60_000)
-  await clock.settle()
-  expect(opens).toEqual([{ id: 'ctx-relay-notes', focus: undefined }])
-  expect(toasts.some(t => t.includes('notes pane shows the handoff (q closes)'))).toBe(true)
-})
-
-test('/ctx-relay-notes：狀態頁（下一步、禁止、缺口、目標、進度）與證據頁，q 或再打一次關掉', { options: { handoffFormat: 'full' } }, async ($, on) => {
-  const clock = mock.clock(on)
-  const panes = new Set<string>()
-  on('ui.panes', () => ({ value: [...panes].map(id => ({ id, title: id, isShown: true, isFocused: false, isPlaced: true })) }))
-  on('ui.open', (_$, e) => {
-    panes.add(e.id)
-    return { value: { isPlaced: true as const } }
-  })
-  on('ui.close', (_$, e) => {
-    panes.delete(e.id)
-    return { value: undefined }
-  })
-  const w = world($, on, {
-    forkText: GOOD.replace('=== VERIFIED ===', '=== VERIFIED ===\n- 已驗證：59 pass\n- 缺口：GitHub 渲染未看'),
-  })
-  w.files.set(`${ROOT}/progress/sid-1/INDEX.md`, '# demo 任務\nphase: 2 等截圖')
-  await start($)
-  await turn($, w, 450_000)
-  await clock.advance(60_000)
-  await clock.settle()
-  const notesCmd = () => $.command.run({ command: 'ctx-relay-notes', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 160 } })
-  // 交接後已自動開過一次；打一次關掉、再打一次重開
-  expect(panes.has('ctx-relay-notes')).toBe(true)
-  await notesCmd()
-  expect(panes.has('ctx-relay-notes')).toBe(false)
-  await notesCmd()
-  expect(panes.has('ctx-relay-notes')).toBe(true)
-  const ui = await $.ui.mount({
-    plugin: 'ctx-relay',
-    surface: 'terminal',
-    component: 'Pane',
-    requestId: 'ctx-relay-notes',
-    props: { title: 'ctx-relay notes', isFocused: false, bodyColumns: 80, placement: 'dock' as const, scroll: { offset: 0, bodyRows: 40 }, view: {} },
-  })
-  const texts = async () => (await ui.findAll({ type: 'Text' })).map(t => t.text).join('\n')
-  // 接續頁：下一步 → 禁止 → 缺口 → 背景；數字前置；DONE 原文不在這頁
-  let text = await texts()
-  expect(text).toContain('auto handoff')
-  expect(text).toContain('1 NEXT')
-  expect(text).toContain('1.\n跑 e2e')
-  expect(text).toContain('不 commit')
-  expect(text).toContain('GitHub 渲染未看')
-  expect(text).toContain('做 demo')
-  expect(text).toContain('2 等截圖 (demo 任務)')
-  expect(text).toContain('1 listed in the handoff · dirty: 無')
-  expect(text).not.toContain('59 pass')
-  expect(text.indexOf('NEXT')).toBeLessThan(text.indexOf("DON'T"))
-  expect(text.indexOf("DON'T")).toBeLessThan(text.indexOf('GAPS'))
-  // 長字換行不截斷；pane 有自己的實心底，不靠終端機透明背景
-  expect((await ui.findAll({ type: 'Text' })).find(t => t.text === '跑 e2e')?.props.wrap).toBe('wrap')
-  expect((await ui.findAll({ type: 'Box' }))[0]?.props.backgroundColor).toBe('#181818')
-  expect(await ui.findAll({ type: 'Markdown' })).toHaveLength(0)
-  // v：證據頁有已驗證原文與交接檔路徑
-  await ui.press({ key: 'view-evidence' })
-  text = await texts()
-  expect(text).toContain('59 pass')
-  expect(text).toMatch(/demo-task\S*\.md/)
-  expect(text).not.toContain('跑 e2e')
-  await ui.press({ key: 'view-resume' })
-  expect(await texts()).toContain('跑 e2e')
-  await ui.press({ key: 'close' })
-  expect(panes.has('ctx-relay-notes')).toBe(false)
-  await notesCmd()
-  await notesCmd()
-  expect(panes.has('ctx-relay-notes')).toBe(false)
-})
-
-test('/ctx-relay-notes：巢狀清單的子項併進上一項，不算成另一項、缺口不會讀成空的', async ($, on) => {
-  const clock = mock.clock(on)
-  on('ui.panes', () => ({ value: [] }))
-  on('ui.open', () => ({ value: { isPlaced: true as const } }))
-  const w = world($, on, {
-    forkText: GOOD
-      .replace('=== VERIFIED ===\n單元測試過；e2e 未跑', '=== VERIFIED ===\n- 已驗證：59 pass\n- 缺口（還沒驗證）：\n  - 實機畫面沒看\n  - 捲動沒試')
-      .replace('=== NEXT ===\n跑 e2e', '=== NEXT ===\n1. 等實機回報，看兩件事：\n   - 標題對齊\n   - 捲動\n2. OK 就改 README'),
-  })
-  await start($)
-  await turn($, w, 450_000)
-  await clock.advance(60_000)
-  await clock.settle()
-  const ui = await $.ui.mount({
-    plugin: 'ctx-relay',
-    surface: 'terminal',
-    component: 'Pane',
-    requestId: 'ctx-relay-notes',
-    props: { title: 'ctx-relay notes', isFocused: false, bodyColumns: 80, placement: 'dock' as const, scroll: { offset: 0, bodyRows: 40 }, view: {} },
-  })
-  const text = (await ui.findAll({ type: 'Text' })).map(t => t.text).join('\n')
-  expect(text).toContain('2 NEXT')
-  expect(text).toContain('等實機回報，看兩件事：標題對齊 · 捲動')
-  expect(text).toContain('實機畫面沒看 · 捲動沒試')
-  expect(text).not.toContain('None recorded')
+  expect((await band($)).text).toBe('')
 })
 
 test('倒數中你手動 /clear（session.end）：計時器停掉，不交接', async ($, on) => {
@@ -944,6 +834,8 @@ test('背景工作一直不結束：到交接線與壓縮點的中點就強制�
   expect(w.cleared).toBe(1)
   const [, content] = handoffFiles(w)[0] ?? ['', '']
   expect(content).toContain('- 交接時仍在跑（完成通知可能收不到）：shell npm run dev')
+  const events = (w.files.get(`${ROOT}/ctx-relay/handoffs.jsonl`) ?? '').trim().split('\n').map(l => JSON.parse(l) as Record<string, unknown>)
+  expect(events.find(e => e.event === 'countdown')).toMatchObject({ trigger: 'cap' })
 })
 
 test('一次性排程會再叫醒這個 session：延後；循環排程不算', async ($, on) => {
@@ -1101,14 +993,6 @@ test('fork 鍵名打錯（=== VERIFED ===）：欄位記 thin，內文不丟，�
   expect(w.cleared).toBe(1)
 })
 
-test('第一輪也有收據', async ($, on) => {
-  mock.clock(on)
-  const w = world($, on)
-  await start($)
-  await turn($, w, 260_000)
-  expect((await band($)).text).toContain('+260K')
-})
-
 test('別的 mod 也畫 band（例如 blast-radius 的按鈕）：兩邊都畫出來', async ($, on) => {
   mock.clock(on)
   // 測試的 hook 在所有 plugin 之下：模擬排在 ctx-relay 底下的另一個 band mod（比 world 的先登記，排在它外層）。
@@ -1119,95 +1003,29 @@ test('別的 mod 也畫 band（例如 blast-radius 的按鈕）：兩邊都畫�
   })
   const w = world($, on)
   await start($)
-  await turn($, w, 200_000)
+  await turn($, w, 450_000)
   const { ui, text } = await band($)
-  expect(text).toContain('200K/434K')
+  expect(text).toContain('Handoff in')
   expect(await ui.find({ key: 'proceed' })).toBeDefined()
 })
 
-test('圖示固定小怪獸、跟膠囊進度條一起跟著 token÷交接線變色：綠 → 黃 → 過提醒線橘 → 過交接線朱紅；不用背景色', async ($, on) => {
-  mock.clock(on)
-  const w = world($, on)
-  await start($)
-  // 交接線 433840、提醒線 381779
-  const head = async () => {
-    const { ui } = await band($)
-    const texts = await ui.findAll({ type: 'Text' })
-    const boxes = await ui.findAll({ type: 'Box' })
-    expect(boxes.some(b => b.props.backgroundColor !== undefined)).toBe(false)
-    const [raster] = await ui.findAll({ type: 'Raster' })
-    return { glyph: texts[0]?.text.trim(), color: texts[0]?.props.color, cells: cells(String(raster?.props.cells ?? '')) }
-  }
-  await turn($, w, 100_000)
-  // 23%：10 格亮 2 格，其餘暗格深灰
-  let h = await head()
-  expect(h).toMatchObject({ glyph: '󰯉', color: '#009E73' })
-  expect(h.cells.map(c => c[0])).toEqual([0xee03, 0xee04, ...Array(7).fill(0xee01), 0xee02])
-  expect(h.cells[5]?.[1]).toBe(0x464e5a)
-  await turn($, w, 330_000)
-  // 76%：亮 8 格，圖示還是小怪獸
-  h = await head()
-  expect(h).toMatchObject({ glyph: '󰯉', color: '#F0E442' })
-  expect(h.cells.filter(c => (c[0] ?? 0) >= 0xee03).length).toBe(8)
-  // 長條每根用那一輪的比例色：前面幾輪綠、這輪黃
-  const bars = (await (await band($)).ui.findAll({ type: 'Text' })).filter(t => /^[▁▂▃▄▅▆▇█]$/.test(t.text))
-  expect(bars.at(-1)?.props.color).toBe('#F0E442')
-  expect(bars.at(-2)?.props.color).toBe('#009E73')
-  await turn($, w, 400_000)
-  expect(await head()).toMatchObject({ glyph: '󰯉', color: '#E69F00' })
-  await turn($, w, 450_000)
-  // 越線後倒數：整列換成倒數列（骷髏朱紅）
-  expect((await band($)).text).toContain('Handoff in')
-  const countdown = await (await band($)).ui.findAll({ type: 'Text' })
-  expect(countdown[0]?.props.color).toBe('error')
-})
-
-test('動畫：每 250ms 一幀，圖示每 2 幀明暗切換；每輪結束這輪新增的格子亮 0.5 秒後靜止；快取冷了就停', async ($, on) => {
+// 每次 invalidate 都重畫整個畫面（連別的 mod 的 pane），閒置時要是 0 次
+test('重畫次數：沒越線時，開場閒置與回合結束後閒置都不重畫', async ($, on) => {
   const clock = mock.clock(on)
   const w = world($, on)
+  let redraws = 0
+  on('ui.invalidate', ($$, e, next) => {
+    redraws += 1
+    return next(e)
+  })
   await start($)
-  const look = async () => {
-    const { ui } = await band($)
-    const [raster] = await ui.findAll({ type: 'Raster' })
-    const bar = cells(String(raster?.props.cells ?? ''))
-    return { icon: (await ui.findAll({ type: 'Text' }))[0]?.props.color, bright: bar.flatMap((c, i) => (c[1] !== 0x009e73 && c[1] !== 0x464e5a ? [i] : [])) }
-  }
+  redraws = 0
+  await idle(clock, 10 * 60_000)
+  expect(redraws).toBe(0)
   await turn($, w, 100_000)
-  await turn($, w, 200_000)
-  // 23% → 46%：第 2～4 格是這輪新增的，調亮；第 0、1 格維持本色
-  expect(await look()).toEqual({ icon: '#009E73', bright: [2, 3, 4] })
-  await clock.advance(250)
-  expect(await look()).toEqual({ icon: '#009E73', bright: [2, 3, 4] })
-  await clock.advance(250)
-  expect(await look()).toEqual({ icon: '#00573f', bright: [] })
-  await clock.advance(1000)
-  expect((await look()).bright).toEqual([])
-  // 快取冷了（人多半不在）就停：之後畫面不再變
-  await idle(clock, 61 * 60_000)
-  const still = await look()
-  await clock.advance(500)
-  expect(await look()).toEqual(still)
-})
-
-test('窄終端：長條圖放不下才拿掉（旁邊開 dock pane 也照算），<80 欄拿掉進度條，圖示與數字保留', async ($, on) => {
-  mock.clock(on)
-  const w = world($, on)
-  await start($)
-  await turn($, w, 100_000)
-  await turn($, w, 200_000)
-  expect((await band($)).text).toMatch(/[▁▂▃▄▅▆▇█]{2}/)
-  // 長條每根用那一輪的比例色（都在 70% 以下：綠）
-  const bars = (await (await band($)).ui.findAll({ type: 'Text' })).filter(t => /^[▁▂▃▄▅▆▇█]$/.test(t.text))
-  expect(bars.length).toBeGreaterThanOrEqual(2)
-  expect(bars.every(t => t.props.color === '#009E73')).toBe(true)
-  // 100 欄（例如開著 dock pane）放得下就照畫；40 欄放不下就拿掉
-  expect((await band($, 100)).text).toMatch(/[▁▂▃▄▅▆▇█]{2}/)
-  expect((await band($, 40)).text).not.toMatch(/[▁▂▃▄▅▆▇█]/)
-  expect(await (await band($, 100)).ui.findAll({ type: 'Raster' })).toHaveLength(1)
-  const narrow = (await band($, 70)).text
-  expect(await (await band($, 70)).ui.findAll({ type: 'Raster' })).toHaveLength(0)
-  expect(narrow).toContain('󰯉')
-  expect(narrow).toContain('200K/434K')
+  redraws = 0
+  await idle(clock, 70 * 60_000)
+  expect(redraws).toBe(0)
 })
 
 test('倒數中重新載入（session.start 再跑）：照原截止時間交接一次', async ($, on) => {
@@ -1339,118 +1157,8 @@ test('handoff-pickup：接續送出被擋就留著這行，不記已接手', asy
   expect((await band($)).text).toContain('Pending handoff')
 })
 
-// 快取倒數（relay-band 020）
 async function status($: Engine) {
   return (await $.command.run({ command: 'ctx-relay-status', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 160 } })).text ?? ''
 }
 
-async function idleBand($: Engine) {
-  const ui = await $.ui.mount({
-    plugin: 'ctx-relay',
-    surface: 'terminal',
-    component: 'AbovePrompt',
-    props: { hasSurvey: false, isWorking: true, maxRows: 5, bodyColumns: 160, scroll: { offset: 0, bodyRows: 5 }, view: {} },
-  })
-  const text = (await ui.findAll({ type: 'Text' })).map(t => t.text).join(' ')
-  await ui.unmount()
-  return text
-}
 
-test('快取倒數：回合結束後顯示剩幾分，<1 分鐘改秒數，過期顯示雪花 cold；回合進行中不顯示', async ($, on) => {
-  const clock = mock.clock(on)
-  const w = world($, on)
-  await start($)
-  await turn($, w, 100_000)
-  // 訂閱（rateLimits 非空）→ 1h
-  expect((await band($)).text).toContain('cache 60m')
-  expect(await idleBand($)).not.toContain('cache')
-  await idle(clock, 18 * 60_000)
-  expect((await band($)).text).toContain('cache 42m')
-  await idle(clock, 41 * 60_000 + 30_000)
-  expect((await band($)).text).toContain('cache 30s')
-  await clock.advance(31_000)
-  expect((await band($)).text).toContain('󰜗 cold')
-  expect(await status($)).toContain('cache: ttl 1h (subscription, estimated)')
-})
-
-test('快取過期：不再顯示上一輪的命中率，只留雪花 cold', async ($, on) => {
-  const clock = mock.clock(on)
-  const w = world($, on)
-  await start($)
-  await turn($, w, 100_000)
-  await turn($, w, 200_000, { cacheRead: 1_200 })
-  expect((await band($)).text).toContain('󰜗 12%')
-  await idle(clock, 61 * 60_000)
-  const text = (await band($)).text
-  expect(text).not.toContain('12%')
-  expect(text).toContain('󰜗 cold')
-})
-
-test('主對話壓縮後倒數作廢，下一輪結束再從頭算；預先計算（precompute）不算', async ($, on) => {
-  const clock = mock.clock(on)
-  const w = world($, on)
-  const summary = { role: 'user' as const, text: '摘要', toolUses: [] }
-  on('session.compact', () => ({ messages: [summary] }))
-  await start($)
-  await turn($, w, 300_000)
-  await idle(clock, 50 * 60_000)
-  await $.session.compact({ trigger: 'precompute', instructions: '', messages: [summary] })
-  expect((await band($)).text).toContain('cache 10m')
-  await $.session.compact({ trigger: 'auto', instructions: '', messages: [summary] })
-  expect((await band($)).text).not.toContain('cache')
-  await turn($, w, 40_000)
-  expect((await band($)).text).toContain('cache 60m')
-})
-
-test('快取 TTL 判定順序：FORCE_PROMPT_CACHING_5M > CLAUDE_CODE_PROMPT_CACHE_TTL > promptCacheTtl > ENABLE_PROMPT_CACHING_1H > 訂閱與否', async ($, on) => {
-  mock.clock(on)
-  const w = world($, on)
-  await start($)
-  const ttl = async () => {
-    await turn($, w, 100_000)
-    return (await status($)).split('\n').find(l => l.startsWith('cache:')) ?? ''
-  }
-  w.rateLimits = []
-  expect(await ttl()).toContain('ttl 5m (no subscription, estimated)')
-  w.env.ENABLE_PROMPT_CACHING_1H = '1'
-  expect(await ttl()).toContain('ttl 1h (ENABLE_PROMPT_CACHING_1H, estimated)')
-  w.settings.promptCacheTtl = '5m'
-  expect(await ttl()).toContain('ttl 5m (promptCacheTtl setting, estimated)')
-  w.env.CLAUDE_CODE_PROMPT_CACHE_TTL = '1h'
-  expect(await ttl()).toContain('ttl 1h (CLAUDE_CODE_PROMPT_CACHE_TTL, estimated)')
-  w.env.FORCE_PROMPT_CACHING_5M = '1'
-  expect(await ttl()).toContain('ttl 5m (FORCE_PROMPT_CACHING_5M, estimated)')
-})
-
-test('Team 帳號（收不到 session.compact）：這輪中間壓縮過（context 少一半以上），偏冷不拿來改判 TTL', async ($, on) => {
-  const clock = mock.clock(on)
-  const w = world($, on)
-  await start($)
-  await turn($, w, 300_000)
-  await clock.advance(10 * 60_000)
-  await $.turn.start({ text: '', turnId: 't-a' })
-  await turn($, w, 40_000, { cacheRead: 1_000 })
-  expect(await status($)).toContain('ttl 1h')
-})
-
-test('閒置 10 分鐘（未到推定的 1h）回來卻偏冷：狀態寫觀測，TTL 不改判；下一輪正常就不再寫', async ($, on) => {
-  const clock = mock.clock(on)
-  const w = world($, on)
-  await start($)
-  await turn($, w, 100_000)
-  // 只閒置 3 分鐘就偏冷：還在 5m 內，不記
-  await clock.advance(3 * 60_000)
-  await $.turn.start({ text: '', turnId: 't-a' })
-  await turn($, w, 110_000, { cacheRead: 1_000 })
-  expect(await status($)).not.toContain('cache note')
-  await clock.advance(10 * 60_000)
-  await $.turn.start({ text: '', turnId: 't-b' })
-  await turn($, w, 120_000, { cacheRead: 1_000 })
-  const text = await status($)
-  expect(text).toContain('ttl 1h (subscription, estimated)')
-  expect(text).toContain('cache note: last turn came back cold (10%) after 10m00s idle')
-  expect((await band($)).text).toContain('cache 60m')
-  await $.turn.start({ text: '', turnId: 't-c' })
-  await turn($, w, 130_000)
-  expect(await status($)).not.toContain('cache note')
-})

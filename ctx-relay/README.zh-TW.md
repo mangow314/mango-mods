@@ -4,9 +4,10 @@
 
 不需要其他 skill 或 hook：交接檔由 mod 自己寫。
 
-一個 Claude Code mod，在提示框上方顯示一行 band：目前 context／交接線、每輪花費、prompt 快取還熱多久。
-主對話越過自動交接線時，它會自動交接：產生交接檔，`/clear`，在新對話接續。
-新對話開場時，如果有還沒人接手的交接檔，band 多一行 Pending handoff（待接手），按 1 就送出接續指令。
+一個做交接的 Claude Code mod：主對話越過自動交接線時，它產生結構化交接檔，`/clear`，在新對話接續。
+新對話開場時，如果有還沒人接手的交接檔，會問你要不要接手，按 1 就送出接續指令。
+
+它不顯示 context 用量，這交給你的 statusline。提示框上方的 band 只在交接有事要你處理或知道時出現（倒數、延後、寫檔中、失敗、接手、待接手），閒置的 session 完全不重畫。
 
 實機測過 Claude Code 2.1.289 到 2.1.296。mods API 還在 early access，改版後可能要跟著調整。
 
@@ -18,6 +19,7 @@
 | 別的 Stop hook 擋下（回合其實沒結束） | 不判斷，等真正停下的那次 |
 | 倒數中 | 按 Cancel（hotkey 1）就取消，這段對話之後只提醒；送出任何訊息只延後，這輪結束還在線上就重新倒數 |
 | 倒數或準備中有新回合開始（排程、背景通知、別的 session 傳訊） | 這次切換作廢，回合結束再重新判斷 |
+| 倒數、準備或延後中主對話壓縮了（`/compact`、自動壓縮、閒置壓縮） | 作廢：context 已經變小，下一輪結束再重新判斷 |
 | 倒數結束 | mod 收集 git 狀態 → `$.model.fork` 只填各欄內文，每欄用一行 `=== 鍵名 ===` 分段（3 分鐘沒回就放棄）→ mod 用自己寫死的 `## ` 標題組成交接檔，模型沒有機會把標題打錯 → 機器檢查（缺欄位就標 `thin:`；一個分段標記都沒有就記失敗）→ 寫檔並讀回確認 → 確認對話沒變動 → `/clear` → 在新對話送出交接檔路徑和接手規則 |
 | 任何一步在 `/clear` 之前失敗 | 留在原對話，band 顯示原因，不重試 |
 
@@ -26,7 +28,6 @@
 ## 門檻
 - 壓縮點：Claude Code 自己回報的 auto-compact 觸發點（`$.session.usage({ breakdown })` 的 `autoCompactThreshold`）。auto-compact 關掉時改用模型窗。
 - 交接線：設定 `handoffTokens` 就用設定值；沒設（0）就用壓縮點的 85%。設定值超過壓縮點的 85% 時（例如換到 200K 模型），改用 85%，`/ctx-relay-status` 會註明。
-- 橘色提醒線：交接線的 88%。
 - 延後上限：有背景工作時，最多延後到交接線與壓縮點的中點。
 
 設定交接線：`/config` 裡的 ctx-relay 那一列，或在 shell 跑：
@@ -42,51 +43,17 @@ echo '{"handoffTokens": "400000"}' | claude plugin configure ctx-relay@mango-mod
 用 `claude --plugin-dir` 載入時讀不到已安裝版本的 `handoffTokens`，交接線會是自動值。
 
 ## band
-![ctx-relay band：圖示、膠囊進度條、token、費用、快取倒數](../docs/assets/ctx-relay-band.png)
+平時是空的，只在交接需要你時出現。會出現的行：
 
-一行，由左到右：
+- 倒數：`󰚌 Handoff in 42s · at 400K · send a message to postpone`，旁邊是 `Cancel [1]` 按鈕。
+- `Handoff deferred: <原因>`（延後）、`Writing handoff file…`（寫檔中）、`Auto handoff failed: <原因>. Hand off manually`（失敗）、`Auto handoff cancelled (…; reminders only)`（已取消）。
+- 交接後（自動交接，或按待接手那行的 `Resume [1]`）：`Resumed from <檔名> · next: <下一步欄的第一行>`，你一打字就收掉。自動交接還會跳一個附交接檔路徑的 toast。
+- `/clear` 成功但接續訊息送不出去：`Cleared, but <原因>. Type: Read <路徑> and continue from it`。「Type:」後面是要你貼進對話的接續指令；`full` 格式時是中文（`讀 <路徑> 並依其接續`）。這行會留到你再 clear。
+- `Pending handoff: <檔名> (5m ago)`＋`Resume [1]` 按鈕，見「待接手」。
 
-1. 小怪獸圖示＋10 格膠囊進度條，兩者跟著離交接線的比例（token ÷ 交接線）變色：
-
-   | token ÷ 交接線 | 顏色 |
-   |---|---|
-   | 70% 以下 | 綠 |
-   | 70% 到提醒線 | 黃 |
-   | 提醒線到交接線 | 橘 |
-   | 到交接線以上 | 朱紅 |
-
-   進度條平常靜止；每輪結束時，這輪新增的格子亮 0.5 秒（增加不到一格就亮最前面那格）。圖示每 250ms 一幀明暗呼吸；快取過期後（你多半不在）停下，下一輪結束再開始。
-2. `220K/434K 51%`：目前 context／交接線，以及比例。
-3. `· +20K $0.50 12s`：這輪增加的 context、花費、耗時。這輪快取命中率（整輪請求加總）低於 40% 時，後面多一個 `󰜗 12%`：這輪吃到冷快取、比較貴，多半是閒置太久快取過期。
-4. `· cache 42m`：prompt 快取倒數，見「快取倒數」。回合進行中不顯示。
-5. 長條：最近幾輪結束時的 context，滿格＝到交接線，每根用那一輪的比例色（上表）。這一行放得下才畫（旁邊開著 dock pane 時照實際寬度算）。
-6. `· <狀態>`：延後交接（附原因）、正在寫交接檔、失敗、已取消，或這段對話是從哪份交接檔接手的。
-
-- 只用前景色，沒有底色。
-- 文字顏色用 Claude Code 的主題色名稱（`text`、`inactive`、`warning`、`error`…），跟著你的 `/theme` 走，淺色、daltonized 都一樣。圖示和進度條維持上表的固定色：進度條是 `Raster`，只吃 RGB。
-- 不到 80 欄就拿掉進度條（圖示和數字保留）；還是放不下的部分從尾端截掉。
-- 倒數時整行換成 `󰚌 Handoff in 42s · at 400K · send a message to postpone`，旁邊是 `Cancel [1]` 按鈕。
-- 交接後（自動交接，或按待接手那行的 `Resume [1]`），狀態寫 `Resumed from <檔名> · next: <下一步欄的第一行> · /ctx-relay-notes`，自動交接還會跳一個 toast。你一打字，next 那段就收掉。
-- `/clear` 成功但接續訊息送不出去時，這行顯示 `Cleared, but <原因>. Type: Read <路徑> and continue from it`。「Type:」後面是要你貼進對話的接續指令；`full` 格式時是中文（`讀 <路徑> 並依其接續`）。
+- 文字顏色用 Claude Code 的主題色名稱（`text`、`inactive`、`warning`、`error`…），跟著你的 `/theme` 走，淺色、daltonized 都一樣。
 - 別的 mod 也畫 band 時，它的內容在上、ctx-relay 這行在下。高度不夠或對方不讓位時，ctx-relay 這行會看不到，見「已知限制」。
-- 圖示、雪花、膠囊（U+EE00–EE05，Nerd Fonts 3.0 起才有）都要 Nerd Font（例如 Symbols Nerd Font 補字），沒有的話會變成方框。
-- 在 tmux 裡，Claude Code 預設只用 256 色。tmux 有開 RGB 的話，設 `CLAUDE_CODE_TMUX_TRUECOLOR=1` 才會照原色畫。
-
-## 快取倒數
-prompt 快取讓下一次請求便宜地重讀對話。一段時間沒有請求就會過期（存活時間 TTL），每次請求都會重新計時。倒數告訴你還剩多久，方便決定要繼續、先壓縮，還是開新 session。
-
-- 剩餘時間＝TTL −（現在 − 主對話上一輪結束的時間）。以分計，不到 1 分鐘改以秒計，最後 5 分鐘變橘色，過期顯示 `󰜗 cold`（同時收掉上一輪的命中率）。
-- mod 拿不到 Claude Code 自己的快取狀態（`prompt_cache` 只在 statusline 的輸入裡），所以 ctx-relay 自己推算。它從回合結束算起，比該輪最後一次請求開始的時間晚，可能多算大約最後一則回覆的長度。當參考就好。
-- TTL 判定，先符合的算，順序和 Claude Code 相同（[prompt caching](https://code.claude.com/docs/en/prompt-caching)）：
-  1. 有設 `FORCE_PROMPT_CACHING_5M` → 5 分鐘
-  2. `CLAUDE_CODE_PROMPT_CACHE_TTL`（`5m` 或 `1h`）
-  3. 設定 `promptCacheTtl`（`5m` 或 `1h`）
-  4. 有設 `ENABLE_PROMPT_CACHING_1H` → 1 小時
-  5. Claude 訂閱（session 回報用量上限）→ 1 小時；否則（API key、雲端供應商）→ 5 分鐘
-- TTL 是推估值，`/ctx-relay-status` 標 `estimated`。閒置超過 5 分鐘、還沒到推定的 TTL 就回來，那輪命中率卻低於 40% 時，`/ctx-relay-status` 會記一筆，但不改 TTL：訂閱超出方案用量會降成 5 分鐘，換模型、工具或系統提示也會讓快取變冷，mod 分不出是哪一種。
-- 主對話壓縮後（`/compact`、自動壓縮、閒置壓縮），舊快取對不上對話開頭，倒數先收掉，下一輪結束再算。
-- 閒置壓縮：Claude Code 會在你閒置時、快取過期前自己把長對話壓縮，並顯示「Compacted while idle, before the prompt cache expired」。文件沒寫，以下讀自 2.1.294 執行檔：只在快取是 1 小時、還沒過期，context 至少 200K（`CLAUDE_CODE_IDLE_COMPACT_MIN_TOKENS`，下限 100K），閒置到 TTL 的大約 90%（約 54 分鐘），而且 Anthropic 為你的帳號開了這功能時才跑。在 settings 設 `"idleCompaction": false` 可關掉。它會讓 context 變小，所以這時不會碰到交接線。
-- ctx-relay 不幫快取保溫：用 `$.model.fork` 送的請求讀不到主對話的快取（見「已知限制」），所以延長不了它。
+- 圖示要 Nerd Font（例如 Symbols Nerd Font 補字），沒有的話會變成方框。
 
 ## 交接檔格式
 
@@ -97,7 +64,12 @@ prompt 快取讓下一次請求便宜地重讀對話。一段時間沒有請求�
 | `lite`（預設） | Goal、Files、Verified、Next | 標題與 fork 指示是英文；內文照對話語言寫 |
 | `full` | 作者專用：作者自己交接格式的 8 欄（目標 + 最新指令、已改／將改檔、已驗證 vs 驗證缺口、dirty 無關項、下一步、關鍵細節備忘、硬約束 yaml、指標），加上來源交接檔的協調契約與 session 的 progress `INDEX.md` | 繁體中文 |
 
-`full` 照作者自己環境的慣例，多數人用 `lite` 就好。notes pane 與待接手那行兩種格式都讀得懂，不看設定。
+`full` 照作者自己環境的慣例，多數人用 `lite` 就好。待接手那行兩種格式都讀得懂，不看設定。
+
+兩種格式都有：
+
+- Verified 欄每行以 `Verified:`（驗證過、看過結果）、`Unconfirmed:`（做了但沒看到結果，例如最後一個工具呼叫還沒回來）、`Gap:`（還沒做）或 `Failed:`（試過但不行的做法與原因）開頭。有 `Unconfirmed:` 項目時，Next 的第一步是確認它。接續訊息會告訴新對話：`Unconfirmed:` 和 `Gap:` 不算完成，`Failed:` 列的做法沒有新理由不要再試。
+- 檔頭引用你最近 3 則訊息原文（舊到新，每則最多 600 字），由 mod 從對話記錄取出，不經 fork 改寫。工具結果和系統插入的訊息（以 `<` 開頭）不算。
 
 ```bash
 echo '{"handoffFormat": "full"}' | claude plugin configure ctx-relay@mango-mods --values-stdin
@@ -130,8 +102,7 @@ git repo：`<git-common-dir>/harness/handoff/`（在 `.git` 裡，不會被 comm
 - 接續送出被擋（例如 settings 的 hook 拒絕）時，這行留著，也不記已接手。
 
 ## 指令
-- `/ctx-relay-status`：顯示門檻、讀數、交接狀態、背景工作、快取 TTL（附判定來源）和剩餘時間，以及最近 3 次交接失敗。每次交接失敗（/clear 之前）都會追加到 `<harness root>/ctx-relay/failures.jsonl`（時間、自動或手動、token、你離開幾分鐘、原因；留最近 100 筆）。另外列出交接帳本 `<harness root>/ctx-relay/handoffs.jsonl`（留最近 500 筆）的筆數：每次倒數、取消、延後（你送出訊息或開了新回合）、交接完成、失敗各一行；交接完成那行記交接前的 token、fork 的用量（input、cache read、cache write、output）和接續訊息有沒有送出。用來判斷自動交接值不值得
-- `/ctx-relay-notes`：打開（再打一次關掉）一個確認先前狀態用的筆記 pane，內容取自這個對話接手的交接檔（沒有就拿 `handoff/` 最新一份），加上檔頭那個來源 session 的 `INDEX.md` 進度。自動交接後，終端夠寬時會自己打開一次（不搶輸入框焦點）；不夠寬就由 toast 提示指令。分兩頁：`s` 狀態頁（下一步、禁止事項、缺口，再來是目標、階段、改動檔案），`v` 證據頁（已驗證原文、交接檔來源）。只用一個強調色加灰字；紅黃綠只染 ✓ ▲ ✗ 這些符號。長字自動換行。pane 自己畫深色底，終端機透明背景下也一樣好讀。按 `q` 關閉。
+- `/ctx-relay-status`：顯示上一輪結束時的 context、門檻、交接狀態、背景工作，以及最近 3 次交接失敗。每次交接失敗（/clear 之前）都會追加到 `<harness root>/ctx-relay/failures.jsonl`（時間、自動或手動、token、你離開幾分鐘、原因；留最近 100 筆）。另外列出交接帳本 `<harness root>/ctx-relay/handoffs.jsonl`（留最近 500 筆）的筆數：每次倒數、取消、延後（你送出訊息或開了新回合）、交接完成、失敗各一行；交接完成那行記交接前的 token、fork 的用量（input、cache read、cache write、output）和接續訊息有沒有送出；每次倒數記觸發原因：`handoff`（越過交接線）或 `cap`（背景工作沒結束、到上限被強制）。用來判斷自動交接值不值得
 - `/ctx-relay-now`：立刻交接；有背景工作在跑時要打 `/ctx-relay-now yes`。fork 指示、交接檔檔頭和新對話的接續訊息都寫明是 `/ctx-relay-now` 手動交接，不寫「越過自動交接線」
   - 後面可以接最新指令，例如 `/ctx-relay-now yes` 換行再打「做 B 並安裝新 mod」。第一個字是 `yes` 才算確定；其餘文字是指令。沒有背景工作時不用 `yes`，整段參數都算指令。
   - 指令原話會交給 fork 寫目標欄和下一步欄（`lite` 是 Goal／Next，`full` 是「目標 + 最新指令」和「下一步」），也原樣寫進交接檔檔頭和接續訊息（每行加 `> `，指令裡的 `## ` 不會變成交接檔的標題）。
@@ -145,7 +116,7 @@ git repo：`<git-common-dir>/harness/handoff/`（在 `.git` 裡，不會被 comm
 - 送給其他 Claude session、還沒回覆的請求偵測不到：`/clear` 前請自己確認。
 - 別的 mod 在 band 的位置畫高的框時（實測一個確認框 mod 在 80 欄終端機會這樣），框開著的期間 ctx-relay 這行可能看不到；按鈕照常可按，框關掉 band 就回來。那個 mod 先畫又不讓位時，終端機多高都看不到；哪個 mod 先畫由載入順序決定。
 - 寫交接檔的花費約等於一輪冷快取。fork 讀不到主對話的快取：2.1.294 實測，回合結束 30 秒後送的 fork 命中 43%（只有共用的系統提示和工具定義），同時主對話下一輪命中 100%。
-- 壓縮之後，band 上的 token 數仍是壓縮前的讀數，要到下一輪結束才更新。
+- 壓縮之後，`/ctx-relay-status` 的 token 數仍是壓縮前的讀數，要到下一輪結束才更新。
 - 交接內容由 fork 產生，機器檢查只看欄位有沒有空，不保證內容正確。新對話會被要求先用 git 核對。
 - `/clear` 之後 `$.state` 會歸零；模組變數和計時器會保留（實測），所以 mod 在 clear 前會先取消計時器。
 - 需要 PATH 上有 `bash` 和 `git`；非 git 目錄還要 `realpath`（GNU，支援 `-m`），以及 `sha256sum` 或 `shasum`。

@@ -12,8 +12,7 @@ can vanish. These two mods take on one problem each:
 | Plugin | What it does |
 | --- | --- |
 | [sitrep](sitrep/README.md) | Under each long reply, a box with the status, a one-line outcome, what you have to do, collapsed sections (changes, checks) and the questions waiting on you; one row above the prompt answers them from the keyboard. Every word in the box is the reply's own: a small model only picks line numbers |
-| [ctx-relay](ctx-relay/README.md) | A band with context size, per-turn cost and the prompt-cache countdown. Before the context fills up it writes a handoff file you can read, runs `/clear`, and resumes in the new conversation. Needs no other skill or hook |
-| [xv-band](xv-band/README.md) | Early access: a row above the prompt with the live status of [xvendor](https://github.com/mangow314/xvendor) cross-vendor review jobs. Useful only with xvendor installed |
+| [ctx-relay](ctx-relay/README.md) | Before the context fills up it writes a handoff file you can read, runs `/clear`, and resumes in the new conversation. Its band appears only during a handoff. Needs no other skill or hook |
 
 A mod is a Claude Code plugin written as JS/TS function hooks: it can draw a
 band above the prompt, open a pane beside the conversation, and react to
@@ -46,13 +45,10 @@ from the reply's own lines, so it cannot say what the reply does not. Details:
 
 ![ctx-relay loop: context grows to the handoff line, the mod writes a handoff file, runs /clear, and the fresh conversation picks up](docs/assets/ctx-relay-loop.svg)
 
-![ctx-relay band as a turn ends: the space invader and capsule bar go from 66% green to 76% yellow, the cell the turn added lights up for a moment, then tokens, cost, cache countdown and per-turn bars in green and yellow](docs/assets/bands.gif)
-
-The bar fills toward the handoff line (85% of the auto-compact point by
-default) and changes color as it gets close (here a turn takes it from 66%,
-green, to 76%, yellow). When a turn ends, the cells it added light up for a
-moment. The right side shows this turn's growth, cost, how long the prompt
-cache stays warm, and the last few turns as bars.
+When a turn ends past the handoff line (85% of the auto-compact point by
+default), a 60-second countdown with a Cancel button appears above the
+prompt. ctx-relay does not show context usage otherwise; use your status
+line for that.
 
 Why hand off instead of letting auto-compact run: the handoff file is a plain
 Markdown file (Goal, Files, Verified, Next) inside your repo's `.git` folder,

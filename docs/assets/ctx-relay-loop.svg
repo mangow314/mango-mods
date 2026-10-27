@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="900" height="380" viewBox="0 0 900 380" role="img" aria-label="ctx-relay loop: context grows turn by turn until the bar reaches the handoff line; the mod writes a handoff file with Goal, Files, Verified and Next; runs /clear; and the fresh conversation reads the file and continues. Loops every 14 seconds.">
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="380" viewBox="0 0 900 380" role="img" aria-label="ctx-relay loop: context grows turn by turn while the band stays empty; past the handoff line a 60-second countdown with Cancel appears; the mod writes a handoff file that quotes your last messages and splits Verified, Unconfirmed and Failed; runs /clear; and the fresh conversation checks the unconfirmed item first. Loops every 14 seconds.">
   <!-- 14 秒一輪：0–3.5 秒 context 長、3.5–5 倒數、5–7 寫交接檔、7–9 /clear、9–13.5 新對話接續、13.5–14 淡出重來 -->
   <style>
     text { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
@@ -16,13 +16,7 @@
     .l4 { animation-name: l4; } @keyframes l4 { 0%,17.86% { opacity: 0 } 19.64%,50% { opacity: 1 } 51.79%,100% { opacity: 0 } }
     .l5 { animation-name: l5; } @keyframes l5 { 0%,22.14% { opacity: 0 } 23.93%,50% { opacity: 1 } 51.79%,100% { opacity: 0 } }
 
-    /* 進度條：跟著 context 長、變色；/clear 後回到幾乎空的綠色 */
-    .fill { transform-box: fill-box; transform-origin: left center; animation-name: fill; }
-    @keyframes fill { 0% { transform: scaleX(0.08); fill: #009E73 } 14.29% { transform: scaleX(0.55); fill: #009E73 } 19.29% { transform: scaleX(0.75); fill: #F0E442 } 22.86% { transform: scaleX(0.92); fill: #E69F00 } 25%,52.86% { transform: scaleX(1); fill: #D55E00 } 57.14%,96.43% { transform: scaleX(0.1); fill: #009E73 } 100% { transform: scaleX(0.08); fill: #009E73 } }
-    .icon { animation-name: icon; }
-    @keyframes icon { 0%,18.57% { fill: #009E73 } 19.29%,22.14% { fill: #F0E442 } 22.86%,24.29% { fill: #E69F00 } 25%,52.86% { fill: #D55E00 } 57.14%,100% { fill: #009E73 } }
-
-    /* band 右側文字：數字、倒數、接續，輪流出現 */
+    /* band：平時空的；倒數、寫檔、接續輪流出現 */
     .s1 { animation-name: s1; } @keyframes s1 { 0%,25% { opacity: 1 } 26.79%,100% { opacity: 0 } }
     .s2 { animation-name: s2; } @keyframes s2 { 0%,25% { opacity: 0 } 26.79%,35.71% { opacity: 1 } 37.5%,100% { opacity: 0 } }
     .s3 { animation-name: s3; } @keyframes s3 { 0%,35.71% { opacity: 0 } 37.5%,52.86% { opacity: 1 } 54.64%,100% { opacity: 0 } }
@@ -73,34 +67,36 @@
   </g>
   <g class="t r2">
     <rect x="60" y="112" width="468" height="40" rx="4" fill="#21262d"/>
-    <text x="72" y="130" class="txt">Checked git: matches the file. Next: run e2e.</text>
-    <text x="72" y="146" class="dim">Waiting for you.</text>
+    <text x="72" y="130" class="txt">Checked git: matches. e2e is unconfirmed.</text>
+    <text x="72" y="146" class="dim">Next: check its result. Waiting for you.</text>
   </g>
 
   <rect class="t clear" x="24" y="24" width="520" height="290" rx="8" fill="#e6edf3" opacity="0"/>
   <text class="t clear" x="284" y="176" text-anchor="middle" fill="#0d1117" font-size="28" font-weight="700" opacity="0">/clear</text>
 
-  <!-- band：圖示＋10 格進度條＋右側文字 -->
+  <!-- band：平時空的，只在交接時出現 -->
   <line x1="24" y1="262" x2="544" y2="262" stroke="#30363d"/>
-  <circle class="t icon" cx="48" cy="288" r="8" fill="#009E73"/>
-  <rect x="64" y="281" width="180" height="14" rx="7" fill="#464e5a"/>
-  <rect class="t fill" x="64" y="281" width="180" height="14" rx="7" fill="#009E73"/>
-  <line x1="246" y1="274" x2="246" y2="302" stroke="#D55E00" stroke-dasharray="3 3"/>
-  <text x="246" y="270" text-anchor="middle" class="dim" font-size="10">handoff line</text>
-  <text class="t s1 txt" x="258" y="292">context grows each turn · $0.50</text>
-  <text class="t s2 txt" x="258" y="292" fill="#D55E00" style="fill:#D55E00">Handoff in 60s · cancel [1]</text>
-  <text class="t s3 txt" x="258" y="292">writing handoff file…</text>
-  <text class="t s4 txt" x="258" y="292">Resumed · next: run e2e</text>
+  <text class="t s1 dim" x="40" y="292">band: empty until a handoff needs you</text>
+  <text class="t s2 txt" x="40" y="292" style="fill:#D55E00">Handoff in 60s · at 434K</text>
+  <g class="t s2"><rect x="460" y="279" width="72" height="20" rx="4" fill="#30363d"/><text x="496" y="293" text-anchor="middle" class="txt">Cancel [1]</text></g>
+  <text class="t s3 txt" x="40" y="292">Writing handoff file…</text>
+  <text class="t s4 txt" x="40" y="292">Resumed from …demo-task.md · next: check e2e result</text>
 
   <!-- 交接檔 -->
   <g class="t card">
     <rect x="570" y="24" width="306" height="290" rx="8" fill="#161b22" stroke="#30363d"/>
     <text x="586" y="46" class="dim">handoff/20261009-1530-demo-task.md</text>
+    <text x="586" y="66" class="dim">&gt; you: ship it, but don't push yet</text>
   </g>
-  <g class="t f1"><text x="586" y="80" class="head">## Goal</text><text x="586" y="98" class="txt">ship the demo build</text></g>
-  <g class="t f2"><text x="586" y="128" class="head">## Files</text><text x="586" y="146" class="txt">M src/parse.ts</text></g>
-  <g class="t f3"><text x="586" y="176" class="head">## Verified</text><text x="586" y="194" class="txt">unit tests pass · e2e not run</text></g>
-  <g class="t f4"><text x="586" y="224" class="head">## Next</text><text x="586" y="242" class="txt">run e2e</text></g>
+  <g class="t f1"><text x="586" y="92" class="head">## Goal</text><text x="586" y="110" class="txt">ship the demo build</text></g>
+  <g class="t f2"><text x="586" y="136" class="head">## Files</text><text x="586" y="154" class="txt">M src/parse.ts</text></g>
+  <g class="t f3">
+    <text x="586" y="180" class="head">## Verified</text>
+    <text x="586" y="198" class="txt">Verified: unit tests pass</text>
+    <text x="586" y="214" class="txt">Unconfirmed: e2e run started</text>
+    <text x="586" y="230" class="txt">Failed: fs mock (flaky)</text>
+  </g>
+  <g class="t f4"><text x="586" y="258" class="head">## Next</text><text x="586" y="276" class="txt">check the e2e result</text></g>
 
   <g class="t arrow">
     <path d="M568 82 C 556 82, 548 82, 532 82" stroke="#58a6ff" stroke-width="2" fill="none"/>
@@ -108,8 +104,8 @@
   </g>
 
   <!-- 步驟說明 -->
-  <text class="t c1 txt" x="24" y="350">1 · Context grows turn by turn toward the handoff line</text>
-  <text class="t c2 txt" x="24" y="350">2 · Past the line: a 60 s countdown, then the mod writes a handoff file</text>
+  <text class="t c1 txt" x="24" y="350">1 · Context grows turn by turn; the band stays empty (your status line shows usage)</text>
+  <text class="t c2 txt" x="24" y="350">2 · Past the handoff line: a 60 s countdown, then the mod writes a handoff file</text>
   <text class="t c3 txt" x="24" y="350">3 · /clear</text>
-  <text class="t c4 txt" x="24" y="350">4 · The fresh conversation reads the file, checks git, and picks up</text>
+  <text class="t c4 txt" x="24" y="350">4 · The fresh conversation reads the file, checks git, and checks what is unconfirmed first</text>
 </svg>

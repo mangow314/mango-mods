@@ -7,14 +7,15 @@
 
 It needs no other skill or hook: the mod writes the handoff file itself.
 
-A Claude Code mod that draws a band above the prompt: current context / the
-handoff line, this turn's cost, and how long the prompt cache stays warm.
-When the main conversation crosses the automatic handoff line, it hands off on
-its own: it writes a handoff file, runs `/clear`, and resumes in the new
-conversation.
-When a new conversation starts and there is a handoff file nobody has picked
-up, the band gets a second line, Pending handoff; press 1 to send the resume
-prompt.
+A Claude Code mod for handing off: when the main conversation crosses the
+automatic handoff line, it writes a structured handoff file, runs `/clear`,
+and resumes in the new conversation. When a new conversation starts and there
+is a handoff file nobody has picked up, it offers to resume it; press 1.
+
+It does not show context usage: use your status line for that. The band above
+the prompt appears only while there is something to do or know about a
+handoff (countdown, deferral, writing, failure, resume, pending pickup), so an
+idle session costs no redraws.
 
 Tested on Claude Code 2.1.289 to 2.1.296. The mods API is still in early
 access, so a Claude Code release may require changes.
@@ -28,6 +29,7 @@ access, so a Claude Code release may require changes.
 | Another Stop hook blocks the stop (the turn has not really ended) | No decision; wait for the stop that really ends the turn |
 | During the countdown | Press Cancel (hotkey 1) to cancel; for the rest of this conversation it only reminds you. Sending any message only postpones it: if you are still past the line when that turn ends, the countdown starts again |
 | A new turn starts during the countdown or preparation (a schedule, a background notification, a message from another session) | This switch is dropped; it decides again when the turn ends |
+| The main conversation is compacted (`/compact`, auto-compact, idle compaction) during a countdown, preparation or deferral | Dropped: the context is small again; it decides again when the next turn ends |
 | The countdown ends | The mod collects git state → `$.model.fork` fills in only the body of each field, one `=== KEY ===` line per field (gives up after 3 minutes without an answer) → the mod assembles the handoff file under its own hard-coded `## ` headings, so the model has no chance to mistype a heading → machine check (a missing field is marked `thin:`; no section marker at all counts as a failure) → write the file and read it back → confirm the conversation has not changed → `/clear` → send the handoff file path and the pickup rules in the new conversation |
 | Any step fails before `/clear` | Stays in the original conversation, the band shows why, no retry |
 
@@ -50,7 +52,6 @@ before 0.3.0) is removed.
   compaction point. A setting above 85% of the compaction point (for example
   after switching to a 200K model) falls back to 85%, and
   `/ctx-relay-status` says so.
-- Orange warning line: 88% of the handoff line.
 - Deferral cap: with background work, the handoff can be deferred at most to
   halfway between the handoff line and the compaction point.
 
@@ -80,109 +81,31 @@ is not read, so the handoff line is the automatic value.
 
 ## The band
 
-![ctx-relay band: icon, capsule progress bar, tokens, cost, cache countdown](../docs/assets/ctx-relay-band.png)
+The band is empty unless a handoff needs you. Its lines:
 
-One line, left to right:
+- Countdown: `󰚌 Handoff in 42s · at 400K · send a message to postpone`, with
+  a `Cancel [1]` button.
+- `Handoff deferred: <reason>`, `Writing handoff file…`,
+  `Auto handoff failed: <reason>. Hand off manually`, or
+  `Auto handoff cancelled (…; reminders only)`.
+- After a handoff (automatic, or `Resume [1]` on a pending one):
+  `Resumed from <file> · next: <first line of the next-step field>`, until
+  you type. An automatic handoff also shows a toast with the file's path.
+- If `/clear` succeeded but the resume message could not be sent:
+  `Cleared, but <reason>. Type: Read <path> and continue from it`. The part
+  after "Type:" is what you paste into the conversation; with the `full`
+  format it is in Chinese (`讀 <path> 並依其接續`). This line stays until you
+  clear again.
+- `Pending handoff: <file> (5m ago)` with a `Resume [1]` button; see "Waiting
+  to be picked up".
 
-1. A space invader icon and a 10-cell capsule progress bar, both colored by
-   how close context is to the handoff line (tokens ÷ handoff line):
-
-   | Tokens ÷ handoff line | Color |
-   | --- | --- |
-   | below 70% | green |
-   | 70% up to the warning line | yellow |
-   | warning line up to the handoff line | orange |
-   | at or past the handoff line | vermilion |
-
-   The bar stays still; when a turn ends, the cells that turn added light up
-   for half a second (the leading cell, when it added less than a cell). The
-   icon pulses, one frame every 250 ms. Once the prompt cache has expired (you
-   are probably away), the pulse stops; it starts again when the next turn
-   ends.
-2. `220K/434K 51%`: current context / handoff line, and the share.
-3. `· +20K $0.50 12s`: how much context this turn added, what it cost, and how
-   long it took. When this turn's cache hit rate (summed over every request in
-   the turn) is below 40%, `󰜗 12%` follows: the turn ran on a cold cache and
-   cost more, usually because the cache expired while you were idle.
-4. `· cache 42m`: the prompt cache countdown; see "Cache countdown". Hidden
-   while a turn runs.
-5. Bars: context at the end of each recent turn, a full bar = at the handoff
-   line, each in that turn's color from the table above. Drawn only when it
-   fits on the line (with a dock pane open, the narrower width counts).
-6. `· <status>`: handoff deferred (with the reason), writing the handoff file,
-   failed, cancelled, or which file this conversation resumed from.
-
-- Foreground colors only; no backgrounds.
 - Text colors use Claude Code theme names (`text`, `inactive`, `warning`,
-  `error`…), so they follow your `/theme`, light and daltonized included. The
-  icon and progress bar keep the fixed colors in the table above: the bar is a
-  `Raster`, which takes RGB only.
-- Below 80 columns the progress bar is dropped (the icon and numbers stay);
-  whatever still does not fit is cut at the end.
-- During the countdown the whole line becomes
-  `󰚌 Handoff in 42s · at 400K · send a message to postpone`, with a
-  `Cancel [1]` button next to it.
-- After a handoff (automatic, or `Resume [1]` on a pending one) the status
-  reads `Resumed from <file> · next: <first line of the next-step field> ·
-  /ctx-relay-notes`, and an automatic handoff also shows a toast. The "next"
-  part goes away as soon as you type.
-- If `/clear` succeeded but the resume message could not be sent, the line
-  reads `Cleared, but <reason>. Type: Read <path> and continue from it`. The
-  part after "Type:" is what you paste into the conversation; with the `full`
-  format it is in Chinese (`讀 <path> 並依其接續`).
+  `error`…), so they follow your `/theme`, light and daltonized included.
 - When another mod also draws a band, its content goes on top and the
   ctx-relay line below. When there is not enough height, or the other mod does
   not give way, the ctx-relay line can be hidden; see "Known limits".
-- The icons, the snowflake, and the capsule (U+EE00–EE05, in Nerd Fonts 3.0
-  and later) need a Nerd Font, for example Symbols Nerd Font as a fallback;
+- The icons need a Nerd Font, for example Symbols Nerd Font as a fallback;
   without one they render as boxes.
-- Inside tmux, Claude Code uses only 256 colors by default. If tmux has RGB
-  enabled, set `CLAUDE_CODE_TMUX_TRUECOLOR=1` to get the exact colors.
-
-## Cache countdown
-
-The prompt cache lets the next request re-read the conversation cheaply. It
-expires after a stretch with no requests (its time to live, TTL), and every
-request restarts the clock. The countdown tells you how long it has left, so
-you can decide whether to keep going, compact first, or start a new session.
-
-- Time left = TTL − (now − when the last main-conversation turn ended). Shown
-  in minutes, in seconds under one minute, orange in the last 5 minutes, and
-  `󰜗 cold` once expired (the last turn's hit rate is hidden then).
-- Mods do not receive Claude Code's own cache state (`prompt_cache` is only
-  in the status line's input), so ctx-relay works it out itself. It measures
-  from the end of the turn, which is later than the start of the turn's last
-  request, so it can run long by about the length of the last reply. Treat it
-  as a guide.
-- TTL, first match wins, in the order Claude Code uses
-  ([prompt caching](https://code.claude.com/docs/en/prompt-caching)):
-  1. `FORCE_PROMPT_CACHING_5M` set → 5 minutes
-  2. `CLAUDE_CODE_PROMPT_CACHE_TTL` (`5m` or `1h`)
-  3. the `promptCacheTtl` setting (`5m` or `1h`)
-  4. `ENABLE_PROMPT_CACHING_1H` set → 1 hour
-  5. a Claude subscription (the session reports rate limits) → 1 hour;
-     otherwise (API key, cloud provider) → 5 minutes
-- The TTL is an estimate; `/ctx-relay-status` marks it `estimated`. If you
-  come back after more than 5 minutes but before the assumed TTL, and that
-  turn's hit rate is below 40%, `/ctx-relay-status` notes it. The TTL is not
-  changed: a subscription over its included usage drops to 5 minutes, but
-  switching the model, tools or system prompt also starts a cold cache, and
-  the mod cannot tell which happened.
-- After the main conversation is compacted (`/compact`, auto-compact, or idle
-  compaction), the old cache no longer matches the start of the conversation,
-  so the countdown is dropped until the next turn ends.
-- Idle compaction: Claude Code can compact a long conversation by itself while
-  you are idle, before the cache expires, and then shows "Compacted while idle,
-  before the prompt cache expired". This is not in the docs; read from the
-  2.1.294 executable: it runs only when the cache is a one-hour one and still
-  warm, context is at least 200K (`CLAUDE_CODE_IDLE_COMPACT_MIN_TOKENS`, no
-  lower than 100K), you have been idle for about 90% of the TTL (about 54
-  minutes), and Anthropic has turned the feature on for your account. Turn it
-  off with `"idleCompaction": false` in settings. It shrinks the context, so
-  the handoff line is not reached.
-- ctx-relay does not keep the cache warm. A request sent with `$.model.fork`
-  does not read the main conversation's cache (see "Known limits"), so it
-  cannot extend it.
 
 ## Handoff file format
 
@@ -194,8 +117,21 @@ The `handoffFormat` setting picks one of two formats:
 | `full` | Author-specific: the 8 fields of the author's own handoff format (goal + latest instruction, files, verified vs gaps, unrelated dirty files, next step, key details, hard constraints as YAML, pointers), plus the source handoff file's coordination contract and the session's progress `INDEX.md` | Traditional Chinese |
 
 `full` follows conventions from the author's own setup; most people want
-`lite`. The notes pane and the pickup line read either format, whatever the
-setting says.
+`lite`. The pickup line reads either format, whatever the setting says.
+
+Both formats:
+
+- Each line under Verified starts with `Verified:` (checked, with the result
+  seen), `Unconfirmed:` (done, but the result was never seen, for example the
+  last tool call had not returned), `Gap:` (not done yet) or `Failed:` (tried
+  and did not work, and why). When there is an `Unconfirmed:` item, Next starts
+  by checking it. The resume message tells the new conversation that
+  `Unconfirmed:` and `Gap:` items are not done and not to retry what `Failed:`
+  lists without a new reason.
+- The header quotes your last 3 messages verbatim (oldest first, up to 600
+  characters each), taken from the transcript by the mod, not rewritten by the
+  fork. Tool results and messages the system inserted (they start with `<`)
+  are skipped.
 
 ```bash
 echo '{"handoffFormat": "full"}' | claude plugin configure ctx-relay@mango-mods --values-stdin
@@ -257,9 +193,8 @@ follows.
 
 ## Commands
 
-- `/ctx-relay-status`: shows thresholds, readings, handoff state, background
-  work, the cache TTL (with where it came from) and time left, and the last
-  three handoff failures. Every failed handoff (before `/clear`) is appended
+- `/ctx-relay-status`: shows context at the end of the last turn, thresholds,
+  handoff state, background work, and the last three handoff failures. Every failed handoff (before `/clear`) is appended
   to `<harness root>/ctx-relay/failures.jsonl` (time, auto or manual, tokens,
   minutes since you last typed, reason; last 100 kept).
   It also counts the handoff ledger, `<harness root>/ctx-relay/handoffs.jsonl`
@@ -267,18 +202,9 @@ follows.
   message or a new turn started), completed handoff, and failure. A
   completed handoff records the tokens before it, the fork's token usage
   (input, cache read, cache write, output), and whether the resume message
-  was sent. Use it to judge whether the automatic handoff earns its keep.
-- `/ctx-relay-notes`: opens (or, typed again, closes) a notes pane for
-  checking where things stood: the handoff file this conversation resumed
-  from (or the newest one in `handoff/`), plus the phase from the `INDEX.md`
-  of the session named in its header. After an automatic handoff it opens by
-  itself once, without taking the prompt's focus, when the terminal is wide
-  enough; otherwise the toast points to the command. Two pages: `s` status
-  (next steps, don'ts, gaps, then goal, phase and files) and `v` evidence
-  (the verified notes as written, and where the handoff came from). One
-  accent color and gray text; red, yellow and green mark only the ✓ ▲ ✗
-  symbols. Long lines wrap. The pane paints its own dark background, so it
-  reads the same over a transparent terminal. `q` closes it.
+  was sent, and each countdown records its trigger: `handoff` (crossed the
+  line) or `cap` (forced at the cap while background work still ran). Use it
+  to judge whether the automatic handoff earns its keep.
 - `/ctx-relay-now`: hand off right away; with background work running, type
   `/ctx-relay-now yes`. The fork instructions, the handoff file header, and the
   resume message in the new conversation all say this was a manual
@@ -322,7 +248,7 @@ follows.
   The fork does not read the main conversation's cache: measured on 2.1.294,
   a fork sent 30 seconds after a turn hit 43% (only the shared system prompt
   and tools), while the main conversation's next turn hit 100%.
-- After a compaction, the band's token count is still the reading from before
+- After a compaction, `/ctx-relay-status` still shows the reading from before
   it until the next turn ends.
 - The handoff content comes from the fork; the machine check only looks for
   empty fields and does not guarantee the content is correct. The new
