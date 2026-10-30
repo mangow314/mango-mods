@@ -165,7 +165,7 @@ follows.
 | When | What happens |
 | --- | --- |
 | A new conversation starts (no messages yet at startup; an old conversation reopened with `--resume` does not count), or after you run `/clear` yourself | Look for handoff files in the handoff folder that nobody has picked up, and show the newest; the count of the others goes in `+N` |
-| Press 1 while the prompt is empty (or click the button) | Sends "Read <full path> and continue from it; check the git state and the next step before acting.", followed by: if the header has a head line, `git log --oneline <head>..HEAD` printing any commit means the file may be stale, so say so first (the Chinese version for a `full` file), and marks this file as picked up |
+| Press 1 while the prompt is empty (or click the button) | Sends "Read <full path> and continue from it; before acting, re-run the file's Verified: commands that are safe to repeat and within existing authorization, against the original goal; commands known to take over 60 s may be skipped but must be listed as unverified, and nothing you did not re-run inherits the previous verdict; if the results disagree with the file, trust the re-run and report first.", followed by: if the header has a head line, `git log --oneline <head>..HEAD` printing any commit means the file may be stale, so say so first (the Chinese version for a `full` file), and marks this file as picked up |
 | The main conversation starts a new turn (you send a message, press resume, a schedule fires) | The line goes away |
 
 - "Picked up" is recorded as `<handoff folder>/.picked/<handoff file name>`

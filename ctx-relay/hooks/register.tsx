@@ -1033,8 +1033,8 @@ function quote(text: string): string {
 
 // 交接檔第一行、讀回檢查與接續鈕送出的訊息共用這一句
 function pickupText(format: Format, path: string): string {
-  if (format === 'lite') return `Read ${path} and continue from it; check the git state and the next step before acting. If the header has a head line, git log --oneline <head>..HEAD printing any commit means the file may be stale: say so first.`
-  return `讀 ${path} 並依其接續執行；先確認 git 狀態與下一步再動手。檔頭有 HEAD 行時，git log --oneline <HEAD>..HEAD 有輸出代表交接檔可能過時，先回報。`
+  if (format === 'lite') return `Read ${path} and continue from it; before acting, re-run the file's Verified: commands that are safe to repeat and within existing authorization, against the original goal; commands known to take over 60 s may be skipped but must be listed as unverified, and nothing you did not re-run inherits the previous verdict; if the results disagree with the file, trust the re-run and report first. If the header has a head line, git log --oneline <head>..HEAD printing any commit means the file may be stale: say so first.`
+  return `讀 ${path} 並依其接續執行；動手前先重跑檔內「已驗證」欄中可安全重複、在既有授權內的 Verified: 指令，對照原始目標；已知超過 60 秒的可略過但列為未驗證，沒重跑的不沿用前手結論；結果和檔內敘述不符時以重跑為準並先回報，再看下一步。檔頭有 HEAD 行時，git log --oneline <HEAD>..HEAD 有輸出代表交接檔可能過時，先回報。`
 }
 
 // 任何一步失敗印空字串
