@@ -304,6 +304,8 @@ export const register: Register = (on, options) => {
       await update($, agentsAtom, list => list.map(a => (a.id === id ? { ...a, status: e.isAborted ? 'killed' : 'completed', durationMs: e.durationMs } : a)))
       return result
     }
+    // claude -p（例如 sdlc-run 跑好幾小時）沒有畫面：不叫 haiku、不跑 git diff，免得每則長回覆白花一次請求
+    if ((await $.session.surfaces()).length === 0) return result
     if (!e.isAborted) await update($, classicAtom, c => (c === 'unknown' ? 'guarded' : c))
     const lines = numberLines(e.answer)
     const isLong = lines.join('').length >= EXCERPT_MIN || lines.filter(l => HEADING_RE.test(l)).length >= EXCERPT_HEADINGS
@@ -638,8 +640,8 @@ async function excerpt($: EngineInterface, id: string, answer: string, lines: st
   }
   const summary = result.summary
   // 新的結論框沒有題目＝之前的題目已經處理過（例如使用者自己打字回答），那列跟著消失
-  // 完工回覆的「你要做」多半是建議（例如手動再測一次），不在 prompt 上方催；卡住、做到一半才提示
-  const todo = summary.status === 'done' ? [] : summary.items.filter(i => i.kind === 'user-next').map(i => i.text.replace(TODO_PREFIX_RE, ''))
+  // 「你要做」＝要你親手跑的指令或操作，完工只剩你驗收也一樣提示（跟框的「等你動手」同一條定義）
+  const todo = summary.items.filter(i => i.kind === 'user-next').map(i => i.text.replace(TODO_PREFIX_RE, ''))
   await update($, pendingAtom, () => ({ id, decisions: decisionsOf(summary.items), todo }))
   await update($, lastAtom, () => ({ id, summary }))
   // 證據：沿用最近一輪有「驗證」段的結果，直到下一次驗證蓋過去（問題輪通常沒有驗證段，pane 卻正好開著）
@@ -1069,14 +1071,18 @@ function buildSummary(lines: string[], raw: string): Summary | null {
     items.push({ kind: 'decision', text: cleanLine(asked), options, ...(recommended !== undefined ? { recommended } : {}) })
   }
   // 結論只留第一句（結果段常把三句寫在同一行，框裡截成 …）；比對重複時整行與第一句都算結論
+  // 第一句太短（「不是。」「可以。」）就留整行：只有那句看不出在答什麼（實測 22 則有 3 則）
   const whole = cleanLine(outcome)
-  const lead = leadSentence(whole)
+  const first = leadSentence(whole)
+  const lead = [...first].length < 6 ? whole : first
   const shown = new Set([whole, lead])
+  // 已經是題目選項的行不再當你要做／之後我（實測：選項 A 同時被挑成你要做）
+  const optionLines = new Set(list(d.decisions).flatMap(x => list((x as Record<string, unknown>)?.options)))
   for (const [field, kind] of [['todo', 'user-next'], ['next', 'agent-next']] as const) {
     // 跟結論或前面的項目同一句就不再列（實機：之後我把結論那句又列一次）；標題行不是動作
     for (const n of list(d[field])) {
       const line = at(n)
-      if (line === null || isHeading(n)) continue
+      if (line === null || isHeading(n) || optionLines.has(n)) continue
       const text = cleanLine(line)
       if (!shown.has(text) && !items.some(i => i.text === text)) items.push({ kind, text })
     }
@@ -1140,6 +1146,7 @@ const DETAIL_HEADING_RE = /變更|驗證|風險|證據|change|verif|check|test|r
 const DECISION_HEADING_RE = /決定|decision|choose|choice/i
 // 規則認選項只認大寫字母（「e.g. …」不算），而且一段裡要從 A 起連號
 const OPTION_KEY_RE = /^(?:選項\s*|[Oo]ption\s+)?([A-Z])\s*[.)）:：、]/
+const EXPLICIT_OPTION_RE = /^(?:選項\s*|[Oo]ption\s+)A\s*[.)）:：、]/
 
 // 回覆有認得的標題時，照標題改寫模型挑的編號（模型偶爾挑錯結論行、漏掉選項）：
 // 結論＝「結果」這類標題下第一行；題目＝「待你決定」段裡 A、B… 連號的選項行與它們前一行；
@@ -1154,7 +1161,11 @@ function applyHeadings(lines: string[], d: Record<string, unknown>) {
     return Array.from({ length: end - h.i - 1 }, (_, k) => h.i + 1 + k).filter(i => !HEADING_RE.test(lines[i] ?? ''))
   }
   const result = heads.find(h => OUTCOME_HEADING_RE.test(h.text))
-  const first = result ? body(result).find(i => !isShell(lines, i)) : undefined
+  // 模型挑的結論在「結果」段裡、或在第一個標題之前，就照用（25 則凍結樣本：無條件改成段裡第一行，反而把對的 2 則改錯）
+  const mine = typeof d.outcome === 'number' ? d.outcome - 1 : -1
+  const fits = (i: number) => i >= 0 && !HEADING_RE.test(lines[i] ?? '') && !isShell(lines, i)
+  const keep = result !== undefined && fits(mine) && (body(result).includes(mine) || mine < (heads[0]?.i ?? 0))
+  const first = result && !keep ? body(result).find(i => !isShell(lines, i)) : undefined
   if (first !== undefined) d.outcome = first + 1
   const picked = Array.isArray(d.sections) ? (d.sections as Record<string, unknown>[]) : []
   // 細節段的摘要：模型挑的行在段裡、不是殼行就照用（實測有挑得比第一行好的），否則取段裡第一個不是殼行的
@@ -1165,25 +1176,31 @@ function applyHeadings(lines: string[], d: Record<string, unknown>) {
     return top === undefined ? [] : [{ heading: h.i + 1, summary: top + 1 }]
   })
   d.sections = [...picked.filter(s => !detail.some(x => x.heading === s?.heading)), ...detail]
-  const ask = heads.find(h => DECISION_HEADING_RE.test(h.text))
+  // 沒有「待你決定」這類標題時，寫明「選項 A／Option A」的那段也算（實測：「## 下一步（二選一）」的 A 被當成你要做、B 不見）
+  const ask = heads.find(h => DECISION_HEADING_RE.test(h.text)) ?? heads.find(h => body(h).some(r => EXPLICIT_OPTION_RE.test(cleanLine(lines[r] ?? ''))))
   if (!ask) return
   const rows = body(ask)
   const keys = rows.map(r => OPTION_KEY_RE.exec(cleanLine(lines[r] ?? ''))?.[1])
-  // 每題從 A 那行起（前一行是題目），連號到斷為止
-  const starts = keys.flatMap((key, k) => (key === 'A' && k > 0 ? [k] : []))
+  // 每題從 A 那行起（前一行是題目；A 緊接在標題下時，標題就是題目），連號到斷為止
+  const starts = keys.flatMap((key, k) => (key === 'A' ? [k] : []))
   const old = Array.isArray(d.decisions) ? (d.decisions as Record<string, unknown>[]) : []
   const decisions = starts.flatMap((s, n) => {
     let end = s
     while (end < rows.length && keys[end] === String.fromCharCode(65 + end - s)) end++
     if (end - s < 2) return []
-    const question = (rows[s - 1] ?? 0) + 1
+    const question = (s > 0 ? rows[s - 1] ?? 0 : ask.i) + 1
     // 推薦：選項後面、下一題的題目之前提到「建議／recommend」的那行；沒有就沿用模型對同一題標的
     const tail = rows.slice(end, (starts[n + 1] ?? rows.length + 1) - 1)
     const said = tail.find(r => /建議|推薦|recommend|I'd pick|I would pick/i.test(lines[r] ?? ''))
     const recommended = said !== undefined ? said + 1 : old.find(o => o?.question === question)?.recommended
     return [{ question, options: rows.slice(s, end).map(r => r + 1), ...(recommended !== undefined ? { recommended } : {}) }]
   })
-  if (decisions.length > 0) d.decisions = decisions
+  if (decisions.length === 0) return
+  // 「待你決定」段照規則整個取代；只憑選項字樣認出的段，模型在段外或沒寫選項字樣的題目留著（實測：同段第二題是開放題）
+  const overlaps = (o: Record<string, unknown>) => decisions.some(x => x.question === o?.question || x.options.some(p => (Array.isArray(o?.options) ? o.options : []).includes(p)))
+  d.decisions = DECISION_HEADING_RE.test(ask.text)
+    ? decisions
+    : [...decisions, ...old.filter(o => !overlaps(o))].sort((x, y) => Number(x.question) - Number(y.question))
 }
 
 // 要使用者選的題目（有選項的 decision）；題號就是在這個陣列裡的位置
@@ -1191,12 +1208,12 @@ function decisionsOf(items: Item[]): Item[] {
   return items.filter(i => i.kind === 'decision' && (i.options?.length ?? 0) > 0)
 }
 
-// 等你決定＞卡住＞等你動手＞部分完成＞完成。照模型標的狀態走：完成、卡住不因附了「你要做」變黃（使用者實機：幾乎每個框都黃）；
-// 只有做到一半停下來等你才是等你動手（實機 s3 原本標成進行中，兩個評審都誤判成還在跑）
+// 等你決定＞等你動手＞卡住＞部分完成＞完成。有要你親手跑的指令或操作就是等你動手，做完只剩你驗收也算（使用者 2026-11-09 定義）；
+// 「你要做」只收這類動作、不收建議（PICK_RULES），所以不會每個框都黃
 function glyphOf(s: Summary): string {
   if (s.items.some(i => i.kind === 'decision')) return '?'
+  if (s.items.some(i => i.kind === 'user-next')) return '>'
   if (s.status === 'blocked') return '!'
-  if (s.status !== 'done' && s.items.some(i => i.kind === 'user-next')) return '>'
   if (s.status === 'partial') return '~'
   return '✓'
 }

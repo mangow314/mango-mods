@@ -5,10 +5,12 @@ import type { On } from 'claude-code'
 // 測試裡的引擎：記下引擎拿到的回覆正文（mod 改寫後）、填進提示框的字、挑編號模型收到的請求
 // pick＝挑編號模型這次的回答：字串照回、{ fail } 回失敗原因
 // hold＝設了就讓模型卡住，直到測試放行（模擬模型回答要幾秒）
-type World = { bodies: string[]; fills: string[]; asks: { model: string; prompt: string }[]; pick: string | { fail: string }; hold: Promise<void> | null }
+// surfaces＝session 畫在哪些介面上；清空＝claude -p
+type World = { bodies: string[]; fills: string[]; asks: { model: string; prompt: string }[]; pick: string | { fail: string }; hold: Promise<void> | null; surfaces: 'terminal'[] }
 
 function world(on: On): World {
-  const w: World = { bodies: [], fills: [], asks: [], pick: '{}', hold: null }
+  const w: World = { bodies: [], fills: [], asks: [], pick: '{}', hold: null, surfaces: ['terminal'] }
+  on('session.surfaces', () => ({ value: w.surfaces }))
   on('turn.complete', (_$, e) => ({ text: e.answer }))
   on('turn.start', (_$, e) => ({ turnId: e.turnId }))
   on('classic.Stop', () => ({}))
@@ -140,6 +142,14 @@ test('長回覆：回合結束後請 haiku 挑編號（程式碼區塊不編號�
   expect(text).toContain('✓ 完成')
   expect(text).toContain('摘錄')
   expect(text).toContain('照 A 改好。')
+})
+
+test('claude -p（沒有介面）：長回覆不請 haiku 摘錄', ZH, async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+  w.surfaces = []
+  await say($, clock, w, REPLY, PICKS)
+  expect(w.asks).toEqual([])
 })
 
 test('預設英文標籤：狀態、選項、你要做、待答列；英文的 Decisions 段一樣從正文拿掉', async ($, on) => {
@@ -334,8 +344,10 @@ test('次要欄位指錯只丟那一項：你要做、段落、選項指錯時�
   bad.todo = [999]
   bad.sections = [{ heading: 2, summary: 3 }]
   bad.decisions[1] = { ...bad.decisions[1], options: [10, 999] }
-  await say($, clock, w, RAW, JSON.stringify(bad))
-  const ui = await message($, RAW)
+  // 選項不寫「選項」二字：寫明「選項 A」的段會由標題規則補回選項，這裡要測的是模型指錯時的降級
+  const reply = RAW.replaceAll('選項 ', '')
+  await say($, clock, w, reply, JSON.stringify(bad))
+  const ui = await message($, reply)
   // 標題認不出時沒有段落收進框，正文照原樣在；只看框裡的字（正文是一整塊多行的 Text）
   const box = (await ui.findAll({ type: 'Text' })).map(t => t.text).filter(t => !t.includes('\n')).join(' ')
   expect(box).not.toContain('摘錄失敗')
@@ -360,6 +372,46 @@ test('認得的標題照標題改寫模型挑錯的編號：結果段第一行�
   expect(text).toContain('拿掉')
   expect(text).toContain('51 pass · tsc ✓')
   expect(w.bodies.at(-1) ?? '').not.toContain('51 pass')
+})
+
+test('沒有待你決定標題，但段裡寫明「選項 A／B」：一樣成題，選項不再列成你要做', ZH, async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+  const a = '- 選項 A：重開一個 session，說「開 PR」。'
+  const reply = long('PR 還沒開成。', '## 下一步（二選一）', '要怎麼開 PR？', a, '- 選項 B：你自己在終端機 push。')
+  await say($, clock, w, reply, picks(reply, { status: 'blocked', outcome: 'PR 還沒開成。', todo: [a] }))
+  const text = await texts(await message($, reply))
+  expect(text).toContain('? 等你決定')
+  expect(text).toContain('你自己在終端機 push。')
+  expect(text).not.toContain('你要做')
+  // 選項緊接在標題下：標題當題目
+  const bare = long('PR 還沒開成。', '## 下一步（二選一）', a, '- 選項 B：你自己在終端機 push。')
+  await say($, clock, w, bare, picks(bare, { status: 'blocked', outcome: 'PR 還沒開成。', todo: [a] }))
+  const shown = await texts(await message($, bare))
+  expect(shown).toContain('? 等你決定')
+  expect(shown).toContain('下一步（二選一）')
+  expect(shown).not.toContain('你要做')
+})
+
+test('結論第一句太短（「不是。」）就留整行', ZH, async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+  const reply = long('不是。原因是快取過期，設定沒錯。', '細節如下。')
+  await say($, clock, w, reply, picks(reply, { outcome: '不是。原因是快取過期，設定沒錯。' }))
+  const cells = (await (await message($, reply)).findAll({ type: 'Text' })).map(t => t.text)
+  expect(cells).toContain('不是。原因是快取過期，設定沒錯。')
+})
+
+test('結果標題不蓋掉模型挑對的結論：挑在第一個標題之前、或在結果段裡別行，照用', ZH, async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+  const before = long('第 2 關過了。', '## 結果', '- 60 題全對', '## 驗證', '- 比對題庫')
+  await say($, clock, w, before, picks(before, { outcome: '第 2 關過了。' }))
+  // 框裡結論緊接在「驗證」摘要列前面
+  expect(await texts(await message($, before))).toMatch(/第 2 關過了。\s+驗證/)
+  const inside = long('## 結果', '- 小項一', '兩邊都改好了。', '## 驗證', '- 比對題庫')
+  await say($, clock, w, inside, picks(inside, { outcome: '兩邊都改好了。' }))
+  expect(await texts(await message($, inside))).toMatch(/兩邊都改好了。\s+驗證/)
 })
 
 test('標題規則的推薦：選項後面寫「建議」的那行標推薦；「e.g.」這類小寫開頭不當選項', ZH, async ($, on) => {
@@ -1125,19 +1177,21 @@ test('舊回合的結論框收成一行，按 ▸ 畫回完整框；最新那張
   expect((await latest.findAll({ type: 'Box' })).some(b => b.props.borderStyle === 'round')).toBe(true)
 })
 
-test('狀態照模型標的走：完成、卡住附了你要做也不變黃；完成的你要做不在 prompt 上方催', ZH, async ($, on) => {
+test('有你要做就是等你動手：模型標完成或卡住都一樣，prompt 上方也提示；沒有你要做才照模型標的', ZH, async ($, on) => {
   const clock = mock.clock(on)
   const w = world(on)
   const done = chore('done', '狀態完成。', '更新憑證')
   await say($, clock, w, done.reply, done.pick)
   const text = await texts(await message($, done.reply))
-  expect(text).toContain('✓ 完成')
+  expect(text).toContain('> 等你動手')
   expect(text).toContain('你要做  更新憑證')
-  expect(await texts(await above($))).not.toContain('等你動手')
+  expect(await texts(await above($))).toContain('等你動手：')
   const blocked = chore('blocked', '狀態卡住。', '更新憑證')
   await say($, clock, w, blocked.reply, blocked.pick)
-  expect(await texts(await message($, blocked.reply))).toContain('! 卡住')
-  expect(await texts(await above($))).toContain('等你動手：')
+  expect(await texts(await message($, blocked.reply))).toContain('> 等你動手')
+  const stuck = long('狀態卡住。')
+  await say($, clock, w, stuck, picks(stuck, { status: 'blocked', outcome: '狀態卡住。' }))
+  expect(await texts(await message($, stuck))).toContain('! 卡住')
 })
 
 test('prompt 上方：沒題目但有你要做的事時畫「等你動手：…」', ZH, async ($, on) => {

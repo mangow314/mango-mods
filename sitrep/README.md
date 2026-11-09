@@ -40,15 +40,21 @@ language of your conversation.
   risk or section number drops only that item. The
   system prompt is left alone.
   - Headings the mod recognizes override the model's numbers: the first line
-    under a `Result`/`Summary`/`## 結果` heading is the outcome, consecutive
-    `A.`/`B.` (or `選項 A：`) lines in a `Decisions`/`## 待你決定` section are
-    a question's options (the line before them is the question; a later line
-    saying "recommend"/`建議` marks the pick), and a Changes/Checks/Risks
+    under a `Result`/`Summary`/`## 結果` heading is the outcome (unless the
+    model picked another line in that section, or a line above the first
+    heading), consecutive `A.`/`B.` (or `選項 A：`) lines in a
+    `Decisions`/`## 待你決定` section are a question's options (the line
+    before them is the question, or the heading when they start right under
+    it; a later line saying "recommend"/`建議` marks the pick). A section
+    under any heading that spells out `選項 A`/`Option A` gets the same
+    treatment, and the model's other questions stay. A Changes/Checks/Risks
     section's summary is the model's pick when it lies in that section,
     otherwise the section's first line. Status, `You do` and `Then I` still
     come from the model.
   - The box keeps only the outcome line's first sentence (up to the first
-    `。！？`, or `.!?` followed by a space); the reply is unchanged. A lead-in
+    `。！？`, or `.!?` followed by a space), or the whole line when that
+    sentence is under 6 characters (`No.`); the reply is unchanged. Option
+    lines are never also `You do`/`Then I`. A lead-in
     ending in a colon (`Steps:`) or a table header is never the outcome or a
     section summary; the next line is used. A section whose summary repeats
     the outcome, a `You do`/`Then I` line, an option, a line of the
@@ -62,10 +68,10 @@ language of your conversation.
 - **The box** under the reply, with a dim `excerpt` tag in its title:
   - The title on the top border shows the status: `? Your call` (questions
     waiting), `> Your move` (something for you to do by hand), `! Blocked`,
-    `~ In progress`, `✓ Done`, and the turn's duration on the right. A done or
-    blocked reply keeps its color even with a `You do` line; only a reply
-    that stopped halfway to wait for you is `Your move`. Only the two
-    "waiting on you" states are yellow.
+    `~ In progress`, `✓ Done`, and the turn's duration on the right. Any
+    `You do` line (a command or step only you can run, including checking
+    finished work) makes it `Your move`, whatever status the model gave.
+    Only the two "waiting on you" states are yellow.
   - Then the outcome in bold, risk lines with a red `Risk` tag (wrapped in
     full, never cut), and `You do` lines in yellow.
   - Sections the model picks (for example Changes, Checks) leave the body and
@@ -96,7 +102,7 @@ language of your conversation.
   `? N open` with the first open question's options. Focus the row
   (`Ctrl+X`, then `Tab`) and press an option's letter (`a`, `b`…); that fills
   the prompt box the same way. With no questions but something for you to
-  do, it reads `Your move: …` (suggestions in a done reply do not count). It
+  do, it reads `Your move: …`. It
   steps aside for a survey, stacks under other mods' rows (ctx-relay), and
   goes away once a newer reply has neither.
   While a turn runs and nothing waits on you, the same row is one dim line,
@@ -148,7 +154,8 @@ claude --plugin-dir ./mango-mods/sitrep
 ## Known limits
 
 - Each long reply costs one extra `haiku` request, sent through your own
-  Claude Code account.
+  Claude Code account. A `claude -p` run draws nothing, so sitrep skips the
+  excerpt there.
 - The excerpt only picks lines: an outcome the reply never states in one line
   cannot appear, and a decision not written as a question with option lines
   is not offered as buttons. An unanswered question from an earlier reply is
