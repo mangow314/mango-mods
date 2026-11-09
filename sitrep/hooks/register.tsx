@@ -1167,6 +1167,11 @@ function applyHeadings(lines: string[], d: Record<string, unknown>) {
   const keep = result !== undefined && fits(mine) && (body(result).includes(mine) || mine < (heads[0]?.i ?? 0))
   const first = result && !keep ? body(result).find(i => !isShell(lines, i)) : undefined
   if (first !== undefined) d.outcome = first + 1
+  // 沒有「結果」標題、第一個標題前有開場句，模型卻挑到後面段落裡的行：結論改用開場第一句
+  // （實機：「先更新 marketplace…」開頭的回覆，結論挑成最後一段的「測試新增和改寫了幾條…」）
+  const top = heads[0]?.i ?? 0
+  const opening = lines.slice(0, top).findIndex((l, i) => l.trim() !== '' && fits(i))
+  if (!result && opening >= 0 && mine > top) d.outcome = opening + 1
   const picked = Array.isArray(d.sections) ? (d.sections as Record<string, unknown>[]) : []
   // 細節段的摘要：模型挑的行在段裡、不是殼行就照用（實測有挑得比第一行好的），否則取段裡第一個不是殼行的
   const detail = heads.filter(h => h !== result && DETAIL_HEADING_RE.test(h.text) && !DECISION_HEADING_RE.test(h.text)).flatMap(h => {
@@ -1400,12 +1405,15 @@ async function itemRows($: EngineInterface, e: RenderEvent, id: string, items: I
     )
   }
   // 符號換成字（評審：> 和 ~ 第一次看不懂）；你要做的排在結論下第一行，之後我排最後
-  const todo = others.filter(o => o.kind === 'user-next').map((o, i) => (
-    <Text key={`todo-${i}`}>
-      <Text color={YELLOW} bold>{T.youDo}</Text>
-      <Text>{o.text.replace(TODO_PREFIX_RE, '')}</Text>
-    </Text>
-  ))
+  // 跟風險句一樣自己折行、續行對齊在標籤後面（實機：整段 Text 折行時續行頂到框左邊）；room＋5 是框內寬
+  const lead = cols(T.youDo)
+  const todo = others.filter(o => o.kind === 'user-next').flatMap((o, i) =>
+    wrapCols(o.text.replace(TODO_PREFIX_RE, ''), room + 5 - lead).map((l, j) => (
+      <Text key={`todo-${i}-${j}`}>
+        {j > 0 ? ' '.repeat(lead) : <Text color={YELLOW} bold>{T.youDo}</Text>}
+        <Text>{l}</Text>
+      </Text>
+    )))
   const later = others.filter(o => o.kind !== 'user-next').map((o, i) => (
     <Text key={`later-${i}`} color={DIM}>{`${T.thenI}${o.text.replace(THEN_PREFIX_RE, '')}`}</Text>
   ))

@@ -414,6 +414,17 @@ test('結果標題不蓋掉模型挑對的結論：挑在第一個標題之前�
   expect(await texts(await message($, inside))).toMatch(/兩邊都改好了。\s+驗證/)
 })
 
+test('沒有結果標題：模型挑到後面段落的行時，結論改用第一個標題前的開場句；挑在開場裡的照用', ZH, async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+  const late = long('先更新 marketplace，再更新 plugin。', '## 這次改了什麼', '- 狀態規則改了', '測試新增了幾條。', '## 驗證', '- 跑過測試')
+  await say($, clock, w, late, picks(late, { outcome: '測試新增了幾條。' }))
+  expect(await texts(await message($, late))).toMatch(/先更新 marketplace，再更新 plugin。\s+驗證/)
+  const early = long('我看了三個地方。', '可以合併。', '## 驗證', '- 跑過測試')
+  await say($, clock, w, early, picks(early, { outcome: '可以合併。' }))
+  expect(await texts(await message($, early))).toMatch(/可以合併。\s+驗證/)
+})
+
 test('標題規則的推薦：選項後面寫「建議」的那行標推薦；「e.g.」這類小寫開頭不當選項', ZH, async ($, on) => {
   const clock = mock.clock(on)
   const w = world(on)
@@ -745,6 +756,20 @@ test('風險句太長時折行畫完，不截成 …', ZH, async ($, on) => {
   expect(tag).toBeGreaterThan(-1)
   expect(cells.some(t => t.includes('結尾'))).toBe(true)
   expect(cells.some(t => t.includes('未驗證') && t.endsWith('…'))).toBe(false)
+})
+
+test('你要做太長時折行，續行對齊在標籤後面', ZH, async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+  const todo = `請你執行 ${'claude plugin update 之後重開 session '.repeat(4)}結尾`
+  const reply = long('改好了。', todo)
+  await say($, clock, w, reply, picks(reply, { outcome: '改好了。', todo: [todo] }))
+  const { cells } = await boxOf($, reply)
+  // 每列外層 Text 在前、內層文字在後；續行外層＝ 8 格縮排（「你要做  」的寬度）＋該行文字
+  const last = cells.findLast(t => t.endsWith('結尾')) ?? ''
+  expect(cells).toContain('你要做  ')
+  expect(last.includes('請你執行')).toBe(false)
+  expect(cells).toContain(`${' '.repeat(8)}${last}`)
 })
 
 test('風險句、段落摘要跟選項同一句：不再列', ZH, async ($, on) => {

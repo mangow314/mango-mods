@@ -42,7 +42,8 @@ language of your conversation.
   - Headings the mod recognizes override the model's numbers: the first line
     under a `Result`/`Summary`/`## 結果` heading is the outcome (unless the
     model picked another line in that section, or a line above the first
-    heading), consecutive `A.`/`B.` (or `選項 A：`) lines in a
+    heading; with no such heading, a pick below the first heading is
+    replaced by the first line above it), consecutive `A.`/`B.` (or `選項 A：`) lines in a
     `Decisions`/`## 待你決定` section are a question's options (the line
     before them is the question, or the heading when they start right under
     it; a later line saying "recommend"/`建議` marks the pick). A section
@@ -73,7 +74,8 @@ language of your conversation.
     finished work) makes it `Your move`, whatever status the model gave.
     Only the two "waiting on you" states are yellow.
   - Then the outcome in bold, risk lines with a red `Risk` tag (wrapped in
-    full, never cut), and `You do` lines in yellow.
+    full, never cut), and `You do` lines in yellow (wrapped the same way, continuation lines
+    aligned after the tag).
   - Sections the model picks (for example Changes, Checks) leave the body and
     become one summary line each, under a bold blue label; `▸` puts a section
     back in its place in the body. When there are questions, a section whose
