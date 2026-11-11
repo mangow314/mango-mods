@@ -1,6 +1,6 @@
 {
   "name": "ctx-relay",
-  "version": "0.13.1",
+  "version": "0.13.2",
   "description": "Hands off before the context fills up. Past the handoff line it counts down 60 s, writes a handoff file with a fork, runs /clear and resumes in the new conversation; a new conversation lists unclaimed handoff files, press 1 to resume.",
   "author": {
     "name": "Mango"
@@ -18,7 +18,7 @@
     "handoffFormat": {
       "type": "string",
       "title": "Handoff file format",
-      "description": "lite: four sections (Goal, Files, Verified, Next) with English headings; the content follows the conversation's language. full: the author's own eight-section Chinese format (hard constraints, coordination contract, progress INDEX); most users want lite.",
+      "description": "lite: four sections (Goal, Files, Verified, Next) with English headings; the content follows the conversation's language. full: the author's own nine-section Chinese format (hard constraints, coordination contract, progress INDEX); most users want lite.",
       "options": [
         "lite",
         "full"
